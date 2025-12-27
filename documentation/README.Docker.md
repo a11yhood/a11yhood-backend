@@ -6,10 +6,47 @@ This document describes how to run the a11yhood backend in Docker containers.
 
 - Docker Engine 20.10+ or Docker Desktop
 - Docker Compose 2.0+
+- On macOS: Colima (recommended) or Docker Desktop
+
+### macOS Setup with Colima
+
+```bash
+# Install Colima
+brew install colima docker docker-compose
+
+# Start Docker runtime
+colima start
+```
 
 ## Quick Start
 
-### Development Mode
+### Using Shell Scripts (Recommended)
+
+The easiest way to run the backend is using the provided shell scripts:
+
+**Development Mode:**
+```bash
+./start-dev.sh              # Start development server
+./start-dev.sh --reset-db   # Reset database and start
+./stop-dev.sh               # Stop development server
+```
+
+**Production Mode:**
+```bash
+./start-prod.sh             # Start production server
+./stop-prod.sh              # Stop production server
+```
+
+These scripts handle:
+- Docker runtime validation
+- Image building
+- Container startup/shutdown
+- Health checks
+- Helpful output and error messages
+
+### Using Docker Compose Directly
+
+#### Development Mode
 
 Run the backend in development mode with hot reload:
 
@@ -26,7 +63,7 @@ docker-compose down
 
 The API will be available at http://localhost:8000
 
-### Production Mode
+#### Production Mode
 
 Run the backend in production mode:
 

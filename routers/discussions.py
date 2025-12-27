@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from models.discussions import DiscussionCreate, DiscussionUpdate, DiscussionResponse, DiscussionBlockRequest
 from services.database import get_db
 from services.auth import get_current_user
+from services.sanitizer import sanitize_html
 
 router = APIRouter(prefix="/api/discussions", tags=["discussions"])
 
@@ -73,6 +74,9 @@ async def create_discussion(
     # Use authenticated user's username directly (denormalize for display)
     discussion_data["username"] = current_user.get("username")
     
+    # Sanitize user-generated content to prevent XSS
+    discussion_data["content"] = sanitize_html(discussion_data.get("content", ""))
+    
     response = db.table("discussions").insert(discussion_data).execute()
     
     if not response.data:
@@ -106,6 +110,11 @@ async def update_discussion(
     
     update_data = discussion.model_dump(exclude_unset=True)
     update_data["updated_at"] = datetime.now(timezone.utc)
+    
+    # Sanitize content if being updated
+    if "content" in update_data:
+        update_data["content"] = sanitize_html(update_data["content"])
+    
     response = db.table("discussions").update(update_data).eq("id", discussion_id).execute()
     
     return response.data[0]

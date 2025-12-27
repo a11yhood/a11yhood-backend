@@ -9,26 +9,26 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🛑 Stopping a11yhood backend production server...${NC}"
+echo -e "${BLUE}🛑 Stopping a11yhood backend production server (Docker)...${NC}"
 echo ""
 
-# Kill backend (uvicorn)
-echo -e "${YELLOW}🔧 Stopping backend server...${NC}"
-pkill -f "uvicorn main:app"
-if [ $? -eq 0 ]; then
-  echo -e "${GREEN}✓ Backend stopped${NC}"
+# Stop production container
+echo -e "${YELLOW}🔧 Stopping production container...${NC}"
+if docker-compose ps backend-prod 2>/dev/null | grep -q "Up"; then
+  docker-compose --profile production stop backend-prod
+  echo -e "${GREEN}✓ Backend production container stopped${NC}"
 else
-  echo -e "${YELLOW}⚠️  No backend process found${NC}"
+  echo -e "${YELLOW}⚠️  No production container running${NC}"
 fi
-
-# Give process time to clean up
-sleep 1
 
 echo ""
 echo -e "${GREEN}✅ Backend production server stopped${NC}"
 echo ""
 echo -e "${BLUE}💡 To restart production:${NC}"
 echo "   ./start-prod.sh"
+echo ""
+echo -e "${BLUE}💡 To remove the container:${NC}"
+echo "   docker-compose --profile production down"
 echo ""
 echo -e "${BLUE}💡 To start development environment instead:${NC}"
 echo "   ./start-dev.sh"

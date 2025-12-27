@@ -3,8 +3,12 @@
 Sets up FastAPI app with CORS middleware and routes for the accessible product community.
 All endpoints are organized by domain in routers/ and use database_adapter for dual DB support.
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from config import settings
 from routers import activities, blog_posts, collections, discussions, product_urls, products, ratings, requests, scrapers, sources, users
 
@@ -16,6 +20,108 @@ app = FastAPI(
 )
 
 import os
+import logging
+
+# Setup rate limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+async def validate_security_configuration():
+    """Validate critical security settings on startup.
+    
+    Prevents common misconfigurations that could compromise security.
+    Raises RuntimeError for critical issues that must be fixed before running.
+    """
+    
+    # Detect production environment by checking for production indicators
+    is_production = any([
+        # Production Supabase URL (not localhost/dummy)
+        settings.SUPABASE_URL and 
+        "supabase.co" in settings.SUPABASE_URL and
+        "dummy" not in settings.SUPABASE_URL,
+        
+        # Production domain in CORS
+        settings.PRODUCTION_URL and 
+        "localhost" not in settings.PRODUCTION_URL and
+        settings.PRODUCTION_URL.strip(),
+        
+        # Explicit production environment variable
+        os.getenv("ENVIRONMENT") == "production",
+        os.getenv("ENV") == "production",
+    ])
+    
+    # CRITICAL: Prevent TEST_MODE in production
+    if settings.TEST_MODE and is_production:
+        raise RuntimeError(
+            "🚨 CRITICAL SECURITY ERROR: TEST_MODE=true in production environment!\n"
+            "\n"
+            "This bypasses authentication and allows anyone to impersonate users.\n"
+            "\n"
+            "Action required:\n"
+            "  1. Set TEST_MODE=false in your .env file\n"
+            "  2. Restart the application\n"
+            "\n"
+            "Production detected due to:\n"
+            f"  - SUPABASE_URL: {settings.SUPABASE_URL}\n"
+            f"  - PRODUCTION_URL: {settings.PRODUCTION_URL}\n"
+        )
+    
+    # CRITICAL: Validate SECRET_KEY in production
+    if is_production:
+        if settings.SECRET_KEY == "dev-secret-key-change-in-production":
+            raise RuntimeError(
+                "🚨 CRITICAL SECURITY ERROR: Default SECRET_KEY in production!\n"
+                "\n"
+                "Using the default key compromises JWT token security.\n"
+                "\n"
+                "Action required:\n"
+                "  1. Generate a secure key:\n"
+                "     python -c 'import secrets; print(secrets.token_hex(32))'\n"
+                "  2. Set SECRET_KEY in your .env file\n"
+                "  3. Restart the application\n"
+            )
+        
+        if len(settings.SECRET_KEY) < 32:
+            raise RuntimeError(
+                f"🚨 CRITICAL SECURITY ERROR: SECRET_KEY too short ({len(settings.SECRET_KEY)} chars)!\n"
+                "\n"
+                "Production requires a SECRET_KEY of at least 32 characters.\n"
+                "\n"
+                "Action required:\n"
+                "  1. Generate a secure key:\n"
+                "     python -c 'import secrets; print(secrets.token_hex(32))'\n"
+                "  2. Set SECRET_KEY in your .env file\n"
+                "  3. Restart the application\n"
+            )
+    
+    # Warnings for development mode
+    if settings.TEST_MODE:
+        logger.warning(
+            "⚠️  TEST_MODE enabled - Development authentication active\n"
+            "   - Dev tokens (dev-token-*) will be accepted\n"
+            "   - Mock user accounts will be available\n"
+            "   - NEVER enable TEST_MODE in production!\n"
+        )
+    
+    if settings.SECRET_KEY == "dev-secret-key-change-in-production" and not is_production:
+        logger.warning(
+            "⚠️  Using default SECRET_KEY in development\n"
+            "   This is OK for local testing but generate a unique key for staging/production.\n"
+        )
+    
+    # Log security configuration status
+    logger.info(
+        f"Security configuration validated:\n"
+        f"  - Production mode: {is_production}\n"
+        f"  - TEST_MODE: {settings.TEST_MODE}\n"
+        f"  - SECRET_KEY length: {len(settings.SECRET_KEY)} chars\n"
+        f"  - CORS origins: {len(get_cors_origins())} configured\n"
+    )
 
 def get_cors_origins():
     """Build strict CORS allowlist from environment.
@@ -49,7 +155,53 @@ def get_cors_origins():
 
 origins = get_cors_origins()
 
-# Security: Strict CORS configuration
+# ============================================================================
+# Security Middleware
+# ============================================================================
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+    
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+    
+    # Enable XSS protection
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    
+    # Content Security Policy
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'"
+    )
+    
+    # HSTS (only in production with HTTPS)
+    if not settings.TEST_MODE:
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+    
+    # Referrer policy
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    
+    # Permissions policy
+    response.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(), camera=()"
+    )
+    
+    return response
+
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,  # Explicit allowlist only
@@ -58,9 +210,34 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],  # Explicit headers only
 )
 
-# Root endpoints
+# Trusted hosts (prevent host header injection)
+allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0"]
+if settings.PRODUCTION_URL:
+    host = settings.PRODUCTION_URL.replace("https://", "").replace("http://", "").split("/")[0]
+    if host:
+        allowed_hosts.append(host)
+if settings.FRONTEND_URL:
+    host = settings.FRONTEND_URL.replace("https://", "").replace("http://", "").split("/")[0]
+    if host and host not in allowed_hosts:
+        allowed_hosts.append(host)
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=allowed_hosts
+)
+
+# Global exception handler
+from services.error_handler import handle_exception
+app.add_exception_handler(Exception, handle_exception)
+
+# ============================================================================
+# Root Endpoints
+# ============================================================================
+
 @app.get("/")
-def root():
+@limiter.limit("60/minute")  # Prevent abuse
+async def root(request: Request):
+    """API root endpoint."""
     return {
         "message": "a11yhood API",
         "version": "1.0.0",
@@ -69,7 +246,8 @@ def root():
 
 
 @app.get("/health")
-def health_check():
+async def health_check():
+    """Health check endpoint (no rate limit for monitoring)."""
     return {"status": "healthy"}
 
 

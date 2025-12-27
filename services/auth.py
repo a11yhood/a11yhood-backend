@@ -7,6 +7,7 @@ Security: All authorization checks enforce server-side validation; never trust c
 from fastapi import Header, HTTPException, Depends
 from supabase import Client
 from services.database import get_supabase
+from services.security_logger import log_auth_failure
 
 # Fixed dev identities shared with frontend src/lib/dev-users.ts
 # Must match exactly between frontend and backend.
@@ -60,6 +61,7 @@ async def get_current_user(authorization: str = Header(None)):
     from services.database import get_db as get_database_adapter
     
     if not authorization:
+        log_auth_failure(None, "Missing authorization header")
         raise HTTPException(status_code=401, detail="No authorization header")
     
     # Strip "Bearer " prefix if present
@@ -82,6 +84,7 @@ async def get_current_user(authorization: str = Header(None)):
                 "role": user.get("role", "user")
             }
         else:
+            log_auth_failure(user_id, "Dev token user not found in database")
             raise HTTPException(
                 status_code=401, 
                 detail=f"Dev user {user_id} not found. Ensure database is seeded with test users."
@@ -157,7 +160,14 @@ def ensure_admin(current_user: dict):
     Security: Server-side role check prevents privilege escalation.
     Raises 403 Forbidden if current_user lacks admin role.
     """
+    from services.security_logger import log_unauthorized_access
+    
     if not current_user or current_user.get("role") != "admin":
+        log_unauthorized_access(
+            current_user.get("id") if current_user else None,
+            "admin",
+            f"Attempted admin action with role: {current_user.get('role') if current_user else 'none'}"
+        )
         raise HTTPException(status_code=403, detail="Admin access required")
 
 

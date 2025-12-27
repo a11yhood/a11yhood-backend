@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "https://localhost:5173"
     PRODUCTION_URL: str = ""
     
+    # Environment mode (development, staging, production)
+    ENVIRONMENT: Optional[str] = None  # 'production', 'staging', 'development'
+    
     # Test mode settings
     TEST_MODE: bool = False
     TEST_SCRAPER_LIMIT: int = 5

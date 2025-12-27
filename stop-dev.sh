@@ -37,17 +37,21 @@ if [ "$HELP" = true ]; then
   exit 0
 fi
 
-echo -e "${BLUE}🛑 Stopping a11yhood backend development server...${NC}"
+echo -e "${BLUE}🛑 Stopping a11yhood backend development server (Docker)...${NC}"
 echo ""
 
-# Kill backend
-echo -e "${YELLOW}Stopping backend...${NC}"
-if pkill -f "uvicorn main:app" 2>/dev/null; then
-  echo -e "${GREEN}✓ Backend stopped${NC}"
+# Stop container
+echo -e "${YELLOW}Stopping backend container...${NC}"
+if docker-compose ps backend 2>/dev/null | grep -q "Up"; then
+  docker-compose stop backend
+  echo -e "${GREEN}✓ Backend container stopped${NC}"
 else
   echo "  (Backend was not running)"
 fi
 
 echo ""
-echo -e "${GREEN}✅ Backend stopped${NC}"
+echo -e "${GREEN}✅ Backend development server stopped${NC}"
+echo ""
+echo -e "${BLUE}💡 To remove the container and volumes:${NC}"
+echo "   docker-compose down -v"
 echo ""

@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y \
     make \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user for runtime
+RUN useradd -m -u 1000 appuser
+
 # Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -21,11 +24,18 @@ COPY pyproject.toml uv.lock* ./
 # Development stage
 FROM base AS development
 
-# Install all dependencies including dev dependencies
-RUN uv sync --frozen
+# Install dependencies only (skip building package)
+RUN uv pip install --system aiosqlite annotated-doc beautifulsoup4 bleach \
+    fastapi httpx lxml pydantic pydantic-settings python-dotenv python-multipart \
+    requests requests-oauthlib slowapi supabase 'uvicorn[standard]' \
+    pytest pytest-asyncio
 
 # Copy application code
 COPY . .
+
+# Ensure ownership and drop privileges
+RUN chown -R appuser:appuser /app
+USER appuser
 
 # Expose port
 EXPOSE 8000
@@ -41,15 +51,15 @@ CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", 
 FROM base AS production
 
 # Install only production dependencies
-RUN uv sync --frozen --no-dev
+RUN uv pip install --system aiosqlite annotated-doc beautifulsoup4 bleach \
+    fastapi httpx lxml pydantic pydantic-settings python-dotenv python-multipart \
+    requests requests-oauthlib slowapi supabase 'uvicorn[standard]'
 
 # Copy application code
 COPY . .
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
-
+# Ensure ownership and drop privileges
+RUN chown -R appuser:appuser /app
 USER appuser
 
 # Expose port

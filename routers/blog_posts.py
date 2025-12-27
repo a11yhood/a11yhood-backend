@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from models.blog_posts import BlogPostCreate, BlogPostResponse, BlogPostUpdate
 from services.auth import ensure_admin, get_current_user, get_current_user_optional
 from services.database import get_db
+from services.sanitizer import sanitize_html
 
 router = APIRouter(prefix="/api/blog-posts", tags=["blog"])
 
@@ -290,10 +291,13 @@ async def create_blog_post(
 
     normalized_content = _normalize_content_images(payload.content)
 
+    # Sanitize markdown content to prevent XSS
+    sanitized_content = sanitize_html(normalized_content or payload.content)
+
     record = {
         "title": payload.title,
         "slug": slug,
-        "content": normalized_content or payload.content,
+        "content": sanitized_content,
         "excerpt": payload.excerpt,
         "header_image": normalized_image,
         "header_image_alt": payload.header_image_alt,
@@ -341,7 +345,8 @@ async def update_blog_post(
         _ensure_slug_unique(db, new_slug, exclude_id=post_id)
         update_data["slug"] = new_slug
     if updates.content is not None:
-        update_data["content"] = _normalize_content_images(updates.content) or updates.content
+        normalized = _normalize_content_images(updates.content) or updates.content
+        update_data["content"] = sanitize_html(normalized)
     if updates.excerpt is not None:
         update_data["excerpt"] = updates.excerpt
     if updates.header_image is not None:

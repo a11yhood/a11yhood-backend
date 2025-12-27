@@ -9,6 +9,7 @@ from typing import Optional
 from pydantic import BaseModel
 from services.database import get_db
 from services.auth import get_current_user, get_current_user_optional, ensure_admin, DEV_USER_IDS
+from services.security_logger import log_role_change
 from fastapi import Request
 from config import settings
 
@@ -217,8 +218,19 @@ async def update_user_role(
     if not existing.data:
         raise HTTPException(status_code=404, detail="User not found")
 
+    old_role = existing.data[0].get("role", "user")
+    
     response = db.table("users").update({"role": new_role}).eq("id", user_id).execute()
     updated_user = response.data[0] if response.data else existing.data[0]
+    
+    # Log security event for role change
+    log_role_change(
+        admin_id=current_user["id"],
+        target_user_id=user_id,
+        old_role=old_role,
+        new_role=new_role
+    )
+    
     return {
         "id": updated_user["id"],
         "username": updated_user.get("username", ""),
