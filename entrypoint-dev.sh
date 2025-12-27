@@ -5,7 +5,7 @@
 set -e
 
 echo "Cleaning up old database..."
-rm -f /app/test.db
+rm -f /tmp/a11yhood-test.db
 
 echo "Seeding database..."
 python seed_all.py

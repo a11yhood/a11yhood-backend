@@ -212,7 +212,7 @@ app.add_middleware(
     allow_origins=origins,  # Explicit allowlist only
     allow_credentials=True,  # Required for Authorization headers
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # Include OPTIONS for CORS preflight
-    allow_headers=["Content-Type", "Authorization"],  # Explicit headers only
+    allow_headers=["*"],  # Allow all headers (browsers send various sec-fetch-* headers)
 )
 
 # Trusted hosts (prevent host header injection)
