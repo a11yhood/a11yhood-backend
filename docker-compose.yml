@@ -10,12 +10,14 @@ services:
     volumes:
       # Mount source code for hot reload in development
       - .:/app
-      # Don't override node_modules or venv
-      - /app/.venv
+      # Don't override __pycache__
       - /app/__pycache__
     environment:
       # Load from .env file
       - ENV_FILE=${ENV_FILE:-.env.test}
+      # UV settings to prevent venv creation
+      - UV_NO_VIRTUALENV=1
+      - UV_SYSTEM_PYTHON=1
     env_file:
       - ${ENV_FILE:-.env.test}
     healthcheck:

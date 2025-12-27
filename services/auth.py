@@ -57,7 +57,10 @@ async def get_current_user(authorization: str = Header(None)):
     
     Security: Always re-derives user identity server-side; never trusts client assertions.
     """
-    from config import settings
+    from config import settings, load_settings_from_env
+    # Use fresh settings so tests that patch env (e.g., startup security) don't
+    # leave a stale cached TEST_MODE value that would disable dev tokens.
+    settings = load_settings_from_env()
     from services.database import get_db as get_database_adapter
     
     if not authorization:

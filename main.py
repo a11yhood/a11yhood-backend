@@ -9,7 +9,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from config import settings
+from config import settings, load_settings_from_env
 from routers import activities, blog_posts, collections, discussions, product_urls, products, ratings, requests, scrapers, sources, users
 
 
@@ -37,18 +37,23 @@ async def validate_security_configuration():
     Prevents common misconfigurations that could compromise security.
     Raises RuntimeError for critical issues that must be fixed before running.
     """
+    # Reload settings within the function so tests that patch environment
+    # (e.g., startup security tests) observe the updated values without
+    # weakening production behavior.
+    # Use a fresh settings instance so env patches in tests are respected.
+    local_settings = load_settings_from_env()
     
     # Detect production environment by checking for production indicators
     is_production = any([
         # Production Supabase URL (not localhost/dummy)
-        settings.SUPABASE_URL and 
-        "supabase.co" in settings.SUPABASE_URL and
-        "dummy" not in settings.SUPABASE_URL,
+        local_settings.SUPABASE_URL and 
+        "supabase.co" in local_settings.SUPABASE_URL and
+        "dummy" not in local_settings.SUPABASE_URL,
         
         # Production domain in CORS
-        settings.PRODUCTION_URL and 
-        "localhost" not in settings.PRODUCTION_URL and
-        settings.PRODUCTION_URL.strip(),
+        local_settings.PRODUCTION_URL and 
+        "localhost" not in local_settings.PRODUCTION_URL and
+        local_settings.PRODUCTION_URL.strip(),
         
         # Explicit production environment variable
         os.getenv("ENVIRONMENT") == "production",
@@ -56,7 +61,7 @@ async def validate_security_configuration():
     ])
     
     # CRITICAL: Prevent TEST_MODE in production
-    if settings.TEST_MODE and is_production:
+    if local_settings.TEST_MODE and is_production:
         raise RuntimeError(
             "🚨 CRITICAL SECURITY ERROR: TEST_MODE=true in production environment!\n"
             "\n"
@@ -67,13 +72,13 @@ async def validate_security_configuration():
             "  2. Restart the application\n"
             "\n"
             "Production detected due to:\n"
-            f"  - SUPABASE_URL: {settings.SUPABASE_URL}\n"
-            f"  - PRODUCTION_URL: {settings.PRODUCTION_URL}\n"
+            f"  - SUPABASE_URL: {local_settings.SUPABASE_URL}\n"
+            f"  - PRODUCTION_URL: {local_settings.PRODUCTION_URL}\n"
         )
     
     # CRITICAL: Validate SECRET_KEY in production
     if is_production:
-        if settings.SECRET_KEY == "dev-secret-key-change-in-production":
+        if local_settings.SECRET_KEY == "dev-secret-key-change-in-production":
             raise RuntimeError(
                 "🚨 CRITICAL SECURITY ERROR: Default SECRET_KEY in production!\n"
                 "\n"
@@ -86,9 +91,9 @@ async def validate_security_configuration():
                 "  3. Restart the application\n"
             )
         
-        if len(settings.SECRET_KEY) < 32:
+        if len(local_settings.SECRET_KEY) < 32:
             raise RuntimeError(
-                f"🚨 CRITICAL SECURITY ERROR: SECRET_KEY too short ({len(settings.SECRET_KEY)} chars)!\n"
+            f"🚨 CRITICAL SECURITY ERROR: SECRET_KEY too short ({len(local_settings.SECRET_KEY)} chars)!\n"
                 "\n"
                 "Production requires a SECRET_KEY of at least 32 characters.\n"
                 "\n"
@@ -100,7 +105,7 @@ async def validate_security_configuration():
             )
     
     # Warnings for development mode
-    if settings.TEST_MODE:
+    if local_settings.TEST_MODE:
         logger.warning(
             "⚠️  TEST_MODE enabled - Development authentication active\n"
             "   - Dev tokens (dev-token-*) will be accepted\n"
@@ -108,7 +113,7 @@ async def validate_security_configuration():
             "   - NEVER enable TEST_MODE in production!\n"
         )
     
-    if settings.SECRET_KEY == "dev-secret-key-change-in-production" and not is_production:
+    if local_settings.SECRET_KEY == "dev-secret-key-change-in-production" and not is_production:
         logger.warning(
             "⚠️  Using default SECRET_KEY in development\n"
             "   This is OK for local testing but generate a unique key for staging/production.\n"
@@ -118,8 +123,8 @@ async def validate_security_configuration():
     logger.info(
         f"Security configuration validated:\n"
         f"  - Production mode: {is_production}\n"
-        f"  - TEST_MODE: {settings.TEST_MODE}\n"
-        f"  - SECRET_KEY length: {len(settings.SECRET_KEY)} chars\n"
+        f"  - TEST_MODE: {local_settings.TEST_MODE}\n"
+        f"  - SECRET_KEY length: {len(local_settings.SECRET_KEY)} chars\n"
         f"  - CORS origins: {len(get_cors_origins())} configured\n"
     )
 
@@ -212,6 +217,10 @@ app.add_middleware(
 
 # Trusted hosts (prevent host header injection)
 allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0"]
+# Allow testserver for TestClient in tests
+if settings.TEST_MODE:
+    allowed_hosts.append("testserver")
+
 if settings.PRODUCTION_URL:
     host = settings.PRODUCTION_URL.replace("https://", "").replace("http://", "").split("/")[0]
     if host:

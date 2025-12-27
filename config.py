@@ -63,5 +63,13 @@ def get_settings(env_file: str = ".env") -> Settings:
     return Settings(_env_file=env_file)
 
 
+def load_settings_from_env() -> Settings:
+    """Load a fresh settings instance reflecting current environment variables.
+    
+    Bypasses the cached settings so tests that patch os.environ see updated values.
+    """
+    return Settings(_env_file=os.getenv("ENV_FILE", ".env"))
+
+
 # Default settings instance (respects ENV_FILE when set)
 settings = get_settings(os.getenv("ENV_FILE", ".env"))

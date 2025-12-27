@@ -60,7 +60,7 @@ def log_security_event(
         security_logger.info(log_message)
 
 
-def log_auth_failure(user_id: Optional[str], ip_address: str, reason: str):
+def log_auth_failure(user_id: Optional[str], reason: str, ip_address: Optional[str] = None):
     """Log failed authentication attempt."""
     log_security_event(
         event_type="AUTH_FAILED",

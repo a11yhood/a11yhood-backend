@@ -1,5 +1,5 @@
 import os
-os.environ.setdefault("ENV_FILE", "backend/.env.test")
+os.environ.setdefault("ENV_FILE", ".env.test")
 try:
     from dotenv import load_dotenv
     load_dotenv(os.environ["ENV_FILE"])
