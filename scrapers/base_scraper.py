@@ -136,15 +136,27 @@ class BaseScraper(ABC):
     def _load_supported_sources(self) -> dict[str, str]:
         """Return cached supported_sources mapping of domain -> canonical name.
 
-        If the table is missing or the query fails, falls back to an empty mapping so
-        scrapers can continue operating without blocking on the lookup.
+        Strips whitespace from domains/names to avoid duplicate variants like
+        "Thingiverse " leaking into the products table. If the table is missing or the
+        query fails, falls back to an empty mapping so scrapers can continue operating
+        without blocking on the lookup.
         """
         if self._supported_source_cache is not None:
             return self._supported_source_cache
 
         try:
             result = self.supabase.table("supported_sources").select("domain,name").execute()
-            mapping = {row["domain"].lower(): row["name"] for row in (result.data or []) if row.get("domain") and row.get("name")}
+            mapping: dict[str, str] = {}
+            for row in result.data or []:
+                domain_raw = row.get("domain")
+                name_raw = row.get("name")
+                if not domain_raw or not name_raw:
+                    continue
+                domain = str(domain_raw).strip().lower()
+                name = str(name_raw).strip()
+                if not domain or not name:
+                    continue
+                mapping[domain] = name
             self._supported_source_cache = mapping
             return mapping
         except Exception as e:

@@ -11,18 +11,44 @@ def test_get_products_success(client, test_product):
 
 
 def test_get_products_with_filters(client, clean_database, test_product):
-    clean_database.table("products").insert({
-        "name": "GitHub Tool",
-        "description": "From GitHub",
-        "source": "github",
-        "category": "Software",
-        "url": "https://github.com/example/tool",
-    }).execute()
+    p1_id = str(uuid.uuid4())
+    p2_id = str(uuid.uuid4())
+    p3_id = str(uuid.uuid4())
 
-    response = client.get("/api/products?origin=github&category=Software&search=tool")
+    clean_database.table("products").insert([
+        {
+            "id": p1_id,
+            "name": "Assistive Spoon",
+            "description": "Thingiverse fabrication tool",
+            "source": "Thingiverse",
+            "type": "Fabrication",
+            "url": "https://www.thingiverse.com/thing:spoon",
+        },
+        {
+            "id": p2_id,
+            "name": "Voice Control Tool",
+            "description": "Github software tool",
+            "source": "Github",
+            "type": "Tool",
+            "url": "https://github.com/example/tool",
+        },
+        {
+            "id": p3_id,
+            "name": "Knit Pattern",
+            "description": "Ravelry knit",
+            "source": "Ravelry",
+            "type": "Knitting",
+            "url": "https://www.ravelry.com/patterns/library/knit",
+        },
+    ]).execute()
+
+    response = client.get("/api/products?sources=Thingiverse,Github&types=Fabrication")
     assert response.status_code == 200
     data = response.json()
-    assert all(item["source"] == "github" for item in data)
+    ids = {item["id"] for item in data}
+    assert p1_id in ids
+    assert p2_id not in ids
+    assert p3_id not in ids
 
 
 def test_get_product_by_id(client, test_product):
@@ -30,6 +56,43 @@ def test_get_product_by_id(client, test_product):
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == test_product["id"]
+
+
+def test_get_products_filtered_by_tags(client, clean_database):
+    tag_id = str(uuid.uuid4())
+    product_id = str(uuid.uuid4())
+    other_product_id = str(uuid.uuid4())
+
+    clean_database.table("tags").insert({"id": tag_id, "name": "AssistiveTech"}).execute()
+    clean_database.table("products").insert([
+        {
+            "id": product_id,
+            "name": "Adapted Cup",
+            "description": "Assistive device",
+            "source": "Thingiverse",
+            "type": "Fabrication",
+            "url": "https://www.thingiverse.com/thing:cup",
+        },
+        {
+            "id": other_product_id,
+            "name": "Unrelated Tool",
+            "description": "No tag match",
+            "source": "Github",
+            "type": "Tool",
+            "url": "https://github.com/example/unrelated",
+        },
+    ]).execute()
+    clean_database.table("product_tags").insert({
+        "product_id": product_id,
+        "tag_id": tag_id,
+    }).execute()
+
+    resp = client.get("/api/products?tags=AssistiveTech")
+    assert resp.status_code == 200
+    data = resp.json()
+    ids = {item["id"] for item in data}
+    assert product_id in ids
+    assert other_product_id not in ids
 
 
 def test_get_product_not_found(client):

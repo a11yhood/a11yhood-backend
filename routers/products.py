@@ -5,7 +5,7 @@ Supports URL-based upsert for scrapers and tag management via relationship table
 Security: Mutations require authentication; updates/deletes enforce ownership or admin role.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Optional
+from typing import Optional, Iterable
 from datetime import datetime, UTC
 
 from models.products import ProductCreate, ProductUpdate, ProductResponse
@@ -27,9 +27,13 @@ async def get_product_sources(
     """
     try:
         response = db.table("products").select("source").execute()
-        sources = {row["source"] for row in (response.data or []) if row.get("source")}
+        sources = {
+            row["source"].strip()
+            for row in (response.data or [])
+            if row.get("source") and row.get("source").strip()
+        }
         return {"sources": sorted(sources)}
-    except Exception as e:
+    except Exception:
         return {"sources": []}
 
 
@@ -78,7 +82,10 @@ async def get_popular_tags(
 @router.get("", response_model=list[ProductResponse])
 async def get_products(
     source: Optional[str] = None,
+    sources: Optional[list[str]] = Query(None, description="Comma-separated or repeated source values"),
     type: Optional[str] = None,
+    types: Optional[list[str]] = Query(None, description="Comma-separated or repeated type values"),
+    tags: Optional[list[str]] = Query(None, description="Filter products that have any of these tag names"),
     search: Optional[str] = None,
     created_by: Optional[str] = None,
     include_banned: bool = Query(False, description="Include banned products (admin/mod only)"),
@@ -93,13 +100,40 @@ async def get_products(
     Returns denormalized response with editor_ids and tags attached to each product.
     Query supports filtering by source platform, type, text search, and creator.
     """
+    def _normalize_list(values: Iterable[str]) -> list[str]:
+        normalized: list[str] = []
+        for v in values:
+            if not v or not isinstance(v, str):
+                continue
+            for part in v.split(","):
+                item = part.strip()
+                if item:
+                    normalized.append(item)
+        return normalized
+
     query = db.table("products").select("*")
+
+    source_values = set(_normalize_list([source] if source else []) + _normalize_list(sources or []))
+    type_values = set(_normalize_list([type] if type else []) + _normalize_list(types or []))
+    tag_values = _normalize_list(tags or [])
+
+    if source_values:
+        query = query.in_("source", list(source_values))
     
-    if source:
-        query = query.eq("source", source)
-    
-    if type:
-        query = query.eq("type", type)
+    if type_values:
+        query = query.in_("type", list(type_values))
+
+    if tag_values:
+        tag_rows = db.table("tags").select("id,name").in_("name", tag_values).execute()
+        tag_map = {row["name"]: row["id"] for row in (tag_rows.data or []) if row.get("id") and row.get("name")}
+        tag_ids = [tag_map[name] for name in tag_values if name in tag_map]
+        if not tag_ids:
+            return []
+        pt_rows = db.table("product_tags").select("product_id, tag_id").in_("tag_id", tag_ids).execute()
+        product_ids_with_tags = {row["product_id"] for row in (pt_rows.data or []) if row.get("product_id")}
+        if not product_ids_with_tags:
+            return []
+        query = query.in_("id", list(product_ids_with_tags))
     
     if search:
         query = query.ilike("name", f"%{search}%")
