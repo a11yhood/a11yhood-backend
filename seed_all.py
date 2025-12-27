@@ -31,17 +31,18 @@ else:
     logger.warning(f"Environment file {env_file} not found, using defaults")
 
 
-def run_seed(script_name: str, module_name: str) -> bool:
+def run_seed(script_name: str, module_name: str, function_name: str = 'main') -> bool:
     """Run a seed script and return success status."""
     try:
         logger.info(f"Running {script_name}...")
         
-        # Import and run the main function if available, otherwise just import
+        # Import module and call the specified function
         module = __import__(module_name)
-        if hasattr(module, 'main'):
-            module.main()
+        if hasattr(module, function_name):
+            getattr(module, function_name)()
         else:
-            logger.info(f"  {script_name} executed")
+            logger.error(f"  Function {function_name} not found in {module_name}")
+            return False
         
         logger.info(f"✓ {script_name} completed successfully")
         return True
@@ -59,16 +60,16 @@ def main():
     logger.info("=" * 60)
     
     seeds = [
-        ("seed_supported_sources", "seed_supported_sources"),
-        ("seed_scraper_search_terms", "seed_scraper_search_terms"),
-        ("seed_test_users", "seed_test_users"),
-        ("seed_test_product", "seed_test_product"),
-        ("seed_test_collections", "seed_test_collections"),
+        ("seed_supported_sources", "seed_supported_sources", "seed_supported_sources"),
+        ("seed_scraper_search_terms", "seed_scraper_search_terms", "main"),
+        ("seed_test_users", "seed_test_users", "seed_users"),
+        ("seed_test_product", "seed_test_product", "seed_product"),
+        ("seed_test_collections", "seed_test_collections", "seed_collections"),
     ]
     
     results = {}
-    for script_name, module_name in seeds:
-        results[script_name] = run_seed(script_name, module_name)
+    for script_name, module_name, function_name in seeds:
+        results[script_name] = run_seed(script_name, module_name, function_name)
     
     # Print summary
     logger.info("=" * 60)
