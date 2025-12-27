@@ -115,8 +115,9 @@ echo ""
 
 # Start production container
 echo -e "${GREEN}🚀 Starting production container...${NC} (t=$(ts))"
-echo "   Server will be available at: http://localhost:8000"
-echo "   API documentation at: http://localhost:8000/docs"
+echo "   Server will be available at: http://localhost:8001"
+echo "   API documentation at: http://localhost:8001/docs"
+echo "   (Production uses port 8001, development uses port 8000)"
 echo ""
 
 docker-compose --profile production up -d backend-prod
@@ -129,7 +130,7 @@ fi
 # Wait for server to be ready
 echo -e "${YELLOW}⏳ Waiting for server to start...${NC}"
 for i in {1..60}; do  # Production might take longer
-  if curl -s http://localhost:8000/health >/dev/null 2>&1; then
+  if curl -s http://localhost:8001/health >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Backend is ready!${NC} (t=$(ts))"
     break
   fi
@@ -156,7 +157,7 @@ for i in {1..60}; do  # Production might take longer
 done
 
 # Final check
-if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
+if ! curl -s http://localhost:8001/health >/dev/null 2>&1; then
   echo -e "${RED}✗ Server failed to start within 60 seconds${NC}"
   echo "  Check logs with: docker-compose logs backend-prod"
   docker-compose logs --tail=50 backend-prod
@@ -167,10 +168,10 @@ echo ""
 echo -e "${GREEN}✅ PRODUCTION server is running!${NC} (t=$(ts))"
 echo ""
 echo -e "${BLUE}📡 Backend API:${NC}"
-echo "   http://localhost:8000"
+echo "   http://localhost:8001"
 echo ""
 echo -e "${BLUE}📚 API Documentation:${NC}"
-echo "   http://localhost:8000/docs"
+echo "   http://localhost:8001/docs"
 echo ""
 echo -e "${BLUE}💡 To monitor logs:${NC}"
 echo "   docker-compose logs -f backend-prod"

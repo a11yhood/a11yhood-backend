@@ -257,7 +257,29 @@ async def root(request: Request):
 @app.get("/health")
 async def health_check():
     """Health check endpoint (no rate limit for monitoring)."""
-    return {"status": "healthy"}
+    # Load fresh settings to report current mode
+    current_settings = load_settings_from_env()
+    
+    # Detect production environment
+    is_production = any([
+        current_settings.SUPABASE_URL and 
+        "supabase.co" in current_settings.SUPABASE_URL and
+        "dummy" not in current_settings.SUPABASE_URL,
+        
+        current_settings.PRODUCTION_URL and 
+        "localhost" not in current_settings.PRODUCTION_URL and
+        current_settings.PRODUCTION_URL.strip(),
+        
+        os.getenv("ENVIRONMENT") == "production",
+        os.getenv("ENV") == "production",
+    ])
+    
+    return {
+        "status": "healthy",
+        "mode": "production" if is_production else "development",
+        "test_mode": current_settings.TEST_MODE,
+        "database": "supabase" if current_settings.SUPABASE_URL and "dummy" not in current_settings.SUPABASE_URL else "sqlite"
+    }
 
 
 # Temporary stub endpoint to prevent 404s from frontend scraper log queries.

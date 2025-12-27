@@ -84,6 +84,7 @@ echo ""
 echo -e "${GREEN}🚀 Starting backend container...${NC} (t=$(ts))"
 echo "   Server will be available at: http://localhost:8000"
 echo "   API documentation at: http://localhost:8000/docs"
+echo "   (Development uses port 8000, production uses port 8001)"
 echo ""
 
 docker-compose up -d backend

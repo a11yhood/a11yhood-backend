@@ -18,3 +18,7 @@ def test_health_endpoint(client):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
+    assert "mode" in data
+    assert data["mode"] in ["development", "production"]
+    assert "test_mode" in data
+    assert "database" in data

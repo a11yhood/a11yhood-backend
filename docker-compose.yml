@@ -37,7 +37,7 @@ services:
       target: production
     container_name: a11yhood-backend-prod
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       - ENV_FILE=.env
     env_file:
