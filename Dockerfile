@@ -60,7 +60,7 @@ FROM base AS production
 # Install only production dependencies
 RUN uv pip install --system aiosqlite annotated-doc beautifulsoup4 bleach \
     fastapi httpx lxml pydantic pydantic-settings python-dotenv python-multipart \
-    requests requests-oauthlib slowapi supabase 'uvicorn[standard]'
+    requests requests-oauthlib slowapi sqlalchemy supabase 'uvicorn[standard]'
 
 # Copy application code
 COPY . .
