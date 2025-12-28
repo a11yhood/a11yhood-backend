@@ -233,6 +233,11 @@ class BaseScraper(ABC):
             product_data = self._canonicalize_source(product_data)
             # Extract tags for relationship table; avoid inserting into products table
             tag_names = product_data.pop("tags", None)
+            # Convert datetime fields to ISO strings for Supabase/PostgREST compatibility
+            if product_data:
+                for k, v in list(product_data.items()):
+                    if isinstance(v, datetime):
+                        product_data[k] = v.isoformat()
             result = self.supabase.table("products").insert(product_data).execute()
             created = result.data[0] if result.data else None
             if tag_names and created and created.get("id"):
@@ -246,6 +251,9 @@ class BaseScraper(ABC):
             # Fall back if target schema is missing optional image fields
             if product_data and "Could not find the 'image' column" in str(e):
                 sanitized = {k: v for k, v in product_data.items() if k not in {"image", "image_alt"}}
+                for k, v in list(sanitized.items()):
+                    if isinstance(v, datetime):
+                        sanitized[k] = v.isoformat()
                 try:
                     result = self.supabase.table("products").insert(sanitized).execute()
                     created = result.data[0] if result.data else None

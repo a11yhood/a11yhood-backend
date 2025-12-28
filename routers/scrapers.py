@@ -578,11 +578,24 @@ ALLOWED_SEARCH_PLATFORMS = {
 
 
 def _load_search_terms(db, platform: str, fallback: list[str]) -> list[str]:
-    """Load search terms for a platform from single-row search_terms array (Supabase-aligned)."""
+    """Load search terms for a platform.
+
+    Tries JSON array column 'search_terms' first. If missing (normalized schema),
+    falls back to collecting rows from 'search_term' column.
+    """
+    # Try single-row JSON array
     try:
         row = db.table("scraper_search_terms").select("search_terms").eq("platform", platform).limit(1).execute()
         terms = (row.data or [{}])[0].get("search_terms") if row.data else None
         if isinstance(terms, list) and terms:
+            return terms
+    except Exception:
+        pass
+    # Fallback: one row per term
+    try:
+        resp = db.table("scraper_search_terms").select("search_term").eq("platform", platform).execute()
+        terms = [r.get("search_term") for r in (resp.data or []) if r.get("search_term")]
+        if terms:
             return terms
     except Exception:
         pass
@@ -618,6 +631,10 @@ class UpdateSearchTermsRequest(BaseModel):
     search_terms: list[str]
 
 
+class AddSearchTermRequest(BaseModel):
+    search_term: str
+
+
 @router.post("/{platform}/search-terms", response_model=dict)
 async def update_search_terms(
     platform: str,
@@ -646,12 +663,21 @@ async def update_search_terms(
 
     sanitized = [term.strip() for term in request.search_terms]
 
+    # Persist using JSON array if available; otherwise fall back to normalized rows
     try:
-        # Upsert single row per platform with search_terms array
         payload = {"platform": key, "search_terms": sanitized}
         db.table("scraper_search_terms").upsert(payload).execute()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to persist search terms: {e}")
+        # Fallback: normalized schema with one row per term
+        try:
+            # Clear existing terms for platform
+            db.table("scraper_search_terms").delete().eq("platform", key).execute()
+            # Insert each term as a separate row
+            rows = [{"platform": key, "search_term": term} for term in sanitized]
+            if rows:
+                db.table("scraper_search_terms").insert(rows).execute()
+        except Exception as e2:
+            raise HTTPException(status_code=500, detail=f"Failed to persist search terms: {e2}")
 
     # Update runtime variables for immediate effect
     if platform == "github":
@@ -665,6 +691,60 @@ async def update_search_terms(
         "success": True,
         "search_terms": sanitized,
         "message": f"Saved {len(sanitized)} search terms for {platform}."
+    }
+
+
+@router.post("/{platform}/search-terms/add", response_model=dict)
+async def add_search_term(
+    platform: str,
+    request: AddSearchTermRequest,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_db),
+):
+    """Append a single search term without replacing existing ones (admin only)."""
+    if not current_user.get("role") == "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    key = ALLOWED_SEARCH_PLATFORMS.get(platform)
+    if not key:
+        raise HTTPException(status_code=404, detail="Unsupported platform")
+
+    term = request.search_term.strip() if request.search_term else ""
+    if not term:
+        raise HTTPException(status_code=400, detail="Search term cannot be empty")
+    if len(term) > 100:
+        raise HTTPException(status_code=400, detail="Search terms must be 100 characters or less")
+
+    # Load existing terms (supports both schemas)
+    existing = _load_search_terms(db, key, [])
+    if term in existing:
+        return {"success": True, "search_terms": existing, "message": "Term already exists"}
+
+    new_terms = existing + [term]
+
+    # Try array upsert first
+    try:
+        payload = {"platform": key, "search_terms": new_terms}
+        db.table("scraper_search_terms").upsert(payload).execute()
+    except Exception:
+        # Fallback to normalized rows: insert only the new term
+        try:
+            db.table("scraper_search_terms").insert({"platform": key, "search_term": term}).execute()
+        except Exception as e2:
+            raise HTTPException(status_code=500, detail=f"Failed to persist search term: {e2}")
+
+    # Update runtime variables for immediate effect
+    if platform == "github":
+        GitHubScraper.SEARCH_TERMS = new_terms
+    elif platform == "thingiverse":
+        ThingiverseScraper.SEARCH_TERMS = new_terms
+    elif platform == "ravelry":
+        RavelryScraper.PA_CATEGORIES = new_terms
+
+    return {
+        "success": True,
+        "search_terms": new_terms,
+        "message": f"Added search term to {platform}."
     }
 
 # Backwards compatibility routes for GitHub

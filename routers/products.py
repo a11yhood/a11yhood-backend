@@ -32,6 +32,33 @@ def _normalize_list(values: Optional[Iterable[str]]) -> list[str]:
     return normalized
 
 
+def _canonicalize_sources(db, values: list[str]) -> list[str]:
+    """Map incoming source filter values to canonical names from supported_sources (case-insensitive).
+
+    Example: 'github' -> 'Github' if supported_sources.name is 'Github'.
+    Falls back to original input when no match is found.
+    """
+    if not values:
+        return []
+    try:
+        rows = db.table("supported_sources").select("name").execute()
+        name_map = {str(r.get("name")).strip().lower(): str(r.get("name")).strip() for r in (rows.data or []) if r.get("name")}
+        canon: list[str] = []
+        for v in values:
+            key = str(v).strip().lower()
+            canon.append(name_map.get(key, v))
+        # Deduplicate while preserving order
+        seen = set()
+        unique: list[str] = []
+        for c in canon:
+            if c not in seen:
+                seen.add(c)
+                unique.append(c)
+        return unique
+    except Exception:
+        return values
+
+
 @router.get("/sources")
 async def get_product_sources(
     db = Depends(get_db),
@@ -250,6 +277,7 @@ async def get_products(
     query = db.table("products").select("*")
 
     source_values = set(_normalize_list(source) + _normalize_list(sources))
+    source_values = set(_canonicalize_sources(db, list(source_values)))
     type_values = set(_normalize_list(type) + _normalize_list(types))
     tag_values = _normalize_list(tags)
 
@@ -366,6 +394,7 @@ async def count_products(
     query = db.table("products").select("id,banned,source_rating")
 
     source_values = set(_normalize_list(source) + _normalize_list(sources))
+    source_values = set(_canonicalize_sources(db, list(source_values)))
     type_values = set(_normalize_list(type) + _normalize_list(types))
     tag_values = _normalize_list(tags)
 
