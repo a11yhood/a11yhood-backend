@@ -170,7 +170,7 @@ class GitHubScraper(BaseScraper):
         quoted_term = f'"{term}"'
         url = f"{self.API_BASE_URL}/search/repositories"
         params = {
-            'q': f'{quoted_term} stars:>5',
+            'q': f'{quoted_term} stars:>3',
             'sort': 'stars',
             'order': 'desc',
             'per_page': self.RESULTS_PER_PAGE,
