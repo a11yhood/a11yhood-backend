@@ -44,6 +44,7 @@ class ProductResponse(ProductBase):
     banned_at: Optional[datetime] = None
     average_rating: Optional[float] = None
     rating_count: int = 0
+    display_rating: Optional[float] = None
     source_rating: Optional[float] = None
     source_rating_count: Optional[int] = None
     source_last_updated: Optional[datetime] = None

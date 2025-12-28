@@ -1,6 +1,7 @@
 """Test product endpoints using the local SQLite database"""
 import pytest
 import uuid
+from datetime import datetime, UTC, timedelta
 
 
 def test_get_products_success(client, test_product):
@@ -232,6 +233,175 @@ def test_get_products_filtered_by_tags(client, clean_database):
     ids = {item["id"] for item in data}
     assert product_id in ids
     assert other_product_id not in ids
+
+
+def test_get_products_supports_multiple_source_params(client, clean_database):
+    p1_id = str(uuid.uuid4())
+    p2_id = str(uuid.uuid4())
+    p3_id = str(uuid.uuid4())
+
+    clean_database.table("products").insert([
+        {
+            "id": p1_id,
+            "name": "MultiSource Thingiverse",
+            "description": "MultiSource filter",
+            "source": "Thingiverse",
+            "type": "Fabrication",
+            "url": "https://www.thingiverse.com/thing:multisource1",
+        },
+        {
+            "id": p2_id,
+            "name": "MultiSource Github",
+            "description": "MultiSource filter",
+            "source": "Github",
+            "type": "Software",
+            "url": "https://github.com/example/multisource2",
+        },
+        {
+            "id": p3_id,
+            "name": "MultiSource Other",
+            "description": "MultiSource filter",
+            "source": "Ravelry",
+            "type": "Knitting",
+            "url": "https://www.ravelry.com/patterns/library/multisource3",
+        },
+    ]).execute()
+
+    resp = client.get("/api/products?source=Thingiverse&source=Github&search=MultiSource")
+    assert resp.status_code == 200
+    ids = {item["id"] for item in resp.json()}
+    assert p1_id in ids
+    assert p2_id in ids
+    assert p3_id not in ids
+
+
+def test_get_products_filters_by_min_display_rating(client, clean_database, test_user):
+    high_id = str(uuid.uuid4())
+    mixed_id = str(uuid.uuid4())
+    user_only_id = str(uuid.uuid4())
+
+    clean_database.table("products").insert([
+        {
+            "id": high_id,
+            "name": "RatingCase High",
+            "description": "RatingCase",
+            "source": "Github",
+            "type": "Software",
+            "source_rating": 4.5,
+            "url": "https://github.com/example/rating-high",
+            "created_by": test_user["id"],
+        },
+        {
+            "id": mixed_id,
+            "name": "RatingCase Mixed",
+            "description": "RatingCase",
+            "source": "Github",
+            "type": "Software",
+            "source_rating": 2.0,
+            "url": "https://github.com/example/rating-mixed",
+            "created_by": test_user["id"],
+        },
+        {
+            "id": user_only_id,
+            "name": "RatingCase User",
+            "description": "RatingCase",
+            "source": "Github",
+            "type": "Software",
+            "url": "https://github.com/example/rating-user",
+            "created_by": test_user["id"],
+        },
+    ]).execute()
+
+    clean_database.table("ratings").insert([
+        {"product_id": mixed_id, "user_id": test_user["id"], "rating": 4},
+        {"product_id": user_only_id, "user_id": test_user["id"], "rating": 5},
+    ]).execute()
+
+    resp = client.get("/api/products?search=RatingCase&min_rating=3.5")
+    assert resp.status_code == 200
+    data = resp.json()
+    ids = {item["id"] for item in data}
+    assert high_id in ids
+    assert user_only_id in ids
+    assert mixed_id not in ids
+    for item in data:
+        assert item.get("display_rating") is not None
+
+
+def test_count_products_respects_min_rating(client, clean_database, test_user):
+    high_id = str(uuid.uuid4())
+    low_id = str(uuid.uuid4())
+    user_high_id = str(uuid.uuid4())
+
+    clean_database.table("products").insert([
+        {
+            "id": high_id,
+            "name": "RatingCount High",
+            "description": "RatingCount",
+            "source": "Github",
+            "type": "Software",
+            "source_rating": 4.2,
+            "url": "https://github.com/example/rating-count-high",
+            "created_by": test_user["id"],
+        },
+        {
+            "id": low_id,
+            "name": "RatingCount Low",
+            "description": "RatingCount",
+            "source": "Github",
+            "type": "Software",
+            "source_rating": 3.0,
+            "url": "https://github.com/example/rating-count-low",
+            "created_by": test_user["id"],
+        },
+        {
+            "id": user_high_id,
+            "name": "RatingCount User High",
+            "description": "RatingCount",
+            "source": "Github",
+            "type": "Software",
+            "url": "https://github.com/example/rating-count-user",
+            "created_by": test_user["id"],
+        },
+    ]).execute()
+
+    clean_database.table("ratings").insert([
+        {"product_id": low_id, "user_id": test_user["id"], "rating": 3},
+        {"product_id": user_high_id, "user_id": test_user["id"], "rating": 4},
+    ]).execute()
+
+    resp = client.get("/api/products/count?search=RatingCount&min_rating=4")
+    assert resp.status_code == 200
+    assert resp.json()["count"] == 2
+
+
+def test_products_pagination_with_filters(client, clean_database, test_user):
+    base_time = datetime.now(UTC).replace(tzinfo=None)
+    items = []
+    for idx in range(4):
+        pid = str(uuid.uuid4())
+        created_at = base_time + timedelta(minutes=idx)
+        items.append({
+            "id": pid,
+            "name": f"PageTest {idx}",
+            "description": "Pagination check",
+            "source": "Github",
+            "type": "Software",
+            "url": f"https://github.com/example/pagetest-{idx}",
+            "created_by": test_user["id"],
+            "created_at": created_at,
+        })
+    clean_database.table("products").insert(items).execute()
+
+    resp_page = client.get("/api/products?source=Github&search=PageTest&limit=2&offset=1")
+    assert resp_page.status_code == 200
+    data = resp_page.json()
+    assert len(data) == 2
+
+    expected_order = sorted(items, key=lambda p: p["created_at"], reverse=True)
+    expected_slice = expected_order[1:3]
+    returned_ids = [p["id"] for p in data]
+    assert returned_ids == [p["id"] for p in expected_slice]
 
 
 def test_get_product_not_found(client):

@@ -17,6 +17,21 @@ from services.sources import extract_domain, find_source_for_domain
 router = APIRouter(prefix="/api/products", tags=["products"])
 
 
+def _normalize_list(values: Optional[Iterable[str]]) -> list[str]:
+    """Flatten query params supporting comma-separated and repeated values."""
+    normalized: list[str] = []
+    for v in values or []:
+        if v is None:
+            continue
+        if not isinstance(v, str):
+            v = str(v)
+        for part in v.split(","):
+            item = part.strip()
+            if item:
+                normalized.append(item)
+    return normalized
+
+
 @router.get("/sources")
 async def get_product_sources(
     db = Depends(get_db),
@@ -35,6 +50,103 @@ async def get_product_sources(
         return {"sources": sorted(sources)}
     except Exception:
         return {"sources": []}
+
+
+def get_product_ids_for_tags(db, tag_names: list[str], mode: str = "or") -> set[str]:
+    """Return product IDs that match provided tag names using OR/AND semantics."""
+    if not tag_names:
+        return set()
+    tag_rows = db.table("tags").select("id,name").in_("name", tag_names).execute()
+    tag_map = {row["name"]: row["id"] for row in (tag_rows.data or []) if row.get("id") and row.get("name")}
+    tag_ids = [tag_map[name] for name in tag_names if name in tag_map]
+    if not tag_ids:
+        return set()
+
+    pt_rows = db.table("product_tags").select("product_id, tag_id").in_("tag_id", tag_ids).execute()
+    if not pt_rows.data:
+        return set()
+
+    if mode == "and":
+        required = set(tag_ids)
+        product_tag_map: dict[str, set[str]] = {}
+        for row in pt_rows.data:
+            pid = row.get("product_id")
+            tid = row.get("tag_id")
+            if pid and tid:
+                product_tag_map.setdefault(pid, set()).add(tid)
+        return {pid for pid, tids in product_tag_map.items() if required.issubset(tids)}
+
+    return {row["product_id"] for row in pt_rows.data if row.get("product_id")}
+
+
+def _safe_float(value) -> Optional[float]:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_display_rating(user_average: Optional[float], source_rating: Optional[float]) -> Optional[float]:
+    if user_average is not None and source_rating is not None:
+        return (user_average + source_rating) / 2
+    if user_average is not None:
+        return user_average
+    if source_rating is not None:
+        return source_rating
+    return None
+
+
+def build_display_rating_map(db, products: list[dict]) -> dict[str, dict]:
+    """Compute display ratings and counts keyed by product ID."""
+    product_ids = [p.get("id") for p in products if p.get("id")]
+    if not product_ids:
+        return {}
+
+    ratings_response = db.table("ratings").select("product_id,rating").in_("product_id", product_ids).execute()
+    aggregates: dict[str, dict[str, float | int]] = {}
+    for row in ratings_response.data or []:
+        pid = row.get("product_id")
+        rating_raw = row.get("rating")
+        rating_val = _safe_float(rating_raw)
+        if not pid or rating_val is None:
+            continue
+        agg = aggregates.setdefault(pid, {"sum": 0.0, "count": 0})
+        agg["sum"] += rating_val
+        agg["count"] += 1
+
+    ratings_map: dict[str, dict] = {}
+    for product in products:
+        pid = product.get("id")
+        if not pid:
+            continue
+        agg = aggregates.get(pid, {"sum": 0.0, "count": 0})
+        user_avg = (agg["sum"] / agg["count"]) if agg["count"] else None
+        source_rating_val = _safe_float(product.get("source_rating"))
+        display_rating = _compute_display_rating(user_avg, source_rating_val)
+        ratings_map[pid] = {
+            "average_rating": user_avg,
+            "rating_count": agg.get("count", 0),
+            "display_rating": display_rating,
+        }
+    return ratings_map
+
+
+def rating_meets_threshold(product: dict, ratings_map: dict[str, dict], min_rating: float) -> bool:
+    rating_info = ratings_map.get(product.get("id"), {})
+    display_rating = rating_info.get("display_rating")
+    if display_rating is None:
+        return False
+    return display_rating >= min_rating
+
+
+def attach_rating_fields(db, product: dict, ratings_map: Optional[dict[str, dict]] = None) -> dict:
+    """Attach average, count, and display rating to a single product record."""
+    effective_map = ratings_map if ratings_map is not None else build_display_rating_map(db, [product])
+    rating_info = effective_map.get(product.get("id"), {}) if effective_map else {}
+    product["average_rating"] = rating_info.get("average_rating")
+    product["rating_count"] = rating_info.get("rating_count", product.get("rating_count") or 0)
+    product["display_rating"] = rating_info.get("display_rating")
+    return product
 
 
 @router.get("/types")
@@ -81,11 +193,13 @@ async def get_popular_tags(
 
 @router.get("", response_model=list[ProductResponse])
 async def get_products(
-    source: Optional[str] = None,
+    source: Optional[list[str]] = Query(None, alias="source", description="Comma-separated or repeated source values"),
     sources: Optional[list[str]] = Query(None, description="Comma-separated or repeated source values"),
-    type: Optional[str] = None,
+    type: Optional[list[str]] = Query(None, alias="type", description="Comma-separated or repeated type values"),
     types: Optional[list[str]] = Query(None, description="Comma-separated or repeated type values"),
-    tags: Optional[list[str]] = Query(None, description="Filter products that have any of these tag names"),
+    tags: Optional[list[str]] = Query(None, alias="tags", description="Filter products that have any of these tag names"),
+    tags_mode: str = Query("or", pattern="^(?i)(or|and)$", description="Tag filter mode: or (default) or and"),
+    min_rating: Optional[float] = Query(None, ge=0, le=5, description="Minimum display rating (user or source)"),
     search: Optional[str] = None,
     created_by: Optional[str] = None,
     include_banned: bool = Query(False, description="Include banned products (admin/mod only)"),
@@ -100,22 +214,15 @@ async def get_products(
     Returns denormalized response with editor_ids and tags attached to each product.
     Query supports filtering by source platform, type, text search, and creator.
     """
-    def _normalize_list(values: Iterable[str]) -> list[str]:
-        normalized: list[str] = []
-        for v in values:
-            if not v or not isinstance(v, str):
-                continue
-            for part in v.split(","):
-                item = part.strip()
-                if item:
-                    normalized.append(item)
-        return normalized
+    tag_mode = (tags_mode or "or").lower()
+    if tag_mode not in {"or", "and"}:
+        raise HTTPException(status_code=400, detail="tags_mode must be 'or' or 'and'")
 
     query = db.table("products").select("*")
 
-    source_values = set(_normalize_list([source] if source else []) + _normalize_list(sources or []))
-    type_values = set(_normalize_list([type] if type else []) + _normalize_list(types or []))
-    tag_values = _normalize_list(tags or [])
+    source_values = set(_normalize_list(source) + _normalize_list(sources))
+    type_values = set(_normalize_list(type) + _normalize_list(types))
+    tag_values = _normalize_list(tags)
 
     if source_values:
         query = query.in_("source", list(source_values))
@@ -124,13 +231,7 @@ async def get_products(
         query = query.in_("type", list(type_values))
 
     if tag_values:
-        tag_rows = db.table("tags").select("id,name").in_("name", tag_values).execute()
-        tag_map = {row["name"]: row["id"] for row in (tag_rows.data or []) if row.get("id") and row.get("name")}
-        tag_ids = [tag_map[name] for name in tag_values if name in tag_map]
-        if not tag_ids:
-            return []
-        pt_rows = db.table("product_tags").select("product_id, tag_id").in_("tag_id", tag_ids).execute()
-        product_ids_with_tags = {row["product_id"] for row in (pt_rows.data or []) if row.get("product_id")}
+        product_ids_with_tags = get_product_ids_for_tags(db, tag_values, tag_mode)
         if not product_ids_with_tags:
             return []
         query = query.in_("id", list(product_ids_with_tags))
@@ -145,7 +246,11 @@ async def get_products(
         if not current_user or current_user.get("role") not in {"admin", "moderator"}:
             raise HTTPException(status_code=403, detail="Moderator or admin role required to view banned products")
 
-    query = query.range(offset, offset + limit - 1).order("created_at", desc=True)
+    apply_range = min_rating is None
+    if apply_range:
+        query = query.range(offset, offset + limit - 1)
+
+    query = query.order("created_at", desc=True)
     
     response = query.execute()
 
@@ -154,6 +259,12 @@ async def get_products(
 
     if not include_banned:
         products = [p for p in products if not p.get("banned")]
+
+    ratings_map = build_display_rating_map(db, products)
+    if min_rating is not None:
+        products = [p for p in products if rating_meets_threshold(p, ratings_map, min_rating)]
+        products = products[offset:offset + limit]
+
     product_ids = [p["id"] for p in products]
 
     # Load owners for each product
@@ -183,6 +294,10 @@ async def get_products(
     for item in products:
         # Add top-level stars derived from source_rating_count
         item["stars"] = item.get("source_rating_count") or 0
+        rating_info = ratings_map.get(item["id"], {})
+        item["average_rating"] = rating_info.get("average_rating")
+        item["rating_count"] = rating_info.get("rating_count", item.get("rating_count") or 0)
+        item["display_rating"] = rating_info.get("display_rating")
         # Normalize fields for API clients
         if "image" in item:
             item["image_url"] = item.get("image")
@@ -197,11 +312,13 @@ async def get_products(
 
 @router.get("/count")
 async def count_products(
-    source: Optional[str] = None,
+    source: Optional[list[str]] = Query(None, alias="source", description="Comma-separated or repeated source values"),
     sources: Optional[list[str]] = Query(None, description="Comma-separated or repeated source values"),
-    type: Optional[str] = None,
+    type: Optional[list[str]] = Query(None, alias="type", description="Comma-separated or repeated type values"),
     types: Optional[list[str]] = Query(None, description="Comma-separated or repeated type values"),
-    tags: Optional[list[str]] = Query(None, description="Filter products that have any of these tag names"),
+    tags: Optional[list[str]] = Query(None, alias="tags", description="Filter products that have any of these tag names"),
+    tags_mode: str = Query("or", pattern="^(?i)(or|and)$", description="Tag filter mode: or (default) or and"),
+    min_rating: Optional[float] = Query(None, ge=0, le=5, description="Minimum display rating (user or source)"),
     search: Optional[str] = None,
     created_by: Optional[str] = None,
     include_banned: bool = Query(False, description="Include banned products (admin/mod only)"),
@@ -213,22 +330,15 @@ async def count_products(
     Returns {count: int} to help frontend paginate through all matching products.
     Applies same filters as /api/products but returns only the count.
     """
-    def _normalize_list(values: Iterable[str]) -> list[str]:
-        normalized: list[str] = []
-        for v in values:
-            if not v or not isinstance(v, str):
-                continue
-            for part in v.split(","):
-                item = part.strip()
-                if item:
-                    normalized.append(item)
-        return normalized
+    tag_mode = (tags_mode or "or").lower()
+    if tag_mode not in {"or", "and"}:
+        raise HTTPException(status_code=400, detail="tags_mode must be 'or' or 'and'")
 
-    query = db.table("products").select("id")  # Only select id for count
+    query = db.table("products").select("id,banned,source_rating")
 
-    source_values = set(_normalize_list([source] if source else []) + _normalize_list(sources or []))
-    type_values = set(_normalize_list([type] if type else []) + _normalize_list(types or []))
-    tag_values = _normalize_list(tags or [])
+    source_values = set(_normalize_list(source) + _normalize_list(sources))
+    type_values = set(_normalize_list(type) + _normalize_list(types))
+    tag_values = _normalize_list(tags)
 
     if source_values:
         query = query.in_("source", list(source_values))
@@ -237,13 +347,7 @@ async def count_products(
         query = query.in_("type", list(type_values))
 
     if tag_values:
-        tag_rows = db.table("tags").select("id,name").in_("name", tag_values).execute()
-        tag_map = {row["name"]: row["id"] for row in (tag_rows.data or []) if row.get("id") and row.get("name")}
-        tag_ids = [tag_map[name] for name in tag_values if name in tag_map]
-        if not tag_ids:
-            return {"count": 0}
-        pt_rows = db.table("product_tags").select("product_id, tag_id").in_("tag_id", tag_ids).execute()
-        product_ids_with_tags = {row["product_id"] for row in (pt_rows.data or []) if row.get("product_id")}
+        product_ids_with_tags = get_product_ids_for_tags(db, tag_values, tag_mode)
         if not product_ids_with_tags:
             return {"count": 0}
         query = query.in_("id", list(product_ids_with_tags))
@@ -263,6 +367,10 @@ async def count_products(
     
     if not include_banned:
         products = [p for p in products if not p.get("banned")]
+
+    ratings_map = build_display_rating_map(db, products)
+    if min_rating is not None:
+        products = [p for p in products if rating_meets_threshold(p, ratings_map, min_rating)]
     
     return {"count": len(products)}
 
@@ -292,6 +400,7 @@ async def product_exists(
         # Add editor_ids from relationship table
         owners_response = db.table("product_editors").select("user_id").eq("product_id", item["id"]).execute()
         item["editor_ids"] = [owner["user_id"] for owner in owners_response.data] if owners_response.data else []
+        attach_rating_fields(db, item)
         return {"exists": True, "product": item}
     return {"exists": False}
 
@@ -323,6 +432,7 @@ async def get_product(
         result["image_url"] = result.get("image")
     if "url" in result:
         result["source_url"] = result.get("url")
+    attach_rating_fields(db, result)
     
     return result
 
@@ -350,6 +460,7 @@ async def get_product_by_slug(
         result["image_url"] = result.get("image")
     if "url" in result:
         result["source_url"] = result.get("url")
+    attach_rating_fields(db, result)
 
     return result
 
@@ -370,6 +481,7 @@ def _normalize_product(product: dict, db) -> dict:
         product["image_url"] = product.get("image")
     if "url" in product:
         product["source_url"] = product.get("url")
+    attach_rating_fields(db, product)
     return product
 
 
