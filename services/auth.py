@@ -5,9 +5,10 @@ In TEST_MODE, accepts dev tokens for stable test identities without real OAuth.
 Security: All authorization checks enforce server-side validation; never trust client roles.
 """
 from fastapi import Header, HTTPException, Depends
-from supabase import Client
-from services.database import get_supabase
+from config import Settings
+from services.database import get_db, verify_token
 from services.security_logger import log_auth_failure
+from database_adapter import DatabaseAdapter
 
 # Fixed dev identities shared with frontend src/lib/dev-users.ts
 # Must match exactly between frontend and backend.
@@ -17,27 +18,6 @@ DEV_USER_IDS = {
     "94e116f7-885d-4d32-87ae-697c5dc09b9e": "moderator_user",
     "2a3b7c3e-971b-4b42-9c8c-0f1843486c50": "regular_user",
 }
-
-
-async def verify_token(token: str, db: Client = Depends(get_supabase)):
-    """
-    Verify JWT token from Supabase Auth.
-    
-    Usage:
-        @app.get("/protected")
-        def protected_route(user=Depends(verify_token)):
-            return {"user_id": user["id"]}
-    """
-    try:
-        # Verify token with Supabase
-        user = db.auth.get_user(token)
-        
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        
-        return user.user
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
 
 
 async def get_current_user(authorization: str = Header(None)):
@@ -94,26 +74,23 @@ async def get_current_user(authorization: str = Header(None)):
             )
     
     # Production: Real Supabase auth
-    from supabase import Client as SupabaseClient
-    from services.database import get_supabase
+    db_adapter = get_database_adapter()
+    user = await verify_token(token, db_adapter)
 
-    db = get_supabase()
-    supabase_user = await verify_token(token, db)
-
-    # Normalize Supabase user to dict shape expected by routers
+    # Normalize user to dict shape expected by routers
     try:
         user_dict = {
-            "id": getattr(supabase_user, "id", None) if hasattr(supabase_user, "id") else (supabase_user.get("id") if isinstance(supabase_user, dict) else None),
-            "email": getattr(supabase_user, "email", None) if hasattr(supabase_user, "email") else (supabase_user.get("email") if isinstance(supabase_user, dict) else None),
+            "id": getattr(user, "id", None) if hasattr(user, "id") else (user.get("id") if isinstance(user, dict) else None),
+            "email": getattr(user, "email", None) if hasattr(user, "email") else (user.get("email") if isinstance(user, dict) else None),
             "username": None,
             "role": "user",
             "github_id": None,
         }
         meta = None
-        if hasattr(supabase_user, "user_metadata"):
-            meta = getattr(supabase_user, "user_metadata")
-        elif isinstance(supabase_user, dict):
-            meta = supabase_user.get("user_metadata")
+        if hasattr(user, "user_metadata"):
+            meta = getattr(user, "user_metadata")
+        elif isinstance(user, dict):
+            meta = user.get("user_metadata")
 
         if isinstance(meta, dict):
             user_dict["username"] = meta.get("preferred_username") or meta.get("user_name") or user_dict["email"]
@@ -150,7 +127,7 @@ async def get_current_user_optional(authorization: str = Header(None)):
         return await get_current_user(authorization)
     except HTTPException as e:
         # In test mode, if dev user doesn't exist yet, return None (allows user creation)
-        if settings.TEST_MODE and "not found" in str(e.detail):
+        if Settings.TEST_MODE and "not found" in str(e.detail):
             return None
         raise
 

@@ -51,9 +51,10 @@
     role TEXT DEFAULT 'user' CHECK (role IN ('user', 'moderator', 'admin')),
     joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_active TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    preferences JSONB DEFAULT '{"productCardColumns": 3}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
+    
+    UNIQUE(username)
   );
 
   -- ==== Users table hardening: role constraints, RLS, and admin-only role change ====
@@ -196,6 +197,17 @@
     UNIQUE(product_id, user_id)
   );
 
+  -- PRODUCT URLS TABLE (per-product external links)
+  CREATE TABLE product_urls (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    description TEXT,
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
   -- ============================================================================
   -- RATINGS TABLE
   -- ============================================================================
@@ -321,8 +333,6 @@
   CREATE TABLE user_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    user_name TEXT,
-    user_avatar_url TEXT,
     type TEXT NOT NULL CHECK (type IN ('moderator', 'admin', 'product-ownership')),
     reason TEXT,
     message TEXT,
@@ -369,6 +379,10 @@
   CREATE INDEX idx_tags_name ON tags(name);
   CREATE INDEX idx_product_tags_product ON product_tags(product_id);
   CREATE INDEX idx_product_tags_tag ON product_tags(tag_id);
+
+  -- Product URLs
+  CREATE INDEX idx_product_urls_product ON product_urls(product_id);
+  CREATE INDEX idx_product_urls_creator ON product_urls(created_by);
 
   -- Ratings
   CREATE INDEX idx_ratings_product ON ratings(product_id);
@@ -419,7 +433,11 @@
   ALTER TABLE oauth_configs ENABLE ROW LEVEL SECURITY;
   ALTER TABLE tags ENABLE ROW LEVEL SECURITY;
   ALTER TABLE product_tags ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE product_urls ENABLE ROW LEVEL SECURITY;
   ALTER TABLE product_editors ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE scraper_search_terms ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE supported_sources ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE valid_categories ENABLE ROW LEVEL SECURITY;
 
   -- Users: Everyone can read, users can update their own profile
   CREATE POLICY "Users are viewable by everyone" 
@@ -575,6 +593,24 @@
     ON product_editors FOR ALL
     USING (EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role IN ('admin', 'moderator')))
     WITH CHECK (EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role IN ('admin', 'moderator')));
+
+  -- Product URLs: readable by all; owners can manage
+  CREATE POLICY "Product URLs are viewable by everyone"
+    ON product_urls FOR SELECT
+    USING (true);
+
+  CREATE POLICY "Authenticated users can create product URLs"
+    ON product_urls FOR INSERT
+    WITH CHECK (auth.role() = 'authenticated');
+
+  CREATE POLICY "Creators can update their product URLs"
+    ON product_urls FOR UPDATE
+    USING (auth.uid() = created_by)
+    WITH CHECK (auth.uid() = created_by);
+
+  CREATE POLICY "Creators can delete their product URLs"
+    ON product_urls FOR DELETE
+    USING (auth.uid() = created_by);
 
   -- OAuth Configs
   CREATE POLICY "Admins can view oauth configs" 

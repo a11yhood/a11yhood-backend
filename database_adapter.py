@@ -47,6 +47,9 @@ class Product(Base):
     editor_ids = Column(JSON)  # List of editor user IDs
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
+    last_edited_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
+    last_edited_by = Column(String)
+    image_alt = Column(String)
 
 
 class User(Base):
@@ -60,6 +63,12 @@ class User(Base):
     role = Column(String, default="user")  # 'admin', 'moderator', 'user'
     avatar_url = Column(String)
     created_at = Column(DateTime, default=utcnow_naive)
+    bio = Column(String)
+    location = Column(String)
+    website = Column(String)
+    joined_at = Column(DateTime, default=utcnow_naive)
+    last_active = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive)
 
 
 class Rating(Base):
@@ -133,6 +142,7 @@ class UserRequest(Base):
     reason = Column(Text)  # User's reason for the request
     reviewed_by = Column(String)  # Admin who reviewed the request
     reviewed_at = Column(DateTime)
+    reviewer_note = Column(String)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive)
 
