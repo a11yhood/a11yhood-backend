@@ -1,6 +1,7 @@
 """
 Backend scraper service - handles OAuth and coordinates scraping
 """
+import os
 import httpx
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -73,12 +74,12 @@ class ScraperService:
     async def scrape_thingiverse(self, access_token: Optional[str], test_mode: bool = False, test_limit: int = 5) -> Dict[str, Any]:
         """Scrape Thingiverse for accessibility products"""
         scraper = ThingiverseScraper(self.supabase, access_token)
-        # Load persisted search terms if available
+        # Load persisted search terms if available (normalized: one row per search term)
         try:
-            response = self.supabase.table("scraper_search_terms").select("search_terms").eq("platform", "thingiverse").limit(1).execute()
+            response = self.supabase.table("scraper_search_terms").select("search_term").eq("platform", "thingiverse").execute()
             if response.data and len(response.data) > 0:
-                terms = response.data[0].get("search_terms") or []
-                if isinstance(terms, list) and terms:
+                terms = [row.get("search_term") for row in response.data if row.get("search_term")]
+                if terms:
                     scraper.SEARCH_TERMS = terms
         except Exception:
             pass
@@ -91,12 +92,12 @@ class ScraperService:
     async def scrape_ravelry(self, access_token: str, test_mode: bool = False, test_limit: int = 5) -> Dict[str, Any]:
         """Scrape Ravelry for accessibility patterns"""
         scraper = RavelryScraper(self.supabase, access_token)
-        # Load persisted PA categories if available
+        # Load persisted PA categories if available (normalized: one row per category)
         try:
-            response = self.supabase.table("scraper_search_terms").select("search_terms").eq("platform", "ravelry_pa_categories").limit(1).execute()
+            response = self.supabase.table("scraper_search_terms").select("search_term").eq("platform", "ravelry").execute()
             if response.data and len(response.data) > 0:
-                cats = response.data[0].get("search_terms") or []
-                if isinstance(cats, list) and cats:
+                cats = [row.get("search_term") for row in response.data if row.get("search_term")]
+                if cats:
                     scraper.PA_CATEGORIES = cats
         except Exception:
             pass
@@ -108,13 +109,24 @@ class ScraperService:
     
     async def scrape_github(self, test_mode: bool = False, test_limit: int = 5) -> Dict[str, Any]:
         """Scrape GitHub for assistive technology repositories"""
-        scraper = GitHubScraper(self.supabase)
-        # Load persisted search terms if available
+        token: Optional[str] = None
+        # Prefer stored token (set via admin UI), fall back to env for local/dev.
         try:
-            response = self.supabase.table("scraper_search_terms").select("search_terms").eq("platform", "github").limit(1).execute()
+            config_response = self.supabase.table("oauth_configs").select("access_token").eq("platform", "github").execute()
+            token = (config_response.data or [{}])[0].get("access_token") if config_response.data else None
+        except Exception:
+            token = None
+
+        if not token:
+            token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_ACCESS_TOKEN")
+
+        scraper = GitHubScraper(self.supabase, access_token=token)
+        # Load persisted search terms if available (normalized: one row per term)
+        try:
+            response = self.supabase.table("scraper_search_terms").select("search_term").eq("platform", "github").execute()
             if response.data and len(response.data) > 0:
-                terms = response.data[0].get("search_terms") or []
-                if isinstance(terms, list) and terms:
+                terms = [row.get("search_term") for row in response.data if row.get("search_term")]
+                if terms:
                     scraper.SEARCH_TERMS = terms
         except Exception:
             # If DB read fails, continue with default in-memory terms

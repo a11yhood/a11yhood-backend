@@ -1,8 +1,8 @@
 """
 Seed initial scraper search terms for development.
 
-Creates a default row for the GitHub platform in the unified database adapter
-so dev (SQLite) and Supabase can both read/write search terms consistently.
+Populates the scraper_search_terms table (one row per term) for all platforms.
+Works with both SQLite and Supabase.
 """
 from config import get_settings
 from database_adapter import DatabaseAdapter
@@ -16,7 +16,7 @@ def main():
     seeds = [
         {
             "platform": "github",
-            "search_terms": [
+            "terms": [
                 "assistive technology",
                 "screen reader",
                 "eye tracking",
@@ -31,7 +31,7 @@ def main():
         },
         {
             "platform": "thingiverse",
-            "search_terms": [
+            "terms": [
                 "accessibility",
                 "assistive device",
                 "arthritis grip",
@@ -42,8 +42,8 @@ def main():
             ],
         },
         {
-            "platform": "ravelry_pa_categories",
-            "search_terms": [
+            "platform": "ravelry",
+            "terms": [
                 "medical-device-access",
                 "medical-device-accessory",
                 "mobility-aid-accessor",
@@ -54,16 +54,24 @@ def main():
     ]
 
     for seed in seeds:
+        platform = seed["platform"]
+        terms = seed["terms"]
+        
         try:
-            existing = db.table("scraper_search_terms").select("platform,search_terms").eq("platform", seed["platform"]).limit(1).execute()
+            # Check if any terms exist for this platform
+            existing = db.table("scraper_search_terms").select("search_term").eq("platform", platform).limit(1).execute()
+            
             if not existing.data:
-                db.table("scraper_search_terms").upsert(seed).execute()
-                print(f"Seeded scraper_search_terms for platform={seed['platform']}")
+                # Insert one row per search term
+                rows = [{"platform": platform, "search_term": term} for term in terms]
+                db.table("scraper_search_terms").insert(rows).execute()
+                print(f"Seeded {len(terms)} search terms for platform={platform}")
             else:
-                print(f"scraper_search_terms already seeded for platform={seed['platform']}")
+                print(f"scraper_search_terms already seeded for platform={platform} ({len(existing.data)} terms)")
         except Exception as e:
-            print(f"Failed to seed scraper_search_terms for platform={seed['platform']}: {e}")
+            print(f"Failed to seed scraper_search_terms for platform={platform}: {e}")
 
 
 if __name__ == "__main__":
     main()
+

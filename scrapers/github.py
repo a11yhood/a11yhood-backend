@@ -42,11 +42,16 @@ class GitHubScraper(BaseScraper):
     MAX_PAGES_PER_TERM = 10
     RESULTS_PER_PAGE = 20
     
-    def __init__(self, supabase_client):
-        super().__init__(supabase_client)
+    def __init__(self, supabase_client, access_token: Optional[str] = None):
+        super().__init__(supabase_client, access_token)
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
+        # Use a dedicated client so we can attach auth headers if present.
+        self.client = httpx.AsyncClient(headers=headers)
     
     def get_source_name(self) -> str:
-        return 'scraped-github'
+        return 'github'
     
     def supports_url(self, url: str) -> bool:
         """Check if this URL is a GitHub URL"""
@@ -78,6 +83,7 @@ class GitHubScraper(BaseScraper):
         """Fetch repository details from GitHub API"""
         try:
             url = f"https://api.github.com/repos/{owner}/{repo}"
+            await self._throttle_request()
             response = await self.client.get(url, timeout=10.0)
             if response.status_code == 200:
                 return response.json()
@@ -172,10 +178,10 @@ class GitHubScraper(BaseScraper):
         }
         
         try:
+            await self._throttle_request()
             response = await self.client.get(
                 url,
                 params=params,
-                headers={'Accept': 'application/vnd.github.v3+json'}
             )
             response.raise_for_status()
             
@@ -268,14 +274,14 @@ class GitHubScraper(BaseScraper):
             'description': repo.get('description', ''),
             'url': repo['html_url'],
             'image': repo['owner'].get('avatar_url'),
-            'source': 'scraped-github',
+            'source': 'github',
             'type': 'Software',
             'tags': tags,
-            'scraped_at': datetime.now(),
+            'scraped_at': datetime.now().isoformat(),
             'external_id': str(repo['id']),
             'source_rating': star_rating,  # Normalized star rating (2-5)
             'source_rating_count': stars,  # Actual GitHub star count
-            'source_last_updated': source_last_updated,
+            'source_last_updated': source_last_updated.isoformat() if source_last_updated else None,
             'external_data': {
                 'language': language,
                 'topics': topics,

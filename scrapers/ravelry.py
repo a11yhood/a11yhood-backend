@@ -38,7 +38,7 @@ class RavelryScraper(BaseScraper):
         self.client = httpx.AsyncClient(headers=default_headers)
     
     def get_source_name(self) -> str:
-        return 'scraped-ravelry'
+        return 'ravelry'
     
     def supports_url(self, url: str) -> bool:
         """Check if this URL is a Ravelry URL"""
@@ -75,12 +75,11 @@ class RavelryScraper(BaseScraper):
             test_mode: If True, only scrape limited items for testing
             test_limit: Number of items to scrape in test mode
             
-        Returns:
+        return {
             Dict with scraping results (products_found, products_added, etc.)
         """
         if not self.access_token:
             raise ValueError("Ravelry access token is required")
-        
         start_time = datetime.now()
         products_found = 0
         products_added = 0
@@ -293,7 +292,7 @@ class RavelryScraper(BaseScraper):
             'description': description,
             'url': pattern_url,
             'image': image,
-            'source': 'scraped-ravelry',
+            'source': 'ravelry',
             'type': product_type,
             'tags': unique_tags,
             'scraped_at': datetime.now(),

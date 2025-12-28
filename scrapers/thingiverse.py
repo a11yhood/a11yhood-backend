@@ -34,7 +34,7 @@ class ThingiverseScraper(BaseScraper):
         super().__init__(supabase_client, access_token)
     
     def get_source_name(self) -> str:
-        return 'scraped-thingiverse'
+        return 'thingiverse'
     
     def supports_url(self, url: str) -> bool:
         """Check if this URL is a Thingiverse URL"""
@@ -308,7 +308,7 @@ class ThingiverseScraper(BaseScraper):
             'description': thing.get('description', ''),
             'url': url,
             'image': image,
-            'source': 'scraped-thingiverse',
+            'source': 'thingiverse',
             'type': product_type,
             'tags': tags,
             'scraped_at': datetime.now(),

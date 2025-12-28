@@ -5,7 +5,7 @@ This allows tests to use SQLite (fast, local) while production uses Supabase.
 The adapter provides a unified interface that works with both backends.
 """
 from typing import Optional, Dict, List, Any, Union
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, UTC
 import uuid
@@ -249,10 +249,14 @@ class ScraperSearchTerms(Base):
     __tablename__ = "scraper_search_terms"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    platform = Column(String, unique=True, nullable=False)
-    search_terms = Column(JSON, nullable=False, default=list)
+    platform = Column(String, nullable=False)
+    search_term = Column(String, nullable=False)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
+    
+    __table_args__ = (
+        UniqueConstraint('platform', 'search_term', name='scraper_search_terms_platform_term_key'),
+    )
 
 
 class DatabaseAdapter:

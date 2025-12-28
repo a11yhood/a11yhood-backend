@@ -41,10 +41,10 @@ SessionLocal = sessionmaker(bind=engine)
 Base.metadata.create_all(bind=engine)
 
 SUPPORTED_SOURCES = [
-    {"domain": "ravelry.com", "name": "Ravelry"},
-    {"domain": "github.com", "name": "Github"},
-    {"domain": "thingiverse.com", "name": "Thingiverse"},
-    {"domain": "example.com", "name": "Example"},
+    {"domain": "ravelry.com", "name": "ravelry"},
+    {"domain": "github.com", "name": "github"},
+    {"domain": "thingiverse.com", "name": "thingiverse"},
+    {"domain": "example.com", "name": "example"},
 ]
 
 

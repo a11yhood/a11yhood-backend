@@ -67,12 +67,10 @@ async def _run_scraper_and_log(
                 'products_updated': 0,
                 'duration_seconds': 0,
             }
-        
-        # Save log to database using ScraperUtilities
+
         ScraperUtilities.set_last_scrape_time(database, result['source'], result, user_id=user_id)
-        
+
     except Exception as e:
-        # Save error log using ScraperUtilities
         error_result = {
             'source': source,
             'products_found': 0,
@@ -103,21 +101,26 @@ async def trigger_scraper(
     
     # Get OAuth token from database
     access_token = None
-    if request.source.value in ["thingiverse", "ravelry"]:
+    if request.source.value in ["thingiverse", "ravelry", "github"]:
         config_response = db.table("oauth_configs").select("access_token").eq("platform", request.source.value).execute()
         
-        if not config_response.data:
-            raise HTTPException(
-                status_code=400,
-                detail=f"OAuth not configured for {request.source.value}. Please authorize in admin settings."
-            )
-        
-        access_token = config_response.data[0].get("access_token")
-        if not access_token:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No access token found for {request.source.value}. Please authorize in admin settings."
-            )
+        if request.source.value in ["thingiverse", "ravelry"]:
+            if not config_response.data:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"OAuth not configured for {request.source.value}. Please authorize in admin settings."
+                )
+            
+            access_token = config_response.data[0].get("access_token")
+            if not access_token:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No access token found for {request.source.value}. Please authorize in admin settings."
+                )
+        else:
+            # GitHub token is optional (scraper can run unauthenticated but is rate limited)
+            if config_response.data:
+                access_token = config_response.data[0].get("access_token") or None
     
     # Start scraping in background
     background_tasks.add_task(
@@ -221,7 +224,13 @@ async def load_url(
             refreshed = None
             try:
                 # Try GitHub
-                github_scraper = GitHubScraper(db)
+                github_token = None
+                try:
+                    config_response = db.table("oauth_configs").select("access_token").eq("platform", "github").execute()
+                    github_token = (config_response.data or [{}])[0].get("access_token") if config_response.data else None
+                except Exception:
+                    github_token = None
+                github_scraper = GitHubScraper(db, access_token=github_token)
                 if github_scraper.supports_url(url):
                     refreshed = await github_scraper.scrape_url(url)
             except Exception as e:
@@ -261,7 +270,13 @@ async def load_url(
     # Try each scraper to see if it supports this URL
     try:
         # Try GitHub
-        github_scraper = GitHubScraper(db)
+        github_token = None
+        try:
+            config_response = db.table("oauth_configs").select("access_token").eq("platform", "github").execute()
+            github_token = (config_response.data or [{}])[0].get("access_token") if config_response.data else None
+        except Exception:
+            github_token = None
+        github_scraper = GitHubScraper(db, access_token=github_token)
         if github_scraper.supports_url(url):
             scraped_data = await github_scraper.scrape_url(url)
             scraper_name = "github"
@@ -558,16 +573,20 @@ async def disconnect_oauth(
 ALLOWED_SEARCH_PLATFORMS = {
     "github": "github",
     "thingiverse": "thingiverse",
-    "ravelry": "ravelry_pa_categories",
+    "ravelry": "ravelry",
 }
 
 
 def _load_search_terms(db, platform: str, fallback: list[str]) -> list[str]:
-    row = db.table("scraper_search_terms").select("search_terms").eq("platform", platform).limit(1).execute()
-    if row.data and len(row.data) > 0:
-        terms = row.data[0].get("search_terms") or []
-        if isinstance(terms, list) and terms:
-            return terms
+    """Load search terms for a platform from the normalized table (one row per search term)."""
+    try:
+        rows = db.table("scraper_search_terms").select("search_term").eq("platform", platform).execute()
+        if rows.data and len(rows.data) > 0:
+            terms = [row.get("search_term") for row in rows.data if row.get("search_term")]
+            if terms:
+                return terms
+    except Exception:
+        pass
     return fallback
 
 
@@ -629,10 +648,12 @@ async def update_search_terms(
     sanitized = [term.strip() for term in request.search_terms]
 
     try:
-        db.table("scraper_search_terms").upsert({
-            "platform": key,
-            "search_terms": sanitized,
-        }).execute()
+        # Delete all existing terms for this platform
+        db.table("scraper_search_terms").delete().eq("platform", key).execute()
+        
+        # Insert new terms (one row per search term)
+        term_rows = [{"platform": key, "search_term": term} for term in sanitized]
+        db.table("scraper_search_terms").insert(term_rows).execute()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to persist search terms: {e}")
 
@@ -645,8 +666,9 @@ async def update_search_terms(
         RavelryScraper.PA_CATEGORIES = sanitized
 
     return {
+        "success": True,
         "search_terms": sanitized,
-        "message": f"Saved {len(sanitized)} search terms."
+        "message": f"Saved {len(sanitized)} search terms for {platform}."
     }
 
 # Backwards compatibility routes for GitHub

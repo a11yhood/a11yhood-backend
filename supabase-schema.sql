@@ -35,6 +35,15 @@
     ('github.com', 'Github'),
     ('thingiverse.com', 'Thingiverse');
 
+  -- Scraper search terms (persisted search terms for each platform)
+  CREATE TABLE scraper_search_terms (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    platform TEXT NOT NULL UNIQUE,
+    search_terms JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   -- ============================================================================
   -- USERS TABLE
   -- ============================================================================
@@ -618,6 +627,15 @@
     ON oauth_configs FOR SELECT 
     USING (EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role IN ('admin', 'moderator')));
 
+  -- Scraper Search Terms: authenticated users can read, admins can manage
+  CREATE POLICY "Authenticated users can view scraper search terms"
+    ON scraper_search_terms FOR SELECT
+    USING (auth.role() = 'authenticated' OR auth.role() = 'service_role');
+
+  CREATE POLICY "Admins can manage scraper search terms"
+    ON scraper_search_terms FOR ALL
+    USING (EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role IN ('admin', 'moderator')))
+    WITH CHECK (EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role IN ('admin', 'moderator')));
 
   -- Product Tags: Everyone can read, authenticated users can create, admins can delete
   CREATE POLICY "Product tags are viewable by everyone"
@@ -699,4 +717,7 @@
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
   CREATE TRIGGER update_user_requests_updated_at BEFORE UPDATE ON user_requests
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+  CREATE TRIGGER update_scraper_search_terms_updated_at BEFORE UPDATE ON scraper_search_terms
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
