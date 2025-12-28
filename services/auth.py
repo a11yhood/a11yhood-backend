@@ -75,7 +75,7 @@ async def get_current_user(authorization: str = Header(None)):
     
     # Production: Real Supabase auth
     db_adapter = get_database_adapter()
-    user = await verify_token(token, db_adapter)
+    user = verify_token(token, db_adapter)
 
     # Normalize user to dict shape expected by routers
     try:
