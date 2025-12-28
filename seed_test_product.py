@@ -70,6 +70,7 @@ def seed_product():
             slug=slug,
             created_at=datetime.now(UTC).replace(tzinfo=None),
             updated_at=datetime.now(UTC).replace(tzinfo=None),
+            source_last_updated=datetime.now(UTC).replace(tzinfo=None),
         )
         db.add(product)
         db.commit()
