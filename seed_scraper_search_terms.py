@@ -47,8 +47,9 @@ def main():
             "terms": [
                 "medical-device-access",
                 "medical-device-accessory",
-                "mobility-aid-accessor",
+                "mobility-aid-accessory",
                 "other-accessibility",
+                "adaptive",
                 "therapy-aid",
             ],
         },

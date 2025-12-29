@@ -15,7 +15,17 @@ These utilities provide the same functionality that existed on the frontend,
 but now operate on the backend with direct database access.
 """
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import (
+    Dict,
+    Any,
+    Optional,
+    Callable,
+    Awaitable,
+    AsyncIterator,
+    List,
+    Tuple,
+    TypeVar,
+)
 from datetime import datetime, UTC
 from urllib.parse import urlsplit
 import httpx
@@ -23,6 +33,9 @@ import os
 import uuid
 
 from services.id_generator import normalize_to_snake_case
+
+
+T = TypeVar("T")
 
 
 class BaseScraper(ABC):
@@ -39,7 +52,7 @@ class BaseScraper(ABC):
     
     API_BASE_URL: str = ""
     REQUESTS_PER_MINUTE: int = 30
-    
+
     def __init__(self, supabase_client, access_token: Optional[str] = None):
         self.supabase = supabase_client
         self.access_token = access_token
@@ -100,6 +113,42 @@ class BaseScraper(ABC):
             await asyncio.sleep(sleep_time)
         
         self.last_request_time = time.time()
+
+    async def _paginate(
+        self,
+        fetch_page: Callable[[int], Awaitable[Tuple[List[T], bool]]],
+        *,
+        start_page: int = 1,
+        max_pages: Optional[int] = None,
+        stop_on_empty: bool = True,
+    ) -> AsyncIterator[List[T]]:
+        """Iterate through paginated API results without duplicating loops in scrapers.
+
+        The ``fetch_page`` callback must return a tuple ``(items, has_more)`` where
+        ``items`` is the list of results for the requested page and ``has_more``
+        indicates whether additional pages might exist.
+
+        - Pagination stops when ``has_more`` is False or ``max_pages`` is reached.
+        - If ``stop_on_empty`` is True, an empty ``items`` list will end pagination
+          unless ``has_more`` is True (allowing APIs that return empty pages to
+          continue when signaled).
+        """
+        page = start_page
+        while True:
+            if max_pages is not None and page > max_pages:
+                break
+
+            items, has_more = await fetch_page(page)
+
+            if items:
+                yield items
+            elif stop_on_empty and not has_more:
+                break
+
+            if not has_more:
+                break
+
+            page += 1
     
     async def _product_exists(self, url: str) -> Optional[Dict[str, Any]]:
         """

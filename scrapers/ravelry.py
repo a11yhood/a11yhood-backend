@@ -3,8 +3,8 @@ Ravelry scraper for accessibility knitting/crochet patterns
 Uses Ravelry API with OAuth2 authentication
 """
 import httpx
-from typing import List, Optional, Dict, Any
-from datetime import datetime
+from typing import List, Optional, Dict, Any, Tuple
+from datetime import datetime, UTC, timedelta
 from .base_scraper import BaseScraper
 
 
@@ -30,7 +30,6 @@ class RavelryScraper(BaseScraper):
     API_BASE_URL = 'https://api.ravelry.com'
     REQUESTS_PER_MINUTE = 5
     RESULTS_PER_PAGE = 50
-    MAX_PAGES_PER_CATEGORY = 10
     
     def __init__(self, supabase_client, access_token: Optional[str] = None):
         super().__init__(supabase_client, access_token)
@@ -39,6 +38,7 @@ class RavelryScraper(BaseScraper):
         if access_token:
             default_headers["Authorization"] = f"Bearer {access_token}"
         self.client = httpx.AsyncClient(headers=default_headers)
+        self._refresh_in_progress = False
     
     def get_source_name(self) -> str:
         return 'ravelry'
@@ -83,7 +83,7 @@ class RavelryScraper(BaseScraper):
         """
         if not self.access_token:
             raise ValueError("Ravelry access token is required")
-        start_time = datetime.now()
+        start_time = datetime.now(UTC)
         products_found = 0
         products_added = 0
         products_updated = 0
@@ -93,49 +93,47 @@ class RavelryScraper(BaseScraper):
                 if test_mode and products_found >= test_limit:
                     break
                 
-                # Fetch patterns for this PA category with pagination
-                for page in range(1, self.MAX_PAGES_PER_CATEGORY + 1):
+                category_count = 0
+                pages_seen = 0
+
+                async for patterns in self._paginate(lambda page: self._search_patterns(pa_category, page)):
+                    pages_seen += 1
                     if test_mode and products_found >= test_limit:
                         break
-                    
-                    patterns = await self._search_patterns(pa_category, page)
-                    
-                    if not patterns:
-                        # Warn when a category returns nothing on the first page so we can detect stale slugs.
-                        if page == 1:
-                            print(f"[Ravelry] No results for category '{pa_category}' (page 1)")
-                        break  # No more results
-                    
+
                     for pattern in patterns:
                         if test_mode and products_found >= test_limit:
                             break
-                        
+
+                        category_count += 1
                         products_found += 1
-                        
-                        # Fetch full pattern details to get ratings, craft type, description, etc.
+
                         pattern_id = pattern.get('id')
                         full_pattern = await self._fetch_pattern_details(pattern_id)
-                        
+
                         if not full_pattern:
                             print(f"[Ravelry] Failed to fetch details for pattern {pattern_id}, skipping")
                             continue
-                        
-                        # Check if product already exists by URL
+
                         url = f"https://www.ravelry.com/patterns/library/{full_pattern['permalink']}"
                         existing = await self._product_exists(url)
-                        
+
                         if existing:
-                            # Update existing product
                             result = await self._update_product(existing["id"], full_pattern)
                             if result:
                                 products_updated += 1
                         else:
-                            # Add new product
                             result = await self._create_product(full_pattern)
                             if result:
                                 products_added += 1
+
+                if category_count and pages_seen:
+                    print(f"[Ravelry] Category '{pa_category}' has {category_count} patterns across {pages_seen} pages")
+
+                if test_mode and products_found >= test_limit:
+                    break
             
-            duration = (datetime.now() - start_time).total_seconds()
+            duration = (datetime.now(UTC) - start_time).total_seconds()
             
             return {
                 'source': 'Ravelry',
@@ -147,7 +145,7 @@ class RavelryScraper(BaseScraper):
             }
             
         except Exception as e:
-            duration = (datetime.now() - start_time).total_seconds()
+            duration = (datetime.now(UTC) - start_time).total_seconds()
             return {
                 'source': 'Ravelry',
                 'products_found': products_found,
@@ -158,8 +156,11 @@ class RavelryScraper(BaseScraper):
                 'error_message': str(e),
             }
     
-    async def _search_patterns(self, pa_category: str, page: int) -> List[Dict[str, Any]]:
-        """Search Ravelry patterns by PA category"""
+    async def _search_patterns(self, pa_category: str, page: int) -> Tuple[List[Dict[str, Any]], bool]:
+        """Search Ravelry patterns by PA slug.
+
+        Returns a tuple of (patterns, has_more).
+        """
         url = f"{self.API_BASE_URL}/patterns/search.json"
         params = {
             'pa': pa_category,
@@ -167,39 +168,97 @@ class RavelryScraper(BaseScraper):
             'page': page,
             'sort': 'best',
         }
-        
         try:
-            await self._throttle_request()
-            response = await self.client.get(
-                url,
-                params=params,
-            )
-            response.raise_for_status()
-            
-            data = response.json()
+            data = await self._get_with_refresh(url, params)
             patterns = data.get('patterns', [])
-            
-            return patterns
-            
+            if not patterns and page == 1:
+                print(f"[Ravelry] No results for category '{pa_category}' (page 1)")
+            has_more = len(patterns) >= self.RESULTS_PER_PAGE
+            return patterns, has_more
         except httpx.HTTPError as e:
             print(f"[Ravelry] Error searching PA category '{pa_category}' page {page}: {e}")
-            return []
+            return [], False
     
     async def _fetch_pattern_details(self, pattern_id: int | str) -> Optional[Dict[str, Any]]:
         """Fetch full pattern details by ID or permalink"""
         url = f"{self.API_BASE_URL}/patterns/{pattern_id}.json"
-        
         try:
-            await self._throttle_request()
-            response = await self.client.get(url)
-            response.raise_for_status()
-            data = response.json()
+            data = await self._get_with_refresh(url)
             pattern = data.get('pattern') or (data.get('patterns') or [None])[0]
-            
             return pattern
         except httpx.HTTPError as e:
             print(f"[Ravelry] Error fetching pattern {pattern_id}: {e}")
             return None
+
+    async def _get_with_refresh(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """GET helper that refreshes token on 401/403 once before failing"""
+        for attempt in (1, 2):
+            await self._throttle_request()
+            response = await self.client.get(url, params=params)
+            try:
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                if attempt == 1 and status in (401, 403):
+                    refreshed = await self._refresh_access_token()
+                    if refreshed:
+                        continue
+                raise
+
+    async def _refresh_access_token(self) -> bool:
+        """Refresh Ravelry OAuth token using stored refresh_token; returns True if refreshed"""
+        if self._refresh_in_progress:
+            # Avoid concurrent refresh storms
+            return False
+        self._refresh_in_progress = True
+        try:
+            resp = self.supabase.table("oauth_configs").select("client_id, client_secret, refresh_token").eq("platform", "ravelry").limit(1).execute()
+            cfg = (resp.data or [{}])[0]
+            client_id = cfg.get("client_id")
+            client_secret = cfg.get("client_secret")
+            refresh_token = cfg.get("refresh_token")
+            if not (client_id and client_secret and refresh_token):
+                print("[Ravelry] Cannot refresh token: missing client_id/client_secret/refresh_token")
+                return False
+            async with httpx.AsyncClient() as http_client:
+                token_resp = await http_client.post(
+                    "https://www.ravelry.com/oauth2/token",
+                    auth=(client_id, client_secret),
+                    data={
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh_token,
+                        # Ravelry expects redirect_uri in refresh requests per error message
+                        "redirect_uri": cfg.get("redirect_uri"),
+                    },
+                )
+                if token_resp.status_code != 200:
+                    print(f"[Ravelry] Token refresh failed: {token_resp.status_code} {token_resp.text}")
+                    return False
+                token_data = token_resp.json()
+                new_access = token_data.get("access_token")
+                new_refresh = token_data.get("refresh_token", refresh_token)
+                if not new_access:
+                    print("[Ravelry] Token refresh failed: no access_token in response")
+                    return False
+                # Update db
+                update_payload = {
+                    "access_token": new_access,
+                    "refresh_token": new_refresh,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+                if token_data.get("expires_in"):
+                    expires_at = datetime.now(UTC) + timedelta(seconds=token_data["expires_in"])
+                    update_payload["token_expires_at"] = expires_at.isoformat()
+                self.supabase.table("oauth_configs").update(update_payload).eq("platform", "ravelry").execute()
+                # Update client header for subsequent requests
+                self.client.headers["Authorization"] = f"Bearer {new_access}"
+                return True
+        except Exception as exc:
+            print(f"[Ravelry] Token refresh exception: {exc}")
+            return False
+        finally:
+            self._refresh_in_progress = False
     
     def _create_product_dict(self, pattern: Dict[str, Any]) -> Dict[str, Any]:
         """Convert Ravelry pattern data to product format"""

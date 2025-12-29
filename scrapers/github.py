@@ -3,7 +3,7 @@ GitHub scraper for accessibility and assistive technology projects
 Uses GitHub REST API to search for repositories focused on assistive technologies
 """
 import httpx
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from .base_scraper import BaseScraper
 
@@ -39,7 +39,6 @@ class GitHubScraper(BaseScraper):
     
     API_BASE_URL = 'https://api.github.com'
     REQUESTS_PER_MINUTE = 30
-    MAX_PAGES_PER_TERM = 10
     RESULTS_PER_PAGE = 20
     
     def __init__(self, supabase_client, access_token: Optional[str] = None):
@@ -111,36 +110,30 @@ class GitHubScraper(BaseScraper):
             for term_index, term in enumerate(self.SEARCH_TERMS):
                 if test_mode and products_found >= test_limit:
                     break
-                
-                # Search repositories with this term
-                for page in range(1, self.MAX_PAGES_PER_TERM + 1):
+
+                async for repos in self._paginate(lambda page: self._fetch_repositories(term, page)):
                     if test_mode and products_found >= test_limit:
                         break
-                    
-                    repos = await self._fetch_repositories(term, page)
-                    
-                    if not repos:
-                        break  # No more results
-                    
+
                     for repo in repos:
                         if test_mode and products_found >= test_limit:
                             break
-                        
+
                         products_found += 1
-                        
-                        # Check if product already exists by URL
+
                         existing = await self._product_exists(repo["html_url"])
-                        
+
                         if existing:
-                            # Update existing product
                             result = await self._update_product(existing["id"], repo)
                             if result:
                                 products_updated += 1
                         else:
-                            # Add new product
                             result = await self._create_product(repo)
                             if result:
                                 products_added += 1
+
+                if test_mode and products_found >= test_limit:
+                    break
             
             duration = (datetime.now() - start_time).total_seconds()
             
@@ -165,8 +158,11 @@ class GitHubScraper(BaseScraper):
                 'error_message': str(e),
             }
     
-    async def _fetch_repositories(self, term: str, page: int) -> List[Dict[str, Any]]:
-        """Fetch repositories from GitHub API for a search term"""
+    async def _fetch_repositories(self, term: str, page: int) -> Tuple[List[Dict[str, Any]], bool]:
+        """Fetch one page of repositories from GitHub API for a search term.
+
+        Returns a tuple of (filtered_items, has_more).
+        """
         quoted_term = f'"{term}"'
         url = f"{self.API_BASE_URL}/search/repositories"
         params = {
@@ -186,23 +182,18 @@ class GitHubScraper(BaseScraper):
             response.raise_for_status()
             
             data = response.json()
-            
-            repos = []
-            
-            if data.get('items'):
-                for item in data['items']:
-                    # Less restrictive filter - just avoid pure documentation projects
-                    if not self._is_documentation_only(item):
-                        repos.append(item)
-            
-            return repos
+            items = data.get('items', [])
+            filtered = [item for item in items if not self._is_documentation_only(item)]
+
+            has_more = len(items) >= self.RESULTS_PER_PAGE
+            return filtered, has_more
             
         except httpx.HTTPError as e:
             print(f"[GitHub] HTTP Error fetching repositories for term '{term}': {e}")
-            return []
+            return [], False
         except Exception as e:
             print(f"[GitHub] Error fetching repositories for term '{term}': {type(e).__name__}: {e}")
-            return []
+            return [], False
     
     def _is_documentation_only(self, repo: Dict[str, Any]) -> bool:
         """Check if repository is pure documentation (no code)"""
@@ -245,16 +236,18 @@ class GitHubScraper(BaseScraper):
         if language and language not in seen:
             tags.append(language)
         
-        # Convert stars to a 5-star rating: normalize based on common thresholds
-        # 0-10 stars = 2, 10-50 = 3, 50-100 = 4, 100+ = 5
-        if stars >= 100:
+        # Convert stars to a 5-star rating based on GitHub star distribution
+        # 100,000+ stars = 5, 10,000+ = 4, 1,000+ = 3, 100+ = 2, 10+ = 1
+        if stars > 100000:
             star_rating = 5.0
-        elif stars >= 50:
+        elif stars > 10000:
             star_rating = 4.0
-        elif stars >= 10:
+        elif stars > 1000:
             star_rating = 3.0
-        elif stars > 0:
+        elif stars > 100:
             star_rating = 2.0
+        elif stars > 10:
+            star_rating = 1.0
         else:
             star_rating = None
         

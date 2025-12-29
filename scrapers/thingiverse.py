@@ -3,7 +3,7 @@ Thingiverse scraper for accessibility and assistive devices
 Uses Thingiverse API with OAuth authentication
 """
 import httpx
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from .base_scraper import BaseScraper
 from urllib.parse import quote
@@ -125,13 +125,7 @@ class ThingiverseScraper(BaseScraper):
                 if test_mode and products_found >= test_limit:
                     break
                 
-                remaining = None
-                if test_mode:
-                    remaining = max(test_limit - products_found, 0)
-                    if remaining <= 0:
-                        break
-
-                things = await self._search_things(term, max_hits=remaining)
+                things = await self._search_things(term)
                 print(f"[Thingiverse] term='{term}' hits={len(things)}")
                 # Debug: list hits returned for this term
                 for t in things:
@@ -206,75 +200,73 @@ class ThingiverseScraper(BaseScraper):
                 'error_message': str(e),
             }
     
-    async def _search_things(self, term: str, max_hits: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Search Thingiverse for things matching a term with simple pagination.
+    async def _search_things(self, term: str) -> List[Dict[str, Any]]:
+        """Search Thingiverse for things matching a term with pagination via helper.
 
         Uses the documented `GET /search` endpoint with `q` query parameter.
         """
-        url = f"{self.API_BASE_URL}/search/{term}/?type=things"
         hits: List[Dict[str, Any]] = []
-        page = 1
+        per_page = self.RESULTS_PER_PAGE
 
-        while page <= self.MAX_PAGES:
-            per_page = self.RESULTS_PER_PAGE
-            if max_hits is not None:
-                remaining = max(max_hits - len(hits), 0)
-                if remaining <= 0:
-                    break
-                per_page = min(per_page, remaining)
-
-            try:
-                response = await self.client.get(
-                    url,
-                    headers={
-                        'Authorization': f'Bearer {self.access_token}',
-                        'Accept': 'application/json',
-                        'User-Agent': self.USER_AGENT,
-                    },
-                    timeout=15.0,
-                )
-                if response.status_code in (401, 403):
-                    print(
-                        f"[Thingiverse] Auth error status={response.status_code} term='{term}' body={response.text[:200]}"
-                    )
-                response.raise_for_status()
-
-                data = response.json()
-                # Diagnostics: summarize response structure
-                if isinstance(data, list):
-                    print(
-                        f"[Thingiverse] API response type=list n={len(data)} keys_first={list(data[0].keys())[:5] if data else []}"
-                    )
-                    page_hits = data
-                else:
-                    keys = list(data.keys())
-                    page_hits = data.get('hits', [])
-                    print(
-                        f"[Thingiverse] API response type=dict keys={keys[:8]} hits_len={len(page_hits)}"
-                    )
-
-                if not page_hits:
-                    print(
-                        f"[Thingiverse] Empty search results term='{term}' page={page} status={response.status_code} "
-                        f"body={response.text[:300]}"
-                    )
-                    break
-
-                hits.extend(page_hits)
-
-                if max_hits is not None and len(hits) >= max_hits:
-                    break
-
-                # Stop if fewer than requested were returned (no more pages)
-                if len(page_hits) < per_page:
-                    break
-
-                page += 1
-            except httpx.HTTPError as e:
-                print(f"[Thingiverse] Error searching for term '{term}' page={page}: {e}")
-                break
+        async for page_hits in self._paginate(
+            lambda page: self._fetch_things_page(term, page, per_page),
+            max_pages=self.MAX_PAGES,
+        ):
+            hits.extend(page_hits)
 
         return hits
+
+    async def _fetch_things_page(self, term: str, page: int, per_page: int) -> Tuple[List[Dict[str, Any]], bool]:
+        """Fetch a single Thingiverse search page and indicate if more pages remain."""
+        url = f"{self.API_BASE_URL}/search/{term}/"
+
+        try:
+            response = await self.client.get(
+                url,
+                params={
+                    "type": "things",
+                    "page": page,
+                    "per_page": per_page,
+                },
+                headers={
+                    'Authorization': f'Bearer {self.access_token}',
+                    'Accept': 'application/json',
+                    'User-Agent': self.USER_AGENT,
+                },
+                timeout=15.0,
+            )
+            if response.status_code in (401, 403):
+                print(
+                    f"[Thingiverse] Auth error status={response.status_code} term='{term}' body={response.text[:200]}"
+                )
+            response.raise_for_status()
+
+            data = response.json()
+            if isinstance(data, list):
+                print(
+                    f"[Thingiverse] API response type=list n={len(data)} keys_first={list(data[0].keys())[:5] if data else []}"
+                )
+                page_hits = data
+            else:
+                keys = list(data.keys())
+                page_hits = data.get('hits', [])
+                print(
+                    f"[Thingiverse] API response type=dict keys={keys[:8]} hits_len={len(page_hits)}"
+                )
+
+            if not page_hits:
+                print(
+                    f"[Thingiverse] Empty search results term='{term}' page={page} status={response.status_code} "
+                    f"body={response.text[:300]}"
+                )
+                return [], False
+
+            has_more = len(page_hits) >= per_page
+            return page_hits, has_more
+
+        except httpx.HTTPError as e:
+            print(f"[Thingiverse] Error searching for term '{term}' page={page}: {e}")
+            return [], False
 
     @staticmethod
     def _matches_search_term(thing: Dict[str, Any], term: str) -> bool:
