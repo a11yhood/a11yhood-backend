@@ -294,6 +294,40 @@ async def remove_product_from_collection(
     return response.data[0]
 
 
+@router.delete("/{collection_id}/products", response_model=CollectionResponse)
+async def remove_all_products_from_collection(
+    collection_id: str,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_db),
+):
+    """Remove all products from a collection"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    user_id = current_user.get("id")
+    
+    # Get collection
+    response = db.table("collections").select("*").eq("id", collection_id).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    
+    collection = response.data[0]
+    
+    # Check ownership
+    if collection.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Only the owner can modify this collection")
+    
+    # Clear all products
+    db.table("collections").update({
+        "product_ids": [],
+        "updated_at": datetime.now(UTC)
+    }).eq("id", collection_id).execute()
+    
+    # Return updated collection
+    response = db.table("collections").select("*").eq("id", collection_id).execute()
+    return response.data[0]
+
+
 @router.post("/{collection_id}/products", response_model=CollectionResponse)
 async def add_multiple_products_to_collection(
     collection_id: str,

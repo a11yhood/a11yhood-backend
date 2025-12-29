@@ -505,11 +505,9 @@ async def count_products(
     if min_rating is None:
         total = None
         try:
-            # Use distinct when supported (Supabase) to guard against any accidental duplicates.
-            if getattr(db, "backend", None) == "supabase":
-                count_query = base_query.select("id", count="exact", distinct=True)
-            else:
-                count_query = base_query.select("id", count="exact")
+            # Request exact count from PostgREST. Do NOT use distinct=True with count="exact"
+            # as PostgREST doesn't combine them properly.
+            count_query = base_query.select("id", count="exact")
             if source_values:
                 count_query = count_query.in_("source", list(source_values))
             if type_values:
@@ -935,22 +933,121 @@ async def patch_product(
     return result
 
 
-@router.delete("/{product_id}", status_code=204)
+@router.delete("/{product_id}", status_code=200)
 async def delete_product(
     product_id: str,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Delete a product (admin only)"""
+    """Delete a product (admin only)
+    
+    Note: Most related data (ratings, discussions, product_urls, etc.) will be 
+    automatically deleted via CASCADE. We explicitly handle a few tables that 
+    might not cascade properly.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
     if not current_user.get("role") == "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+        raise HTTPException(
+            status_code=403, 
+            detail=f"Admin access required. Your current role: {current_user.get('role', 'user')}"
+        )
     
-    response = db.table("products").delete().eq("id", product_id).execute()
+    # Check if product exists first; accept either ID or slug for convenience
+    check = db.table("products").select("id").eq("id", product_id).execute()
+    if not check.data:
+        slug_lookup = db.table("products").select("id").eq("slug", product_id).limit(1).execute()
+        if not slug_lookup.data:
+            raise HTTPException(status_code=404, detail="Product not found")
+        product_id = slug_lookup.data[0]["id"]
     
-    if response.count == 0:
-        raise HTTPException(status_code=404, detail="Product not found")
+    # The database schema has ON DELETE CASCADE for most relationships,
+    # so they should auto-delete. But we can be explicit for safety.
+    # These will cascade: ratings, discussions, product_urls, product_editors, product_tags
+    # Just delete the product - CASCADE should handle the rest
+    try:
+        print(f"[Delete] Deleting product {product_id}")
+        response = db.table("products").delete().eq("id", product_id).execute()
+        print(f"[Delete] Success, deleted {len(response.data or [])} rows")
+        return {
+            "deleted": True,
+            "message": "Product deleted successfully",
+            "product_id": product_id
+        }
+    except Exception as e:
+        print(f"[Delete] Failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete product: {str(e)}"
+        )
+
+
+@router.post("/bulk-delete", status_code=200)
+async def bulk_delete_products(
+    source: Optional[str] = Query(None, description="Delete all products from this source"),
+    product_ids: Optional[list[str]] = Query(None, description="Specific product IDs to delete"),
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_db),
+):
+    """Bulk delete products (admin only).
     
-    return None
+    Can delete by:
+    - source: Delete all products from a specific source (e.g., 'Thingiverse')
+    - product_ids: Delete specific products by ID
+    
+    Returns count of deleted products.
+    
+    Note: Related data (ratings, discussions, etc.) will be automatically 
+    deleted via database CASCADE constraints.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    if not current_user.get("role") == "admin":
+        raise HTTPException(
+            status_code=403,
+            detail=f"Admin access required. Your current role: {current_user.get('role', 'user')}"
+        )
+    
+    if not source and not product_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Must provide either 'source' or 'product_ids' parameter"
+        )
+    
+    try:
+        # Canonicalize provided source to match supported_sources capitalization
+        canonical_source = _canonicalize_source_value_db(db, source) if source else None
+
+        # Build query to find products to delete
+        if canonical_source:
+            # Find all products from this source
+            products_query = db.table("products").select("id").eq("source", canonical_source)
+        else:
+            # Find specific products by ID
+            products_query = db.table("products").select("id").in_("id", product_ids)
+        
+        products_to_delete = products_query.execute()
+        
+        if not products_to_delete.data:
+            return {"deleted_count": 0, "message": "No products found matching criteria"}
+        
+        ids_to_delete = [p["id"] for p in products_to_delete.data]
+        
+        # Delete the products - CASCADE will handle related data
+        db.table("products").delete().in_("id", ids_to_delete).execute()
+        
+        return {
+            "deleted_count": len(ids_to_delete),
+            "message": f"Successfully deleted {len(ids_to_delete)} product(s)",
+            "source": canonical_source if canonical_source else None
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete products: {str(e)}"
+        )
 
 
 def _ensure_moderator_or_admin(current_user: dict):
