@@ -58,6 +58,21 @@ def _canonicalize_sources(db, values: list[str]) -> list[str]:
     except Exception:
         return values
 
+def _get_supported_source_name_map(db) -> dict[str, str]:
+    """Return mapping of lowercase source name -> canonical name from supported_sources."""
+    try:
+        rows = db.table("supported_sources").select("name").execute()
+        return {str(r.get("name")).strip().lower(): str(r.get("name")).strip() for r in (rows.data or []) if r.get("name")}
+    except Exception:
+        return {}
+
+def _canonicalize_source_value_db(db, value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    key = str(value).strip().lower()
+    name_map = _get_supported_source_name_map(db)
+    return name_map.get(key, value)
+
 
 @router.get("/sources")
 async def get_product_sources(
@@ -66,26 +81,59 @@ async def get_product_sources(
     """Get all unique source values from products table.
     
     Returns a sorted list of distinct sources for filter UI.
-    Uses supported_sources as the canonical list so options are stable
-    regardless of current search filters.
+    Uses supported_sources as the canonical list and unions with actual
+    source values found in products. All values are camelcased to canonical
+    names when available; otherwise title-cased.
     """
     try:
-        # Prefer canonical supported_sources table so UI always has full list.
+        # Canonical list and mapping from supported_sources
         response = db.table("supported_sources").select("name").execute()
-        sources = {
+        canonical_list = [
             row["name"].strip()
             for row in (response.data or [])
             if row.get("name") and row.get("name").strip()
-        }
-        # Fallback to distinct product sources if the table is empty/missing.
-        if not sources:
-            product_sources = db.table("products").select("source").execute()
-            sources = {
-                row["source"].strip()
-                for row in (product_sources.data or [])
-                if row.get("source") and row.get("source").strip()
-            }
-        return {"sources": sorted(sources)}
+        ]
+        canonical_set = set(canonical_list)
+        name_map = {n.lower(): n for n in canonical_list}
+
+        # Distinct sources present in products
+        product_sources: set[str] = set()
+        try:
+            if getattr(db, "backend", None) == "supabase":
+                resp = db.table("products").select("source", distinct=True).execute()
+                product_sources = {
+                    str(row.get("source")).strip()
+                    for row in (resp.data or [])
+                    if row.get("source") and str(row.get("source")).strip()
+                }
+            else:
+                raise TypeError("distinct not supported for this backend")
+        except TypeError:
+            # Fallback: paginate through products and collect unique sources
+            page_size = 1000
+            offset = 0
+            while True:
+                resp = db.table("products").select("source").range(offset, offset + page_size - 1).execute()
+                rows = resp.data or []
+                if not rows:
+                    break
+                for row in rows:
+                    s = row.get("source")
+                    if s and str(s).strip():
+                        product_sources.add(str(s).strip())
+                if len(rows) < page_size:
+                    break
+                offset += page_size
+
+        # Canonicalize product sources to supported_sources names; fallback to title case
+        canonicalized_products = set()
+        for s in product_sources:
+            key = s.lower()
+            canonicalized_products.add(name_map.get(key, s.title()))
+
+        # Union canonical and product-derived lists
+        combined = canonical_set.union(canonicalized_products)
+        return {"sources": sorted(combined)}
     except Exception:
         return {"sources": []}
 
@@ -205,45 +253,46 @@ async def get_product_types(
     regardless of current search filters.
     """
     try:
-        # Prefer canonical valid_categories table.
+        # Canonical list from valid_categories
         response = db.table("valid_categories").select("category").execute()
-        types = {
+        canonical_types = {
             row["category"].strip()
             for row in (response.data or [])
             if row.get("category") and row.get("category").strip()
         }
-        # Fallback to distinct product types if table is empty/missing.
-        if not types:
-            # Try Supabase distinct selection first to avoid scanning all rows.
-            try:
-                if getattr(db, "backend", None) == "supabase":
-                    resp = db.table("products").select("type", distinct=True).execute()
-                    types = {
-                        str(row.get("type")).strip()
-                        for row in (resp.data or [])
-                        if row.get("type") and str(row.get("type")).strip()
-                    }
-                else:
-                    raise TypeError("distinct not supported for this backend")
-            except TypeError:
-                # Fallback: paginate through all products to avoid default caps (e.g., 1000) and gather unique types.
-                page_size = 1000
-                offset = 0
-                found: set[str] = set()
-                while True:
-                    resp = db.table("products").select("type").range(offset, offset + page_size - 1).execute()
-                    rows = resp.data or []
-                    if not rows:
-                        break
-                    for row in rows:
-                        t = row.get("type")
-                        if t and str(t).strip():
-                            found.add(str(t).strip())
-                    if len(rows) < page_size:
-                        break
-                    offset += page_size
-                types = found
-        return {"types": sorted(types)}
+
+        # Distinct types present in products
+        product_types: set[str] = set()
+        try:
+            if getattr(db, "backend", None) == "supabase":
+                resp = db.table("products").select("type", distinct=True).execute()
+                product_types = {
+                    str(row.get("type")).strip()
+                    for row in (resp.data or [])
+                    if row.get("type") and str(row.get("type")).strip()
+                }
+            else:
+                raise TypeError("distinct not supported for this backend")
+        except TypeError:
+            # Fallback: paginate through products and collect unique types (avoids default caps)
+            page_size = 1000
+            offset = 0
+            while True:
+                resp = db.table("products").select("type").range(offset, offset + page_size - 1).execute()
+                rows = resp.data or []
+                if not rows:
+                    break
+                for row in rows:
+                    t = row.get("type")
+                    if t and str(t).strip():
+                        product_types.add(str(t).strip())
+                if len(rows) < page_size:
+                    break
+                offset += page_size
+
+        # Combine canonical list and discovered product types
+        combined = canonical_types.union(product_types)
+        return {"types": sorted(combined)}
     except Exception as e:
         return {"types": []}
 
@@ -387,6 +436,9 @@ async def get_products(
             item["image_url"] = item.get("image")
         if "url" in item:
             item["source_url"] = item.get("url")
+        # Ensure canonical source display names using supported_sources
+        if "source" in item and item.get("source"):
+            item["source"] = _canonicalize_source_value_db(db, item.get("source"))
         item["tags"] = tags_by_product.get(item["id"], [])
         item["editor_ids"] = owners_by_product.get(item["id"], [])
         normalized.append(item)
@@ -783,7 +835,7 @@ async def update_product(
     if "image_url" in product_data and product.image_url is not None:
         db_data["image"] = str(product.image_url)
     if "source" in product_data:
-        db_data["source"] = product_data["source"]
+        db_data["source"] = _canonicalize_source_value_db(db, product_data["source"]) or product_data["source"]
     if "type" in product_data and product.type is not None:
         db_data["type"] = product.type
     if "external_id" in product_data:
@@ -855,7 +907,7 @@ async def patch_product(
     if "image_url" in product_data and product.image_url is not None:
         db_data["image"] = str(product.image_url)
     if "source" in product_data:
-        db_data["source"] = product_data["source"]
+        db_data["source"] = _canonicalize_source_value_db(db, product_data["source"]) or product_data["source"]
     if "type" in product_data and product.type is not None:
         db_data["type"] = product.type
     if "external_id" in product_data:
