@@ -33,12 +33,12 @@ def main():
             "platform": "thingiverse",
             "terms": [
                 "accessibility",
-                "assistive device",
-                "arthritis grip",
-                "adaptive tool",
-                "mobility aid",
-                "tremor stabilizer",
-                "adaptive utensil",
+                "assistive+device",
+                "arthritis+grip",
+                "adaptive+tool",
+                "mobility+aid",
+                "tremor+stabilizer",
+                "adaptive+utensil",
             ],
         },
         {

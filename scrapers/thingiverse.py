@@ -17,18 +17,21 @@ class ThingiverseScraper(BaseScraper):
     """
     
     SEARCH_TERMS = [
+        # Default terms encoded with '+' for spaces as expected
         'accessibility',
-        'assistive device',
-        'arthritis grip',
-        'adaptive tool',
-        'mobility aid',
-        'tremor stabilizer',
-        'adaptive utensil'
+        'assistive+device',
+        'arthritis+grip',
+        'adaptive+tool',
+        'mobility+aid',
+        'tremor+stabilizer',
+        'adaptive+utensil'
     ]
     
     API_BASE_URL = 'https://api.thingiverse.com'
     REQUESTS_PER_MINUTE = 5
     RESULTS_PER_PAGE = 20
+    MAX_PAGES = 100  # Guard against unbounded pagination in case of broad terms
+    USER_AGENT = "a11yhood-backend/thingiverse-scraper"
     
     def __init__(self, supabase_client, access_token: Optional[str] = None):
         super().__init__(supabase_client, access_token)
@@ -69,7 +72,12 @@ class ThingiverseScraper(BaseScraper):
         """Fetch thing details from Thingiverse API with debug output."""
         try:
             url = f"https://api.thingiverse.com/things/{thing_id}"
-            headers = {"Authorization": f"Bearer {self.access_token}"}
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Accept": "application/json",
+                "User-Agent": self.USER_AGENT,
+            }
+            await self._throttle_request()
             response = await self.client.get(url, headers=headers, timeout=10.0)
             if response.status_code != 200:
                 print(
@@ -117,19 +125,30 @@ class ThingiverseScraper(BaseScraper):
                 if test_mode and products_found >= test_limit:
                     break
                 
-                things = await self._search_things(term)
+                remaining = None
+                if test_mode:
+                    remaining = max(test_limit - products_found, 0)
+                    if remaining <= 0:
+                        break
+
+                things = await self._search_things(term, max_hits=remaining)
                 print(f"[Thingiverse] term='{term}' hits={len(things)}")
+                # Debug: list hits returned for this term
+                for t in things:
+                    print(
+                        f"[Thingiverse] term='{term}' hit id={t.get('id')} name={t.get('name')} url={t.get('public_url')}"
+                    )
                 
                 for thing in things:
+                    # Respect test limit after filtering
                     if test_mode and products_found >= test_limit:
                         break
-                    
-                    products_found += 1
+
                     print(f"[Thingiverse] Fetching details id={thing.get('id')} url={thing.get('public_url')}")
-                    
+
                     # Fetch full thing details
                     thing_details = await self._fetch_thing_details(thing['id'])
-                    
+
                     if not thing_details:
                         print(f"[Thingiverse] Skip id={thing.get('id')} (no details)")
                         continue
@@ -138,7 +157,7 @@ class ThingiverseScraper(BaseScraper):
                     url = thing_details.get('public_url') or f"https://www.thingiverse.com/thing:{thing['id']}"
                     existing = await self._product_exists(url)
                     print(f"[Thingiverse] Exists? {bool(existing)} url={url}")
-                    
+
                     if existing:
                         # Update existing product
                         result = await self._update_product(existing["id"], thing_details)
@@ -187,43 +206,112 @@ class ThingiverseScraper(BaseScraper):
                 'error_message': str(e),
             }
     
-    async def _search_things(self, term: str) -> List[Dict[str, Any]]:
-        """Search Thingiverse for things matching a term"""
-        # Encode the term to avoid breaking the path (spaces, special chars)
-        safe_term = quote(term, safe="")
-        url = f"{self.API_BASE_URL}/search/{safe_term}"
-        params = {
-            'type': 'things',
-            'per_page': self.RESULTS_PER_PAGE,
-            'page': 1,
-            'sort': 'relevant',
-        }
-        
-        try:
-            response = await self.client.get(
-                url,
-                params=params,
-                headers={
-                    'Authorization': f'Bearer {self.access_token}',
-                    'Accept': 'application/json',
-                }
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            hits = data.get('hits', [])
+    async def _search_things(self, term: str, max_hits: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Search Thingiverse for things matching a term with simple pagination.
 
-            # Debug: surface empty search responses to help diagnose token/scope/search issues.
-            if not hits:
-                print(
-                    f"[Thingiverse] Empty search results term='{term}' status={response.status_code} "
-                    f"body={response.text[:300]}"
+        Uses the documented `GET /search` endpoint with `q` query parameter.
+        """
+        url = f"{self.API_BASE_URL}/search/{term}/?type=things"
+        hits: List[Dict[str, Any]] = []
+        page = 1
+
+        while page <= self.MAX_PAGES:
+            per_page = self.RESULTS_PER_PAGE
+            if max_hits is not None:
+                remaining = max(max_hits - len(hits), 0)
+                if remaining <= 0:
+                    break
+                per_page = min(per_page, remaining)
+
+            try:
+                response = await self.client.get(
+                    url,
+                    headers={
+                        'Authorization': f'Bearer {self.access_token}',
+                        'Accept': 'application/json',
+                        'User-Agent': self.USER_AGENT,
+                    },
+                    timeout=15.0,
                 )
-            return hits
-            
-        except httpx.HTTPError as e:
-            print(f"[Thingiverse] Error searching for term '{term}': {e}")
-            return []
+                if response.status_code in (401, 403):
+                    print(
+                        f"[Thingiverse] Auth error status={response.status_code} term='{term}' body={response.text[:200]}"
+                    )
+                response.raise_for_status()
+
+                data = response.json()
+                # Diagnostics: summarize response structure
+                if isinstance(data, list):
+                    print(
+                        f"[Thingiverse] API response type=list n={len(data)} keys_first={list(data[0].keys())[:5] if data else []}"
+                    )
+                    page_hits = data
+                else:
+                    keys = list(data.keys())
+                    page_hits = data.get('hits', [])
+                    print(
+                        f"[Thingiverse] API response type=dict keys={keys[:8]} hits_len={len(page_hits)}"
+                    )
+
+                if not page_hits:
+                    print(
+                        f"[Thingiverse] Empty search results term='{term}' page={page} status={response.status_code} "
+                        f"body={response.text[:300]}"
+                    )
+                    break
+
+                hits.extend(page_hits)
+
+                if max_hits is not None and len(hits) >= max_hits:
+                    break
+
+                # Stop if fewer than requested were returned (no more pages)
+                if len(page_hits) < per_page:
+                    break
+
+                page += 1
+            except httpx.HTTPError as e:
+                print(f"[Thingiverse] Error searching for term '{term}' page={page}: {e}")
+                break
+
+        return hits
+
+    @staticmethod
+    def _matches_search_term(thing: Dict[str, Any], term: str) -> bool:
+        """
+        Ensure the returned Thingiverse item actually matches the search term.
+
+        Matching strategy:
+        - Split the search term into words (by whitespace)
+        - Build a combined lowercased text from name, description, tags, categories
+        - Require that ALL words from the term appear in the combined text
+        """
+        try:
+            if not term:
+                return True
+
+            # Normalize term into words (spaces or hyphens treated as separators)
+            raw = term.lower().replace('+', ' ')
+            words = [w for w in raw.replace('-', ' ').split() if w]
+            if not words:
+                return True
+
+            # Collect candidate text fields
+            name = (thing.get('name') or '').lower()
+            description = (thing.get('description') or '').lower()
+            tags = []
+            for tag in thing.get('tags') or []:
+                t = tag.get('name') or tag.get('tag')
+                if t:
+                    tags.append(t.lower())
+            categories = [cat.get('name', '').lower() for cat in (thing.get('categories') or [])]
+
+            combined = ' '.join([name, description, ' '.join(tags), ' '.join(categories)])
+
+            return all(word in combined for word in words)
+        except Exception:
+            # If anything goes wrong, do not exclude
+            return True
     
     def _is_image_url(self, url: Optional[str]) -> bool:
         if not url:

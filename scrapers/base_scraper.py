@@ -233,11 +233,8 @@ class BaseScraper(ABC):
             product_data = self._canonicalize_source(product_data)
             # Extract tags for relationship table; avoid inserting into products table
             tag_names = product_data.pop("tags", None)
-            # Convert datetime fields to ISO strings for Supabase/PostgREST compatibility
-            if product_data:
-                for k, v in list(product_data.items()):
-                    if isinstance(v, datetime):
-                        product_data[k] = v.isoformat()
+            # Recursively convert any datetime fields to ISO strings
+            product_data = self._convert_datetimes(product_data)
             result = self.supabase.table("products").insert(product_data).execute()
             created = result.data[0] if result.data else None
             if tag_names and created and created.get("id"):
@@ -251,9 +248,7 @@ class BaseScraper(ABC):
             # Fall back if target schema is missing optional image fields
             if product_data and "Could not find the 'image' column" in str(e):
                 sanitized = {k: v for k, v in product_data.items() if k not in {"image", "image_alt"}}
-                for k, v in list(sanitized.items()):
-                    if isinstance(v, datetime):
-                        sanitized[k] = v.isoformat()
+                sanitized = self._convert_datetimes(sanitized)
                 try:
                     result = self.supabase.table("products").insert(sanitized).execute()
                     created = result.data[0] if result.data else None
@@ -298,6 +293,8 @@ class BaseScraper(ABC):
             product_data.pop('scraped_at', None)  # Keep original scrape time
             # Use ISO string to avoid JSON serialization failures when sending to Supabase
             product_data['updated_at'] = datetime.now(UTC).replace(tzinfo=None).isoformat()
+            # Recursively convert any datetime fields to ISO strings
+            product_data = self._convert_datetimes(product_data)
             
             result = self.supabase.table("products").update(product_data).eq("id", product_id).execute()
             if tag_names is not None:
@@ -311,7 +308,7 @@ class BaseScraper(ABC):
             if "Could not find the 'image' column" in str(e):
                 sanitized = {k: v for k, v in product_data.items() if k not in {"image", "image_alt"}}
                 try:
-                    result = self.supabase.table("products").update(sanitized).eq("id", product_id).execute()
+                    result = self.supabase.table("products").update(self._convert_datetimes(sanitized)).eq("id", product_id).execute()
                     if tag_names is not None:
                         try:
                             from routers.products import set_product_tags
@@ -324,6 +321,21 @@ class BaseScraper(ABC):
                     print(f"[{self.get_source_name()}] Retry after removing image fields failed: {retry_error}")
             print(f"[{self.get_source_name()}] Error updating product: {e}")
             return False
+
+    @staticmethod
+    def _convert_datetimes(obj: Any) -> Any:
+        """Recursively convert datetime objects to ISO strings in dicts/lists.
+
+        Ensures all payloads sent to Supabase are JSON-serializable.
+        """
+        from datetime import datetime
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, dict):
+            return {k: BaseScraper._convert_datetimes(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [BaseScraper._convert_datetimes(v) for v in obj]
+        return obj
 
 
 class ScraperUtilities:
