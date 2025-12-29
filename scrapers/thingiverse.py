@@ -185,7 +185,7 @@ class ThingiverseScraper(BaseScraper):
             )
             
             return {
-                'source': 'thingiverse',
+                'source': 'Thingiverse',
                 'products_found': products_found,
                 'products_added': products_added,
                 'products_updated': products_updated,
@@ -197,7 +197,7 @@ class ThingiverseScraper(BaseScraper):
             print(f"[Thingiverse] Fatal scrape error: {e}")
             duration = (datetime.now() - start_time).total_seconds()
             return {
-                'source': 'thingiverse',
+                'source': 'Thingiverse',
                 'products_found': products_found,
                 'products_added': products_added,
                 'products_updated': products_updated,
@@ -396,7 +396,7 @@ class ThingiverseScraper(BaseScraper):
             'description': thing.get('description', ''),
             'url': url,
             'image': image,
-            'source': 'thingiverse',
+            'source': 'Thingiverse',
             'type': product_type,
             'tags': tags,
             'scraped_at': datetime.now(),

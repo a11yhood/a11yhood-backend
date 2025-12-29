@@ -145,7 +145,7 @@ class GitHubScraper(BaseScraper):
             duration = (datetime.now() - start_time).total_seconds()
             
             return {
-                'source': 'github',
+                'source': 'GitHub',
                 'products_found': products_found,
                 'products_added': products_added,
                 'products_updated': products_updated,
@@ -156,7 +156,7 @@ class GitHubScraper(BaseScraper):
         except Exception as e:
             duration = (datetime.now() - start_time).total_seconds()
             return {
-                'source': 'github',
+                'source': 'GitHub',
                 'products_found': products_found,
                 'products_added': products_added,
                 'products_updated': products_updated,
@@ -274,7 +274,7 @@ class GitHubScraper(BaseScraper):
             'description': repo.get('description', ''),
             'url': repo['html_url'],
             'image': repo['owner'].get('avatar_url'),
-            'source': 'github',
+            'source': 'GitHub',
             'type': 'Software',
             'tags': tags,
             'scraped_at': datetime.now().isoformat(),

@@ -138,7 +138,7 @@ class RavelryScraper(BaseScraper):
             duration = (datetime.now() - start_time).total_seconds()
             
             return {
-                'source': 'ravelry',
+                'source': 'Ravelry',
                 'products_found': products_found,
                 'products_added': products_added,
                 'products_updated': products_updated,
@@ -149,7 +149,7 @@ class RavelryScraper(BaseScraper):
         except Exception as e:
             duration = (datetime.now() - start_time).total_seconds()
             return {
-                'source': 'ravelry',
+                'source': 'Ravelry',
                 'products_found': products_found,
                 'products_added': products_added,
                 'products_updated': products_updated,
@@ -301,7 +301,7 @@ class RavelryScraper(BaseScraper):
             'description': description,
             'url': pattern_url,
             'image': image,
-            'source': 'ravelry',
+            'source': 'Ravelry',
             'type': product_type,
             'tags': unique_tags,
             'scraped_at': datetime.now().isoformat(),
