@@ -41,10 +41,11 @@ done
 if [ "$HELP" = true ]; then
   echo "Usage: ./start-prod.sh [OPTIONS]"
   echo ""
-  echo "Starts backend production server using Docker (production Supabase database)"
+  echo "Starts backend production server using Docker Compose v2 (production Supabase database)"
   echo ""
   echo "Prerequisites:"
   echo "  - Docker running (colima start)"
+  echo "  - Docker Compose v2 plugin available (docker compose)"
   echo "  - .env configured with production Supabase credentials"
   echo "  - Production Supabase project set up with schema applied"
   echo ""
@@ -60,6 +61,16 @@ if ! docker info >/dev/null 2>&1; then
   echo -e "${RED}✗ Docker is not running${NC}"
   echo "  Please start Docker (or Colima) first:"
   echo "    colima start"
+  exit 1
+fi
+
+# Ensure Docker Compose v2 plugin is available
+if ! docker compose version >/dev/null 2>&1; then
+  echo -e "${RED}✗ Docker Compose v2 plugin (docker compose) not found${NC}"
+  echo "  Install the Compose v2 plugin or use plain Docker script:"
+  echo "    - macOS: Use Docker Desktop (includes Compose v2)"
+  echo "    - Linux (Debian/Ubuntu): sudo apt-get install -y docker-compose-plugin"
+  echo "    - Fallback: ./start-prod-plain.sh"
   exit 1
 fi
 
@@ -106,7 +117,7 @@ echo ""
 
 # Build production image
 echo -e "${YELLOW}🔨 Building production Docker image...${NC} (t=$(ts))"
-if docker-compose build backend-prod 2>&1 | grep -q "Successfully built\|Image.*Built"; then
+if docker compose build backend-prod 2>&1 | grep -q "Successfully built\|Image.*Built"; then
   echo -e "${GREEN}✓ Image ready${NC}"
 else
   echo -e "${YELLOW}⚠️  Build completed with warnings (check output if needed)${NC}"
@@ -120,7 +131,7 @@ echo "   API documentation at: http://localhost:8001/docs"
 echo "   (Production uses port 8001, development uses port 8000)"
 echo ""
 
-docker-compose --profile production up -d backend-prod
+docker compose --profile production up -d backend-prod
 
 if [ $? -ne 0 ]; then
   echo -e "${RED}✗ Failed to start production container${NC}"
@@ -136,9 +147,9 @@ for i in {1..60}; do  # Production might take longer
   fi
   
   # Check if container is still running
-  if ! docker-compose ps backend-prod | grep -q "Up"; then
+  if ! docker compose ps backend-prod | grep -q "Up"; then
     echo -e "${RED}✗ Container is not running${NC}"
-    echo "  Check logs with: docker-compose logs backend-prod"
+    echo "  Check logs with: docker compose logs backend-prod"
     exit 1
   fi
   
@@ -159,8 +170,8 @@ done
 # Final check
 if ! curl -s http://localhost:8001/health >/dev/null 2>&1; then
   echo -e "${RED}✗ Server failed to start within 60 seconds${NC}"
-  echo "  Check logs with: docker-compose logs backend-prod"
-  docker-compose logs --tail=50 backend-prod
+  echo "  Check logs with: docker compose logs backend-prod"
+  docker compose logs --tail=50 backend-prod
   exit 1
 fi
 
@@ -174,7 +185,7 @@ echo -e "${BLUE}📚 API Documentation:${NC}"
 echo "   http://localhost:8001/docs"
 echo ""
 echo -e "${BLUE}💡 To monitor logs:${NC}"
-echo "   docker-compose logs -f backend-prod"
+echo "   docker compose logs -f backend-prod"
 echo ""
 echo -e "${BLUE}🛑 To stop the server:${NC}"
 echo "   ./stop-prod.sh"
@@ -182,5 +193,5 @@ echo ""
 echo -e "${YELLOW}⚠️  Remember:${NC}"
 echo "   - This is PRODUCTION mode with real authentication"
 echo "   - Never reset or seed the production database"
-echo "   - Monitor logs with: docker-compose logs -f backend-prod"
+echo "   - Monitor logs with: docker compose logs -f backend-prod"
 echo ""
