@@ -1046,15 +1046,12 @@ async def bulk_delete_products(
         # Deduplicate IDs to avoid redundant delete calls
         ids_to_delete = list(dict.fromkeys(p["id"] for p in products_to_delete.data))
         
-        # Delete the products - CASCADE will handle related data. Use minimal return
-        # payload to avoid PostgREST JSON generation on deleted rows (e.g., NaN fields).
-        products_table = db.table("products")
-        delete_query = (
-            products_table.delete(returning="minimal")
-            if getattr(db, "backend", None) == "supabase"
-            else products_table.delete()
-        )
-        delete_query.in_("id", ids_to_delete).execute()
+        print(f"[Bulk Delete] About to delete {len(ids_to_delete)} products: {ids_to_delete[:5]}...")
+        print(f"[Bulk Delete] Backend type: {getattr(db, 'backend', 'unknown')}")
+        
+        # Delete the products - CASCADE will handle related data
+        result = db.table("products").delete().in_("id", ids_to_delete).execute()
+        print(f"[Bulk Delete] Delete result: {result}")
         
         return {
             "deleted_count": len(ids_to_delete),
