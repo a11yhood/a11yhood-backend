@@ -59,6 +59,10 @@ class BaseScraper(ABC):
         self.client = httpx.AsyncClient()
         self.last_request_time = 0.0
         self._supported_source_cache: Optional[dict[str, str]] = None
+        # Test-mode session state
+        self._test_mode_enabled: bool = False
+        self._test_mode_limit: int = 0
+        self._test_mode_yielded: int = 0
         
     async def close(self):
         """Clean up resources"""
@@ -121,6 +125,7 @@ class BaseScraper(ABC):
         start_page: int = 1,
         max_pages: Optional[int] = None,
         stop_on_empty: bool = True,
+        respect_test_limit: bool = False,
     ) -> AsyncIterator[List[T]]:
         """Iterate through paginated API results without duplicating loops in scrapers.
 
@@ -141,7 +146,21 @@ class BaseScraper(ABC):
             items, has_more = await fetch_page(page)
 
             if items:
-                yield items
+                if respect_test_limit and self._test_mode_enabled:
+                    remaining = max(self._test_mode_limit - self._test_mode_yielded, 0)
+                    if remaining <= 0:
+                        break
+                    if len(items) > remaining:
+                        # Truncate items to remaining and stop pagination
+                        truncated = items[:remaining]
+                        self._test_mode_yielded += len(truncated)
+                        yield truncated
+                        break
+                    else:
+                        self._test_mode_yielded += len(items)
+                        yield items
+                else:
+                    yield items
             elif stop_on_empty and not has_more:
                 break
 
@@ -149,6 +168,17 @@ class BaseScraper(ABC):
                 break
 
             page += 1
+
+    def _begin_test_session(self, test_mode: bool, test_limit: int):
+        """Initialize test-mode counters for a scrape session.
+
+        Scrapers should call this once at the beginning of `scrape()`.
+        When `respect_test_limit=True` is passed to `_paginate`, pagination
+        will stop after `test_limit` total items have been yielded across pages.
+        """
+        self._test_mode_enabled = bool(test_mode)
+        self._test_mode_limit = int(test_limit or 0)
+        self._test_mode_yielded = 0
     
     async def _product_exists(self, url: str) -> Optional[Dict[str, Any]]:
         """

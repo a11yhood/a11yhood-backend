@@ -106,6 +106,9 @@ class ThingiverseScraper(BaseScraper):
         Returns:
             Dict with scraping results (products_found, products_added, etc.)
         """
+        # Initialize test-mode session for global item capping
+        self._begin_test_session(test_mode, test_limit)
+
         if not self.access_token:
             raise ValueError("Thingiverse access token is required")
         
@@ -126,7 +129,13 @@ class ThingiverseScraper(BaseScraper):
                     break
 
                 things = await self._search_things(term)
-                print(f"[Thingiverse] term='{term}' hits={len(things)}")
+                if test_mode:
+                    remaining = max(test_limit - products_found, 0)
+                    if remaining <= 0:
+                        break
+                    if len(things) > remaining:
+                        things = things[:remaining]
+                print(f"[Thingiverse] term='{term}' hits={len(things)} (capped={test_mode})")
                 # Debug: list hits returned for this term
                 for t in things:
                     print(
@@ -214,6 +223,7 @@ class ThingiverseScraper(BaseScraper):
         async for page_hits in self._paginate(
             lambda page: self._fetch_things_page(term, page, per_page),
             max_pages=self.MAX_PAGES,
+            respect_test_limit=True,
         ):
             hits.extend(page_hits)
 
@@ -247,14 +257,14 @@ class ThingiverseScraper(BaseScraper):
             data = response.json()
             if isinstance(data, list):
                 print(
-                    f"[Thingiverse] API response type=list n={len(data)} keys_first={list(data[0].keys())[:5] if data else []}"
+                    f"[Thingiverse] API response type=list page={page} n={len(data)} keys_first={list(data[0].keys())[:5] if data else []}"
                 )
                 page_hits = data
             else:
                 keys = list(data.keys())
                 page_hits = data.get('hits', [])
                 print(
-                    f"[Thingiverse] API response type=dict keys={keys[:8]} hits_len={len(page_hits)}"
+                    f"[Thingiverse] API response type=dict page={page} keys={keys[:8]} hits_len={len(page_hits)}"
                 )
 
             if not page_hits:

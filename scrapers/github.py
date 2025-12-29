@@ -101,6 +101,9 @@ class GitHubScraper(BaseScraper):
         Returns:
             Dict with scraping results (products_found, products_added, etc.)
         """
+        # Initialize test-mode session for global item capping
+        self._begin_test_session(test_mode, test_limit)
+
         start_time = datetime.now()
         products_found = 0
         products_added = 0
@@ -111,7 +114,7 @@ class GitHubScraper(BaseScraper):
                 if test_mode and products_found >= test_limit:
                     break
 
-                async for repos in self._paginate(lambda page: self._fetch_repositories(term, page)):
+                async for repos in self._paginate(lambda page: self._fetch_repositories(term, page), respect_test_limit=True):
                     if test_mode and products_found >= test_limit:
                         break
 
