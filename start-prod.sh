@@ -159,11 +159,11 @@ echo "   Server will be available at: http://localhost:8001"
 echo "   API documentation at: http://localhost:8001/docs"
 echo "   (Production uses port 8001, development uses port 8000)"
 echo ""
-docker compose --profile production up -d backend-prod
 
 COMPOSE_UP_ARGS=(--profile production up -d backend-prod)
 if [ "$NO_BUILD" = true ]; then
   COMPOSE_UP_ARGS=(--profile production up -d --no-build backend-prod)
+  echo "   Using prebuilt image tag: a11yhood-backend:prod"
 fi
 
 docker compose "${COMPOSE_UP_ARGS[@]}"
