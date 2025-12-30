@@ -308,52 +308,96 @@ async def get_product_types(
 
 
 @router.get("/tags")
-async def get_popular_tags(
-    limit: int = Query(10, le=50),
-    min_products: int = Query(1, ge=1, description="Minimum number of products a tag must have to be included"),
+async def get_tags(
+    source: Optional[list[str]] = Query(None, alias="source", description="Filter tags by product source"),
+    sources: Optional[list[str]] = Query(None, description="Filter tags by product source"),
+    type: Optional[list[str]] = Query(None, alias="type", description="Filter tags by product type"),
+    types: Optional[list[str]] = Query(None, description="Filter tags by product type"),
+    search: Optional[str] = Query(None, description="Case-insensitive substring filter on product name"),
+    created_by: Optional[str] = None,
+    include_banned: bool = Query(False, description="Include banned products (admin/mod only)"),
+    tag_search: Optional[str] = Query(None, description="Case-insensitive substring filter on tag name"),
+    limit: Optional[int] = Query(None, le=1000, description="Optional cap; omit to return all tags"),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
     db = Depends(get_db),
 ):
-    """Get most popular tags from products.
-    
-    Returns tags ordered by frequency (most used first), limited to specified count.
-    Only includes tags used on at least min_products products to filter out noise.
-    
-    Best practices:
-    - Filters out rarely-used tags to show meaningful categories
-    - Orders by usage frequency to prioritize widely-applicable tags
-    - Configurable limit and minimum threshold for different UIs
+    """Get tag names for products matching the provided filters.
+
+    - Uses the same filters as /products (source/type/search/created_by).
+    - Returns tag names alphabetically.
+    - Optional tag_search filters tag names.
+    - Optional limit (up to 1000); omit limit to return all.
+    - include_banned: set to true to include banned products (requires admin/moderator role).
     """
     try:
-        from collections import Counter
-        
-        # Get all product-tag relationships
-        pt_response = db.table("product_tags").select("tag_id").execute()
-        tag_ids = [row["tag_id"] for row in (pt_response.data or []) if row.get("tag_id")]
-        
+        # First, find product_ids matching filters (consistent with /products)
+        product_query = db.table("products").select("id")
+
+        source_values = set(_normalize_list(source) + _normalize_list(sources))
+        source_values = set(_canonicalize_sources(db, list(source_values)))
+        if source_values:
+            product_query = product_query.in_("source", list(source_values))
+
+        type_values = set(_normalize_list(type) + _normalize_list(types))
+        if type_values:
+            product_query = product_query.in_("type", list(type_values))
+
+        if search:
+            product_query = product_query.ilike("name", f"%{search}%")
+
+        if created_by:
+            product_query = product_query.eq("created_by", created_by)
+
+        # Handle banned products
+        if include_banned:
+            if not current_user or current_user.get("role") not in {"admin", "moderator"}:
+                raise HTTPException(status_code=403, detail="Moderator or admin role required to view banned products")
+        else:
+            product_query = product_query.eq("banned", False)
+
+        product_resp = product_query.execute()
+        product_ids = [row["id"] for row in (product_resp.data or [])]
+
+        if not product_ids:
+            return {"tags": []}
+
+        # Fetch tag_ids for these products in chunks to avoid URL length limits
+        # PostgreSQL/PostgREST has limits on query string length for .in_() filters
+        tag_ids_set = set()
+        chunk_size = 500
+        for i in range(0, len(product_ids), chunk_size):
+            chunk = product_ids[i:i + chunk_size]
+            pt_resp = db.table("product_tags").select("tag_id").in_("product_id", chunk).execute()
+            for row in (pt_resp.data or []):
+                if row.get("tag_id"):
+                    tag_ids_set.add(row["tag_id"])
+
+        tag_ids = list(tag_ids_set)
         if not tag_ids:
             return {"tags": []}
+
+        # Fetch tag names, optionally filtered by tag name search
+        # Also chunk the tag_ids query to avoid URL length limits
+        names_set = set()
+        for i in range(0, len(tag_ids), chunk_size):
+            chunk = tag_ids[i:i + chunk_size]
+            tag_query = db.table("tags").select("name").in_("id", chunk)
+            if tag_search:
+                tag_query = tag_query.ilike("name", f"%{tag_search}%")
+            tags_resp = tag_query.execute()
+            for row in (tags_resp.data or []):
+                if row.get("name"):
+                    names_set.add(row["name"])
+
+        names = sorted(names_set)
+        if limit is not None:
+            names = names[:max(limit, 0)]
         
-        # Count tag frequencies
-        tag_counts = Counter(tag_ids)
-        
-        # Filter by minimum usage and get top N
-        filtered_counts = {tag_id: count for tag_id, count in tag_counts.items() if count >= min_products}
-        top_tag_ids = [tag_id for tag_id, count in sorted(filtered_counts.items(), key=lambda x: x[1], reverse=True)[:limit]]
-        
-        if not top_tag_ids:
-            return {"tags": []}
-        
-        # Fetch tag names for top tags
-        tags_response = db.table("tags").select("id,name").in_("id", top_tag_ids).execute()
-        id_to_name = {row["id"]: row["name"] for row in (tags_response.data or [])}
-        
-        # Return in frequency order
-        popular_tags = [id_to_name[tag_id] for tag_id in top_tag_ids if tag_id in id_to_name]
-        return {"tags": popular_tags}
-        
+        return {"tags": names}
+    except HTTPException:
+        raise
     except Exception as e:
-        # Log error but return empty list to avoid breaking frontend
-        print(f"Error fetching popular tags: {e}")
+        print(f"Error fetching tags: {e}")
         return {"tags": []}
 
 
