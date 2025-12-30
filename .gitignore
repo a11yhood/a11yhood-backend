@@ -65,7 +65,7 @@ pids
 dist/
 build/
 *.egg-info/
-
+*.tar
 
 
 # Misc
