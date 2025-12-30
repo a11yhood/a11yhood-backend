@@ -12,6 +12,10 @@ RUN apt-get update && apt-get install -y \
     make \
     && rm -rf /var/lib/apt/lists/*
 
+# Ensure python is available at /usr/bin/python (in addition to /usr/local/bin)
+RUN ln -sf /usr/local/bin/python3 /usr/bin/python && \
+    ln -sf /usr/local/bin/python3 /usr/bin/python3
+
 # Create non-root user for runtime
 RUN useradd -m -u 1000 appuser
 
