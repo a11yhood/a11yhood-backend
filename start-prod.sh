@@ -56,7 +56,7 @@ if [ "$HELP" = true ]; then
   echo ""
   echo "Options:"
   echo "  --help       Show this help message"
-   echo "  --no-build   Skip image build (use when image is already loaded)"
+  echo "  --no-build   Skip image build (use when image is already loaded)"
   echo ""
   echo "See documentation/DEPLOYMENT_PLAN.md for detailed setup instructions"
   exit 0
@@ -159,8 +159,14 @@ echo "   Server will be available at: http://localhost:8001"
 echo "   API documentation at: http://localhost:8001/docs"
 echo "   (Production uses port 8001, development uses port 8000)"
 echo ""
-
 docker compose --profile production up -d backend-prod
+
+COMPOSE_UP_ARGS=(--profile production up -d backend-prod)
+if [ "$NO_BUILD" = true ]; then
+  COMPOSE_UP_ARGS=(--profile production up -d --no-build backend-prod)
+fi
+
+docker compose "${COMPOSE_UP_ARGS[@]}"
 
 if [ $? -ne 0 ]; then
   echo -e "${RED}✗ Failed to start production container${NC}"
