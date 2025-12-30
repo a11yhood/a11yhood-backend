@@ -6,16 +6,29 @@ Markdown content should be sanitized before rendering to prevent XSS.
 """
 from datetime import datetime, UTC
 import re
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from models.blog_posts import BlogPostCreate, BlogPostResponse, BlogPostUpdate
 from services.auth import ensure_admin, get_current_user, get_current_user_optional
-from services.database import get_db
+from services.database import get_db, db_adapter
 from services.sanitizer import sanitize_html
 
 router = APIRouter(prefix="/api/blog-posts", tags=["blog"])
+
+
+def _serialize_datetime(dt: Optional[datetime]) -> Union[datetime, str, None]:
+    """Serialize datetime for database insert/update.
+    
+    Supabase requires ISO strings, SQLite requires datetime objects.
+    """
+    if dt is None:
+        return None
+    # Check if using Supabase backend
+    if hasattr(db_adapter, 'backend') and db_adapter.backend == 'supabase':
+        return dt.isoformat()
+    return dt
 
 
 def _slugify(text: str) -> str:
@@ -307,11 +320,11 @@ async def create_blog_post(
         "author_names": author_names,
         "tags": payload.tags or [],
         "published": payload.published,
-        "published_at": published_at,
-        "publish_date": publish_date,
+        "published_at": _serialize_datetime(published_at),
+        "publish_date": _serialize_datetime(publish_date),
         "featured": payload.featured,
-        "created_at": now,
-        "updated_at": now,
+        "created_at": _serialize_datetime(now),
+        "updated_at": _serialize_datetime(now),
     }
 
     response = db.table("blog_posts").insert(record).execute()
@@ -368,18 +381,20 @@ async def update_blog_post(
     if updates.author_names is not None:
         update_data["author_names"] = updates.author_names
     if updates.publish_date is not None:
-        update_data["publish_date"] = _to_datetime(updates.publish_date)
+        dt = _to_datetime(updates.publish_date)
+        update_data["publish_date"] = _serialize_datetime(dt)
     if updates.published_at is not None:
-        update_data["published_at"] = _to_datetime(updates.published_at)
+        dt = _to_datetime(updates.published_at)
+        update_data["published_at"] = _serialize_datetime(dt)
     if updates.published is not None:
         update_data["published"] = updates.published
         if updates.published:
             if "published_at" not in update_data or update_data["published_at"] is None:
-                update_data["published_at"] = datetime.now(UTC)
+                update_data["published_at"] = _serialize_datetime(datetime.now(UTC))
         else:
             update_data["published_at"] = None
 
-    update_data["updated_at"] = datetime.now(UTC)
+    update_data["updated_at"] = _serialize_datetime(datetime.now(UTC))
 
     updated = db.table("blog_posts").update(update_data).eq("id", post_id).execute()
     if not updated.data:
