@@ -15,10 +15,10 @@ RUN apt-get update && apt-get install -y \
     make \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv for fast dependency management
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Install uv for fast dependency management (using pip to avoid COPY --from issues on macOS)
+RUN pip install uv
 
-# Create non-root user for runtime (after uv copy to avoid permission issues)
+# Create non-root user for runtime
 RUN useradd -m -u 1000 appuser
 
 # Copy requirements
