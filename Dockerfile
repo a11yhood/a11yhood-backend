@@ -2,8 +2,8 @@
 # Single-stage build for production
 # Development mode enabled via volume mounts in scripts/start-dev.sh
 
-# Use Debian bullseye which works better with fuse-overlayfs
-FROM python:3.11-slim-bullseye
+# Use older Python slim-buster which works better with fuse-overlayfs
+FROM python:3.9-slim-buster
 
 # Set working directory
 WORKDIR /app
