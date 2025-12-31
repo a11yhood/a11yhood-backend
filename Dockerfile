@@ -15,11 +15,11 @@ RUN apt-get update && apt-get install -y \
     make \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for runtime
-RUN useradd -m -u 1000 appuser
-
 # Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Create non-root user for runtime (after uv copy to avoid permission issues)
+RUN useradd -m -u 1000 appuser
 
 # Copy requirements
 COPY requirements.txt .
