@@ -20,20 +20,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 # Install dependencies
-RUN uv pip install --system -r requirements.txt
-
-# Copy application code
-COPY . .
-
-# Enpip install --no-cache-dir uv && uv pip install --system -r requirements.txt
+RUN pip install --no-cache-dir uv && uv pip install --system -r requirements.txt
 
 # Copy application code
 COPY . .
 
 # Create non-root user and set ownership after all files are copied
-RUN addgroup -g 1000 appuser \
-    && adduser -D -u 1000 -G appuser appuser \
+RUN groupadd -g 1000 appuser \
+    && useradd -m -u 1000 -g appuser appuser \
     && chown -R appuser:appuser /app
+
+USER appuser
+
+# Expose port
+EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
