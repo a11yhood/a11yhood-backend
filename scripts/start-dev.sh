@@ -17,7 +17,6 @@ NC='\033[0m' # No Color
 # Timing helper
 SECONDS=0
 ts() {
-  # Prints elapsed seconds since script start
   echo "${SECONDS}s"
 }
 
@@ -47,7 +46,7 @@ if [ "$HELP" = true ]; then
   echo "Usage: ./start-dev.sh [OPTIONS]"
   echo ""
   echo "Options:"
-  echo "  --reset-db   Reset database before starting (removes test.db volume) (removes test.db volume)"
+  echo "  --reset-db   Reset test.db before starting"
   echo "  --help       Show this help message"
   exit 0
 fi
@@ -65,29 +64,53 @@ echo ""
 
 # Reset database if requested
 if [ "$RESET_DB" = true ]; then
-  echo -e "${YELLOW}🗑️  Resetting database volume...${NC}"
-  docker-compose down -v
-  echo -e "${GREEN}✓ Database volume removed${NC}"
+  echo -e "${YELLOW}🗑️  Resetting test database...${NC}"
+  rm -f test.db
+  echo -e "${GREEN}✓ Database reset${NC}"
   echo ""
 fi
 
+# Check if container is already running and stop it
+echo -e "${YELLOW}🔧 Checking for existing containers...${NC} (t=$(ts))"
+if docker ps -a --filter "name=a11yhood-backend-dev" --format "{{.Names}}" | grep -q "a11yhood-backend-dev"; then
+  echo "  Stopping existing container..."
+  docker stop a11yhood-backend-dev >/dev/null 2>&1
+  docker rm a11yhood-backend-dev >/dev/null 2>&1
+  sleep 1
+fi
+echo -e "${GREEN}✓ Ready to start${NC}"
+echo ""
+
 # Build if needed
 echo -e "${YELLOW}🔨 Building Docker image...${NC} (t=$(ts))"
-if docker-compose build backend 2>&1 | grep -q "Successfully built\|Image.*Built"; then
+if docker build -t a11yhood-backend:dev . 2>&1 | grep -q "Successfully built\|image.*built"; then
   echo -e "${GREEN}✓ Image ready${NC}"
 else
   echo -e "${YELLOW}⚠️  Build completed with warnings (check output if needed)${NC}"
 fi
 echo ""
 
-# Start container
+# Start container with volume mount for hot reload
 echo -e "${GREEN}🚀 Starting backend container...${NC} (t=$(ts))"
 echo "   Server will be available at: http://localhost:8000"
 echo "   API documentation at: http://localhost:8000/docs"
-echo "   (Development uses port 8000, production uses port 8001)"
+echo "   Code changes will auto-reload"
 echo ""
 
-docker-compose up -d backend
+docker run \
+  -d \
+  --name a11yhood-backend-dev \
+  --env-file .env.test \
+  -p 8000:8000 \
+  -v "$(pwd):/app" \
+  --restart unless-stopped \
+  --health-cmd="curl -f http://localhost:8000/health || exit 1" \
+  --health-interval=30s \
+  --health-timeout=3s \
+  --health-retries=3 \
+  --health-start-period=5s \
+  a11yhood-backend:dev \
+  uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 if [ $? -ne 0 ]; then
   echo -e "${RED}✗ Failed to start container${NC}"
@@ -103,9 +126,9 @@ for i in {1..30}; do
   fi
   
   # Check if container is still running
-  if ! docker-compose ps backend | grep -q "Up"; then
+  if ! docker ps --filter "name=a11yhood-backend-dev" --format "{{.Names}}" | grep -q "a11yhood-backend-dev"; then
     echo -e "${RED}✗ Container is not running${NC}"
-    echo "  Check logs with: docker-compose logs backend"
+    echo "  Check logs with: docker logs a11yhood-backend-dev"
     exit 1
   fi
   
@@ -123,8 +146,8 @@ done
 # Final check
 if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
   echo -e "${RED}✗ Server failed to start within 30 seconds${NC}"
-  echo "  Check logs with: docker-compose logs backend"
-  docker-compose logs --tail=50 backend
+  echo "  Check logs with: docker logs a11yhood-backend-dev"
+  docker logs --tail=50 a11yhood-backend-dev
   exit 1
 fi
 
@@ -138,7 +161,7 @@ echo -e "${BLUE}📚 API Documentation:${NC}"
 echo "   http://localhost:8000/docs"
 echo ""
 echo -e "${BLUE}💡 To monitor logs:${NC}"
-echo "   docker-compose logs -f backend"
+echo "   docker logs -f a11yhood-backend-dev"
 echo ""
 echo -e "${BLUE}🛑 To stop the server:${NC}"
 echo "   ./stop-dev.sh"

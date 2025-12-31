@@ -6,6 +6,7 @@
 # Usage:
 #   ./start-prod.sh        # Normal start
 #   ./start-prod.sh --help # Show help
+#   ./start-prod.sh --no-build # Skip image build
 
 # Color codes for output
 RED='\033[0;31m'
@@ -17,7 +18,6 @@ NC='\033[0m' # No Color
 # Timing helper
 SECONDS=0
 ts() {
-  # Prints elapsed seconds since script start
   echo "${SECONDS}s"
 }
 
@@ -46,11 +46,10 @@ done
 if [ "$HELP" = true ]; then
   echo "Usage: ./start-prod.sh [OPTIONS]"
   echo ""
-  echo "Starts backend production server using Docker Compose v2 (production Supabase database)"
+  echo "Starts backend production server using Docker (production Supabase database)"
   echo ""
   echo "Prerequisites:"
   echo "  - Docker running (colima start)"
-  echo "  - Docker Compose v2 plugin available (docker compose)"
   echo "  - .env configured with production Supabase credentials"
   echo "  - Production Supabase project set up with schema applied"
   echo ""
@@ -69,23 +68,6 @@ if ! docker info >/dev/null 2>&1; then
   echo "    colima start"
   exit 1
 fi
-
-# Determine which compose command is available
-COMPOSE_CMD=""
-if docker compose version >/dev/null 2>&1; then
-  COMPOSE_CMD="docker compose"
-elif docker-compose version >/dev/null 2>&1; then
-  COMPOSE_CMD="docker-compose"
-else
-  echo -e "${RED}✗ Docker Compose not found (tried 'docker compose' and 'docker-compose')${NC}"
-  echo "  Install Docker Compose or use plain Docker script:"
-  echo "    - macOS: brew install docker-compose"
-  echo "    - Linux (Debian/Ubuntu): sudo apt-get install -y docker-compose-plugin"
-  echo "    - Fallback: ./start-prod-plain.sh"
-  exit 1
-fi
-
-echo "Using: $COMPOSE_CMD"
 
 echo -e "${BLUE}🚀 Starting a11yhood backend PRODUCTION server (Docker)...${NC} (t=0s)"
 echo ""
@@ -130,50 +112,50 @@ echo ""
 
 if [ "$NO_BUILD" = false ]; then
   echo -e "${YELLOW}🔨 Building production Docker image...${NC} (t=$(ts))"
-  if $COMPOSE_CMD build backend-prod 2>/tmp/build.out; then
+  if docker build -t a11yhood-backend:prod . 2>/tmp/build.out; then
     echo -e "${GREEN}✓ Image ready${NC}"
   else
-    echo -e "${YELLOW}⚠️  Build failed, retrying with legacy builder...${NC}"
-    if DOCKER_BUILDKIT=0 $COMPOSE_CMD build backend-prod 2>/tmp/build_legacy.out; then
-      echo -e "${GREEN}✓ Image ready (legacy builder)${NC}"
-    else
-      echo -e "${RED}✗ Build failed with both builders${NC}"
-      echo "  Consider building the image on another machine and transferring it:"
-      echo "    # On your dev machine"
-      echo "    docker build --target production -t a11yhood-backend:prod ."
-      echo "    docker save a11yhood-backend:prod -o a11yhood-backend-prod.tar"
-      echo "    scp a11yhood-backend-prod.tar user@server:/tmp/"
-      echo "    # On the server"
-      echo "    docker load -i /tmp/a11yhood-backend-prod.tar"
-      echo "    $COMPOSE_CMD --profile production up -d --no-build backend-prod"
-      echo ""
-      echo "  Build logs (first attempt):"
-      tail -n 30 /tmp/build.out 2>/dev/null || true
-      echo ""
-      echo "  Build logs (legacy attempt):"
-      tail -n 30 /tmp/build_legacy.out 2>/dev/null || true
-      exit 1
-    fi
+    echo -e "${RED}✗ Build failed${NC}"
+    echo ""
+    echo "  Build logs:"
+    tail -n 30 /tmp/build.out 2>/dev/null || true
+    exit 1
   fi
   echo ""
 else
   echo -e "${YELLOW}⏭️  Skipping build (--no-build)${NC}"
+  echo ""
 fi
+
+# Check if container is already running and stop it
+echo -e "${YELLOW}🔧 Checking for existing containers...${NC} (t=$(ts))"
+if docker ps -a --filter "name=a11yhood-backend-prod" --format "{{.Names}}" | grep -q "a11yhood-backend-prod"; then
+  echo "  Stopping existing container..."
+  docker stop a11yhood-backend-prod >/dev/null 2>&1
+  docker rm a11yhood-backend-prod >/dev/null 2>&1
+  sleep 1
+fi
+echo -e "${GREEN}✓ Ready to start${NC}"
+echo ""
 
 # Start production container
 echo -e "${GREEN}🚀 Starting production container...${NC} (t=$(ts))"
-echo "   Server will be available at: http://localhost:8001"
-echo "   API documentation at: http://localhost:8001/docs"
-echo "   (Production uses port 8001, development uses port 8000)"
+echo "   Server will be available at: http://localhost:8000"
+echo "   API documentation at: http://localhost:8000/docs"
 echo ""
 
-COMPOSE_UP_ARGS=(--profile production up -d backend-prod)
-if [ "$NO_BUILD" = true ]; then
-  COMPOSE_UP_ARGS=(--profile production up -d --no-build backend-prod)
-  echo "   Using prebuilt image tag: a11yhood-backend:prod"
-fi
-
-$COMPOSE_CMD "${COMPOSE_UP_ARGS[@]}"
+docker run \
+  -d \
+  --name a11yhood-backend-prod \
+  --env-file .env \
+  -p 8000:8000 \
+  --restart unless-stopped \
+  --health-cmd="curl -f http://localhost:8000/health || exit 1" \
+  --health-interval=30s \
+  --health-timeout=3s \
+  --health-retries=3 \
+  --health-start-period=5s \
+  a11yhood-backend:prod
 
 if [ $? -ne 0 ]; then
   echo -e "${RED}✗ Failed to start production container${NC}"
@@ -182,16 +164,16 @@ fi
 
 # Wait for server to be ready
 echo -e "${YELLOW}⏳ Waiting for server to start...${NC}"
-for i in {1..60}; do  # Production might take longer
-  if curl -s http://localhost:8001/health >/dev/null 2>&1; then
+for i in {1..60}; do
+  if curl -s http://localhost:8000/health >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Backend is ready!${NC} (t=$(ts))"
     break
   fi
   
   # Check if container is still running
-  if ! $COMPOSE_CMD ps backend-prod | grep -q "Up"; then
+  if ! docker ps --filter "name=a11yhood-backend-prod" --format "{{.Names}}" | grep -q "a11yhood-backend-prod"; then
     echo -e "${RED}✗ Container is not running${NC}"
-    echo "  Check logs with: $COMPOSE_CMD logs backend-prod"
+    echo "  Check logs with: docker logs a11yhood-backend-prod"
     exit 1
   fi
   
@@ -210,10 +192,10 @@ for i in {1..60}; do  # Production might take longer
 done
 
 # Final check
-if ! curl -s http://localhost:8001/health >/dev/null 2>&1; then
+if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
   echo -e "${RED}✗ Server failed to start within 60 seconds${NC}"
-  echo "  Check logs with: $COMPOSE_CMD logs backend-prod"
-  $COMPOSE_CMD logs --tail=50 backend-prod
+  echo "  Check logs with: docker logs a11yhood-backend-prod"
+  docker logs --tail=50 a11yhood-backend-prod
   exit 1
 fi
 
@@ -221,13 +203,13 @@ echo ""
 echo -e "${GREEN}✅ PRODUCTION server is running!${NC} (t=$(ts))"
 echo ""
 echo -e "${BLUE}📡 Backend API:${NC}"
-echo "   http://localhost:8001"
+echo "   http://localhost:8000"
 echo ""
 echo -e "${BLUE}📚 API Documentation:${NC}"
-echo "   http://localhost:8001/docs"
+echo "   http://localhost:8000/docs"
 echo ""
 echo -e "${BLUE}💡 To monitor logs:${NC}"
-echo "   $COMPOSE_CMD logs -f backend-prod"
+echo "   docker logs -f a11yhood-backend-prod"
 echo ""
 echo -e "${BLUE}🛑 To stop the server:${NC}"
 echo "   ./stop-prod.sh"
@@ -235,5 +217,5 @@ echo ""
 echo -e "${YELLOW}⚠️  Remember:${NC}"
 echo "   - This is PRODUCTION mode with real authentication"
 echo "   - Never reset or seed the production database"
-echo "   - Monitor logs with: $COMPOSE_CMD logs -f backend-prod"
+echo "   - Monitor logs with: docker logs -f a11yhood-backend-prod"
 echo ""

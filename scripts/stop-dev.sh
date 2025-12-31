@@ -42,16 +42,17 @@ echo ""
 
 # Stop container
 echo -e "${YELLOW}Stopping backend container...${NC}"
-if docker-compose ps backend 2>/dev/null | grep -q "Up"; then
-  docker-compose stop backend
+if docker ps --filter "name=a11yhood-backend-dev" --format "{{.Names}}" | grep -q "a11yhood-backend-dev"; then
+  docker stop a11yhood-backend-dev
+  docker rm a11yhood-backend-dev
   echo -e "${GREEN}✓ Backend container stopped${NC}"
 else
   echo "  (Backend was not running)"
 fi
 
 echo ""
-echo -e "${GREEN}✅ Backend development server stopped${NC}"
+echo -e "${GREEN}✅ Development server stopped${NC}"
 echo ""
-echo -e "${BLUE}💡 To remove the container and volumes:${NC}"
-echo "   docker-compose down -v"
+echo -e "${BLUE}💡 To start development environment again:${NC}"
+echo "   ./start-dev.sh"
 echo ""

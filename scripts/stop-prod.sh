@@ -14,8 +14,9 @@ echo ""
 
 # Stop production container
 echo -e "${YELLOW}🔧 Stopping production container...${NC}"
-if docker-compose ps backend-prod 2>/dev/null | grep -q "Up"; then
-  docker-compose --profile production stop backend-prod
+if docker ps --filter "name=a11yhood-backend-prod" --format "{{.Names}}" | grep -q "a11yhood-backend-prod"; then
+  docker stop a11yhood-backend-prod
+  docker rm a11yhood-backend-prod
   echo -e "${GREEN}✓ Backend production container stopped${NC}"
 else
   echo -e "${YELLOW}⚠️  No production container running${NC}"
@@ -26,9 +27,6 @@ echo -e "${GREEN}✅ Backend production server stopped${NC}"
 echo ""
 echo -e "${BLUE}💡 To restart production:${NC}"
 echo "   ./start-prod.sh"
-echo ""
-echo -e "${BLUE}💡 To remove the container:${NC}"
-echo "   docker-compose --profile production down"
 echo ""
 echo -e "${BLUE}💡 To start development environment instead:${NC}"
 echo "   ./start-dev.sh"
