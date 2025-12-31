@@ -3,7 +3,8 @@
 # NOTE: Currently CANNOT be deployed to slicomex.cs.washington.edu due to
 # fuse-overlayfs storage driver incompatibility. See documentation/DEPLOYMENT_CURRENT.md
 
-FROM python:3.10-slim
+# Use older Python slim-buster which works better with fuse-overlayfs
+FROM python:3.9-slim-buster
 
 RUN echo "=== BUILD DEBUG: Starting build from python:3.10-slim ==="
 RUN echo "=== Python version:" && python --version
