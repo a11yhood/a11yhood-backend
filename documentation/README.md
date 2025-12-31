@@ -33,6 +33,12 @@ All markdown documentation (except repository READMEs) lives here. Below is an i
 - [INTEGRATION_TESTS.md](INTEGRATION_TESTS.md) — Backend integration test setup and commands
 - [QUICK_TEST_GUIDE.md](QUICK_TEST_GUIDE.md) — Fast test command reference
 
+## Deployment
+- [DEPLOYMENT_CURRENT.md](DEPLOYMENT_CURRENT.md) — **Current production deployment setup** (GitHub Actions, branch strategy, server config)
+- [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) — Original deployment plan (historical reference)
+- [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md) — Pre-deployment verification checklist
+- [DOCKER_SETUP.md](DOCKER_SETUP.md) — Docker configuration details
+
 ## Standards, Security, Integrations
 - [CODE_STANDARDS.md](CODE_STANDARDS.md) — Coding standards
 - [SECURITY.md](SECURITY.md) — Security practices
