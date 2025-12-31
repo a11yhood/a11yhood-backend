@@ -6,6 +6,7 @@ from typing import Optional
 class SupportedSourceBase(BaseModel):
     domain: str = Field(..., min_length=1, max_length=255)
     name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, description="Markdown-formatted description of the source")
 
 
 class SupportedSourceCreate(SupportedSourceBase):
@@ -15,6 +16,7 @@ class SupportedSourceCreate(SupportedSourceBase):
 class SupportedSourceUpdate(BaseModel):
     domain: Optional[str] = Field(None, min_length=1, max_length=255)
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, description="Markdown-formatted description of the source")
 
 
 class SupportedSourceResponse(SupportedSourceBase):
