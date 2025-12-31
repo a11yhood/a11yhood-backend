@@ -2,22 +2,21 @@
 # Single-stage build for production
 # Development mode enabled via volume mounts in scripts/start-dev.sh
 
-FROM python:3.14-slim
+FROM python:3.12-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies and create user early to avoid layer issues
-RUN apt-get update && apt-get install -y \
+# Install system dependencies
+RUN apk add --no-cache \
     curl \
     gcc \
-    g++ \
-    make \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -g 1000 appuser \
-    && useradd -m -u 1000 -g appuser appuser
+    musl-dev \
+    linux-headers \
+    && addgroup -g 1000 appuser \
+    && adduser -D -u 1000 -G appuser appuser
 
-# Install uv for fast dependency management
+# Install uv
 RUN pip install --no-cache-dir uv
 
 # Copy requirements
