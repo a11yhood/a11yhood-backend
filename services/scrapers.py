@@ -9,7 +9,8 @@ from datetime import datetime
 from scrapers.github import GitHubScraper
 from scrapers.thingiverse import ThingiverseScraper
 from scrapers.ravelry import RavelryScraper
-
+from scrapers.abledata import AbleDataScraper
+from scrapers.goat import GOATScraper
 
 class ScraperOAuth:
     """Handle OAuth flows for different platforms"""
@@ -143,3 +144,32 @@ class ScraperService:
             return result
         finally:
             await scraper.close()
+    
+    async def scrape_abledata(self, test_mode: bool = False, test_limit: int = 5) -> Dict[str, Any]:
+        """Scrape AbleData archived pages for assistive technology products"""
+        scraper = AbleDataScraper(self.supabase)
+        # Load persisted URLs from scraper_search_terms table
+        try:
+            response = self.supabase.table("scraper_search_terms").select("search_term").eq("platform", "abledata").execute()
+            urls = [r.get("search_term") for r in (response.data or []) if r.get("search_term")]
+            if urls:
+                scraper.DEFAULT_URLS = urls
+        except Exception:
+            pass
+        try:
+            result = await scraper.scrape(test_mode=test_mode, test_limit=test_limit)
+            return result
+        finally:
+            await scraper.close()
+
+    async def scrape_goat(self, access_token: Optional[str] = None, test_mode: bool = False, test_limit: int = 5) -> Dict[str, Any]:
+        """Scrape LibraryThing for books with accessibility information"""
+        scraper = GOATScraper(self.supabase, access_token=access_token)
+        # Note: GOAT scraper is primarily for URL-based scraping
+        # Search terms are not currently supported for bulk scraping
+        try:
+            result = await scraper.scrape(test_mode=test_mode, test_limit=test_limit)
+            return result
+        finally:
+            await scraper.close()
+            

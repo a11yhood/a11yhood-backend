@@ -402,6 +402,16 @@ class SQLiteTable:
         self._filters.append((column, "<", value))
         return self
     
+    def gte(self, column: str, value: Any):
+        """Filter by greater than or equal"""
+        self._filters.append((column, ">=", value))
+        return self
+    
+    def lte(self, column: str, value: Any):
+        """Filter by less than or equal"""
+        self._filters.append((column, "<=", value))
+        return self
+    
     def limit(self, count: int):
         """Limit results"""
         self._limit_val = count
@@ -573,6 +583,10 @@ class SQLiteTable:
                 query = query.filter(col > value)
             elif op == "<":
                 query = query.filter(col < value)
+            elif op == ">=":
+                query = query.filter(col >= value)
+            elif op == "<=":
+                query = query.filter(col <= value)
             elif op == "ilike":
                 query = query.filter(col.ilike(value))
             elif op == "in":

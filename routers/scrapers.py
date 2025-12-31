@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Body
 from typing import Optional
 from supabase import Client
+import logging
 
 from models.scrapers import (
     ScrapingLogResponse,
@@ -19,7 +20,11 @@ from scrapers import ScraperUtilities
 from scrapers.github import GitHubScraper
 from scrapers.ravelry import RavelryScraper
 from scrapers.thingiverse import ThingiverseScraper
+from scrapers.goat import GOATScraper
+from scrapers.goat import GOATScraper
 from routers.products import get_product_tag_rows, get_tags_map, set_product_tags
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/scrapers", tags=["scrapers"])
 
@@ -54,6 +59,17 @@ async def _run_scraper_and_log(
             )
         elif source == "github":
             result = await scraper_service.scrape_github(
+                test_mode=test_mode,
+                test_limit=test_limit
+            )
+        elif source == "abledata":
+            result = await scraper_service.scrape_abledata(
+                test_mode=test_mode,
+                test_limit=test_limit
+            )
+        elif source == "goat":
+            result = await scraper_service.scrape_goat(
+                access_token=access_token,
                 test_mode=test_mode,
                 test_limit=test_limit
             )
@@ -101,10 +117,10 @@ async def trigger_scraper(
     
     # Get OAuth token from database
     access_token = None
-    if request.source.value in ["thingiverse", "ravelry", "github"]:
+    if request.source.value in ["thingiverse", "ravelry", "github", "goat"]:
         config_response = db.table("oauth_configs").select("access_token").eq("platform", request.source.value).execute()
         
-        if request.source.value in ["thingiverse", "ravelry"]:
+        if request.source.value in ["thingiverse", "ravelry", "goat"]:
             if not config_response.data:
                 raise HTTPException(
                     status_code=400,
@@ -256,8 +272,18 @@ async def load_url(
                 except Exception as e:
                     print(f"Thingiverse scraper refresh error: {e}")
 
-            if refreshed and is_image_url(refreshed.get("imageUrl") or refreshed.get("image_url")):
-                new_image = refreshed.get("imageUrl") or refreshed.get("image_url")
+            if not refreshed:
+                try:
+                    config_response = db.table("oauth_configs").select("access_token").eq("platform", "goat").execute()
+                    access_token = config_response.data[0].get("access_token") if config_response.data else None
+                    librarything_scraper = GOATScraper(db, access_token)
+                    if librarything_scraper.supports_url(url):
+                        refreshed = await librarything_scraper.scrape_url(url)
+                except Exception as e:
+                    print(f"GOAT scraper refresh error: {e}")
+
+            if refreshed and is_image_url(refreshed.get("image") or refreshed.get("imageUrl") or refreshed.get("image_url")):
+                new_image = refreshed.get("image") or refreshed.get("imageUrl") or refreshed.get("image_url")
                 db.table("products").update({"image": new_image}).eq("id", product["id"]).execute()
                 product["image_url"] = new_image
 
@@ -311,6 +337,19 @@ async def load_url(
             print(f"Thingiverse scraper error: {e}")
     
     if not scraped_data:
+        try:
+            # Try GOAT (LibraryThing)
+            config_response = db.table("oauth_configs").select("access_token").eq("platform", "goat").execute()
+            access_token = config_response.data[0].get("access_token") if config_response.data else None
+            librarything_scraper = GOATScraper(db, access_token)
+            if librarything_scraper.supports_url(url):
+                scraped_data = await librarything_scraper.scrape_url(url)
+                scraper_name = "librarything"
+        except Exception as e:
+            # Log but continue
+            print(f"GOAT scraper error: {e}")
+    
+    if not scraped_data:
         return {"success": False, "message": "URL not supported by any scraper or scraping failed"}
     
     # Save scraped product to database
@@ -318,7 +357,7 @@ async def load_url(
         "name": scraped_data.get("name"),
         "description": scraped_data.get("description"),
         "url": url,
-        "image": scraped_data.get("imageUrl") or scraped_data.get("image_url"),
+        "image": scraped_data.get("image") or scraped_data.get("imageUrl") or scraped_data.get("image_url"),
         "source": scraped_data.get("source", scraper_name),
         "type": scraped_data.get("type", "Other"),
         "external_id": scraped_data.get("external_id"),
@@ -438,37 +477,50 @@ async def oauth_callback(
 @router.post("/oauth/{platform}/save-token")
 async def save_oauth_token(
     platform: str,
-    token_data: dict,
+    token_data: dict = Body(...),
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
     """Save OAuth token from frontend (admin only)"""
+    logger.info(f"save_oauth_token called with platform={platform}, token_data keys={list(token_data.keys())}")
+    
     if not current_user.get("role") == "admin":
+        logger.warning(f"Non-admin user {current_user.get('id')} attempted to save token")
         raise HTTPException(status_code=403, detail="Admin access required")
     
-    # Check if config exists, create if not
-    config_response = db.table("oauth_configs").select("*").eq("platform", platform).execute()
-    
-    update_data = {
-        "access_token": token_data.get("access_token"),
-        "refresh_token": token_data.get("refresh_token"),
-    }
-    
-    if config_response.data:
-        # Update existing config
-        db.table("oauth_configs").update(update_data).eq("platform", platform).execute()
-    else:
-        # Create new config with minimal data
-        config_data = {
-            "platform": platform,
-            "client_id": token_data.get("client_id", ""),
-            "client_secret": token_data.get("client_secret", ""),
-            "redirect_uri": token_data.get("redirect_uri", ""),
-            **update_data
+    try:
+        # Check if config exists, create if not
+        logger.debug(f"Checking if oauth_configs exists for {platform}")
+        config_response = db.table("oauth_configs").select("*").eq("platform", platform).execute()
+        logger.debug(f"Config response: {config_response.data}")
+        
+        update_data = {
+            "access_token": token_data.get("access_token"),
+            "refresh_token": token_data.get("refresh_token"),
         }
-        db.table("oauth_configs").insert(config_data).execute()
-    
-    return {"message": f"Token saved for {platform}"}
+        
+        if config_response.data:
+            # Update existing config
+            logger.info(f"Updating existing config for {platform}")
+            db.table("oauth_configs").update(update_data).eq("platform", platform).execute()
+        else:
+            # Create new config with minimal data
+            logger.info(f"Creating new config for {platform}")
+            config_data = {
+                "platform": platform,
+                "client_id": token_data.get("client_id", ""),
+                "client_secret": token_data.get("client_secret", ""),
+                "redirect_uri": token_data.get("redirect_uri", ""),
+                **update_data
+            }
+            logger.debug(f"Inserting config data: {config_data}")
+            db.table("oauth_configs").insert(config_data).execute()
+        
+        logger.info(f"Successfully saved token for {platform}")
+        return {"message": f"Token saved for {platform}"}
+    except Exception as e:
+        logger.error(f"Error saving token for {platform}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save token: {str(e)}")
 
 
 @router.get("/oauth/{platform}/config")
@@ -538,15 +590,31 @@ async def update_oauth_config(
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Update OAuth configuration (admin only)"""
+    """Update OAuth configuration (admin only) - creates if doesn't exist"""
     if not current_user.get("role") == "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     
+    # Check if config exists
+    existing = db.table("oauth_configs").select("*").eq("platform", platform).execute()
+    
     update_data = config.model_dump(exclude_unset=True)
-    response = db.table("oauth_configs").update(update_data).eq("platform", platform).execute()
+    
+    if existing.data:
+        # Update existing config
+        response = db.table("oauth_configs").update(update_data).eq("platform", platform).execute()
+    else:
+        # Create new config if it doesn't exist
+        create_data = {
+            "platform": platform,
+            "client_id": update_data.get("client_id", ""),
+            "client_secret": update_data.get("client_secret", ""),
+            "redirect_uri": update_data.get("redirect_uri", ""),
+            **{k: v for k, v in update_data.items() if k not in ("client_id", "client_secret", "redirect_uri")}
+        }
+        response = db.table("oauth_configs").insert(create_data).execute()
     
     if not response.data:
-        raise HTTPException(status_code=404, detail="OAuth config not found")
+        raise HTTPException(status_code=500, detail="Failed to save OAuth config")
     
     return response.data[0]
 
