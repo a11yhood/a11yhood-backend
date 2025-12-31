@@ -2,22 +2,19 @@
 # Single-stage build for production
 # Development mode enabled via volume mounts in scripts/start-dev.sh
 
-FROM python:3.12-alpine
+# Use Debian bullseye which works better with fuse-overlayfs
+FROM python:3.11-slim-bullseye
 
 # Set working directory
 WORKDIR /app
 
 # Install system dependencies
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gcc \
-    musl-dev \
-    linux-headers \
-    && addgroup -g 1000 appuser \
-    && adduser -D -u 1000 -G appuser appuser
-
-# Install uv
-RUN pip install --no-cache-dir uv
+    g++ \
+    make \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
 COPY requirements.txt .
@@ -28,12 +25,15 @@ RUN uv pip install --system -r requirements.txt
 # Copy application code
 COPY . .
 
-# Ensure ownership and drop privileges
-RUN chown -R appuser:appuser /app
-USER appuser
+# Enpip install --no-cache-dir uv && uv pip install --system -r requirements.txt
 
-# Expose port
-EXPOSE 8000
+# Copy application code
+COPY . .
+
+# Create non-root user and set ownership after all files are copied
+RUN addgroup -g 1000 appuser \
+    && adduser -D -u 1000 -G appuser appuser \
+    && chown -R appuser:appuser /app
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
