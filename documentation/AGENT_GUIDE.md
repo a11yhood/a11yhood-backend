@@ -8,6 +8,11 @@ Read this first when operating on the repo. It summarizes conventions, helper ut
 - When adding features, update coverage docs so tests map to behavior.
 - Default to snake_case
 
+## Environment Modes (read before running anything)
+- **Dev/Test (local SQLite + seeds):** `./start-dev.sh --seed` loads `.env.test`, uses SQLite at `/tmp/a11yhood-test.db`, and seeds data via `seed_scripts/seed_all.py`. Safe for local work and scrapers; no real OAuth.
+- **Production (local Supabase):** `./start-prod.sh` loads `.env`, connects to the real Supabase backend, no seeding. Use for local QA against real data.
+- **Deploy (external server):** Runs the same production settings on the external host; use Supabase service role keys and real OAuth. Do not seed here.
+
 ## Git Workflow
 - **NEVER run `git commit` commands** - the user will handle all commits themselves
 - You may suggest commit messages or explain what should be committed
@@ -69,7 +74,7 @@ naive_timestamp = datetime.now(UTC).replace(tzinfo=None)
 - Add negative-path tests when changing contracts (invalid token, wrong role, bad payload) to keep security behavior stable.
 
 ## Helper Functions & Patterns
-- **Server start scripts**: use `./start-dev.sh` / `./stop-dev.sh` for full stack or use `./start-prod.sh` / `./stop-prod.sh` for full stack; prefer these over manual uvicorn/npm commands unless debugging.
+- **Server start scripts**: use `./start-dev.sh --seed` (local SQLite + seeds) or `./start-prod.sh` (Supabase). On the external host, use the deploy flow with production env vars. Prefer these over manual uvicorn/npm commands unless debugging.
 - **Database access**: backend code should go through `database_adapter.py` / services (not direct Supabase client) so SQLite and Supabase both work.
 - **Scrapers**: backend handles scraper services/routes; 
 

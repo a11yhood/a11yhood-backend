@@ -26,9 +26,8 @@ env/
 ENV/
 
 # Environment variables
+.env.*
 .env
-.env.local
-.env.test
 
 # SQLite test databases
 test*.db
