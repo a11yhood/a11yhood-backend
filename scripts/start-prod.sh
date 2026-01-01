@@ -110,23 +110,10 @@ echo "   OAuth enabled (real authentication)"
 echo "   DO NOT seed or reset production database"
 echo ""
 
-echo -e "${YELLOW}📦 Pulling latest image from registry...${NC} (t=$(ts))"
-if docker pull ghcr.io/a11yhood/a11yhood-backend:latest 2>/tmp/pull.out; then
-  echo -e "${GREEN}✓ Image pulled${NC}"
-  docker tag ghcr.io/a11yhood/a11yhood-backend:latest a11yhood-backend:prod
-  echo ""
-else
-  echo -e "${RED}✗ Pull failed${NC}"
-  echo ""
-  echo "  Pull logs:"
-  tail -n 30 /tmp/pull.out 2>/dev/null || true
-  exit 1
-fi
-
 if [ "$NO_BUILD" = false ]; then
   echo -e "${YELLOW}🔨 Building production Docker image...${NC} (t=$(ts))"
   if docker build -t a11yhood-backend:prod . 2>/tmp/build.out; then
-    echo -e "${GREEN}✓ Image ready${NC}"
+    echo -e "${GREEN}✓ Image built${NC}"
   else
     echo -e "${RED}✗ Build failed${NC}"
     echo ""
@@ -136,8 +123,18 @@ if [ "$NO_BUILD" = false ]; then
   fi
   echo ""
 else
-  echo -e "${YELLOW}⏭️  Skipping build (--no-build)${NC}"
-  echo ""
+  echo -e "${YELLOW}📦 Pulling latest image from registry (--no-build)...${NC} (t=$(ts))"
+  if docker pull ghcr.io/a11yhood/a11yhood-backend:latest 2>/tmp/pull.out; then
+    echo -e "${GREEN}✓ Image pulled${NC}"
+    docker tag ghcr.io/a11yhood/a11yhood-backend:latest a11yhood-backend:prod
+    echo ""
+  else
+    echo -e "${RED}✗ Pull failed${NC}"
+    echo ""
+    echo "  Pull logs:"
+    tail -n 30 /tmp/pull.out 2>/dev/null || true
+    exit 1
+  fi
 fi
 
 # Check if container is already running and stop it
