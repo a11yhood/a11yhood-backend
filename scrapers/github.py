@@ -166,10 +166,13 @@ class GitHubScraper(BaseScraper):
 
         Returns a tuple of (filtered_items, has_more).
         """
-        quoted_term = f'"{term}"'
+        # Don't quote the search term—GitHub's quoted searches are too strict
+        # and miss repos where the term is a compound word (e.g., "braille2latex")
+        # or has different capitalization (e.g., "Braille" in description).
+        # Unquoted search matches the term as word tokens anywhere in repo metadata.
         url = f"{self.API_BASE_URL}/search/repositories"
         params = {
-            'q': f'{quoted_term} stars:>3',
+            'q': f'{term} stars:>=3',
             'sort': 'stars',
             'order': 'desc',
             'per_page': self.RESULTS_PER_PAGE,
