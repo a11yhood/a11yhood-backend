@@ -479,14 +479,17 @@ async def get_products(
     # Always apply ordering before range for consistent results
     query = query.order("created_at", desc=True)
 
-    # Optimize min_rating queries: fetch a reasonable batch instead of everything
-    # This balances between fetching too much data and making multiple queries
+    # For min_rating filters, we need to filter by source_rating in SQL first
+    # This is more efficient than fetching everything and filtering in Python
+    # Note: This only filters by source_rating, not user ratings
+    # Products without user ratings but with source_rating >= min_rating will be included
     if min_rating is not None:
-        # Fetch 3x the limit to account for rating filtering, capped at 500
-        batch_size = min(limit * 3 + offset, 500)
-        query = query.range(0, batch_size - 1)
-    else:
-        query = query.range(offset, offset + limit - 1)
+        # Filter products that have source_rating >= min_rating
+        # This significantly reduces the dataset before pagination
+        query = query.gte("source_rating", min_rating)
+    
+    # Apply pagination
+    query = query.range(offset, offset + limit - 1)
     
     response = query.execute()
 
@@ -498,9 +501,11 @@ async def get_products(
     if min_rating is not None or include_ratings:
         ratings_map = build_display_rating_map(db, products)
     
+    # If min_rating is set, we need to additionally filter by user ratings
+    # because the SQL filter only checked source_rating
     if min_rating is not None:
+        # Filter again to ensure display_rating (which considers user ratings) meets threshold
         products = [p for p in products if rating_meets_threshold(p, ratings_map, min_rating)]
-        products = products[offset:offset + limit]
 
     product_ids = [p["id"] for p in products]
 

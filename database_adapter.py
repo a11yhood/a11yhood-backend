@@ -615,6 +615,7 @@ class SQLiteTable:
 
         prepared: Dict[str, Any] = {}
         model_columns = {col.name for col in self.model.__table__.columns}
+        datetime_columns = {col.name for col in self.model.__table__.columns if isinstance(col.type, DateTime)}
 
         # Map newer fields to legacy columns where appropriate
         if "source_url" in item and "url" in model_columns and "url" not in item:
@@ -628,6 +629,16 @@ class SQLiteTable:
         # Only keep keys that exist on the model
         for key, value in item.items():
             if key in model_columns:
-                prepared[key] = value
+                # Convert datetime strings to datetime objects for SQLite
+                if key in datetime_columns and isinstance(value, str):
+                    try:
+                        from datetime import datetime
+                        # Parse ISO format datetime strings
+                        prepared[key] = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        # If parsing fails, store as-is and let SQLAlchemy handle it
+                        prepared[key] = value
+                else:
+                    prepared[key] = value
 
         return prepared
