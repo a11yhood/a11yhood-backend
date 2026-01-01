@@ -22,12 +22,17 @@ ts() {
 
 # Parse arguments
 RESET_DB=false
+SEED_DB=false
 HELP=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --reset-db)
       RESET_DB=true
+      shift
+      ;;
+    --seed)
+      SEED_DB=true
       shift
       ;;
     --help)
@@ -47,6 +52,7 @@ if [ "$HELP" = true ]; then
   echo ""
   echo "Options:"
   echo "  --reset-db   Reset test.db before starting"
+  echo "  --seed       Seed the database (runs seed_scripts/seed_all.py in the container)"
   echo "  --help       Show this help message"
   exit 0
 fi
@@ -149,6 +155,19 @@ if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
   echo "  Check logs with: docker logs a11yhood-backend-dev"
   docker logs --tail=50 a11yhood-backend-dev
   exit 1
+fi
+
+# Seed database if requested
+if [ "$SEED_DB" = true ]; then
+  echo ""
+  echo -e "${YELLOW}🌱 Seeding database inside container...${NC} (t=$(ts))"
+  if docker exec -w /app a11yhood-backend-dev python seed_scripts/seed_all.py; then
+    echo -e "${GREEN}✓ Database seeded${NC}"
+  else
+    echo -e "${RED}✗ Seeding failed${NC}"
+    echo "  Check logs with: docker logs a11yhood-backend-dev"
+    exit 1
+  fi
 fi
 
 echo ""
