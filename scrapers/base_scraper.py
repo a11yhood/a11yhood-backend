@@ -27,10 +27,11 @@ from typing import (
     TypeVar,
 )
 from datetime import datetime, UTC
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlparse
 import httpx
 import os
 import uuid
+import re
 
 from services.id_generator import normalize_to_snake_case
 
@@ -95,6 +96,40 @@ class BaseScraper(ABC):
     def get_source_name(self) -> str:
         """Return the source name (e.g., 'github', 'ravelry', 'thingiverse')"""
         pass
+
+    @staticmethod
+    def _normalize_url(url: Optional[str]) -> Optional[str]:
+        """Normalize URLs for consistent deduplication across scrapers.
+        
+        - Lowercase scheme/host
+        - Strip trailing slashes
+        - Collapse repeated slashes in path
+        - Preserve Wayback Machine URLs (timestamp + inner URL)
+        """
+        if not url:
+            return url
+        try:
+            parsed = urlparse(url)
+            scheme = (parsed.scheme or 'http').lower()
+            netloc = parsed.netloc.lower()
+            raw_path = parsed.path or ''
+            
+            # Preserve inner archived URL in Wayback Machine paths (which contain ://)
+            if netloc == 'web.archive.org' and raw_path.startswith('/web/'):
+                m = re.match(r'^/web/([^/]+)/(.+)$', raw_path)
+                if m:
+                    ts, inner = m.group(1), m.group(2)
+                    inner = inner.rstrip('/')
+                    path = f"/web/{ts}/{inner}"
+                else:
+                    path = raw_path.rstrip('/') or '/'
+            else:
+                path = re.sub(r'/+', '/', raw_path).rstrip('/') or '/'
+            
+            query = parsed.query
+            return f"{scheme}://{netloc}{path}{('?' + query) if query else ''}"
+        except Exception:
+            return url
     
     async def _throttle_request(self):
         """Rate limiting to respect API limits.
@@ -182,7 +217,8 @@ class BaseScraper(ABC):
     
     async def _product_exists(self, url: str) -> Optional[Dict[str, Any]]:
         """
-        Check if a product already exists in the database by URL
+        Check if a product already exists in the database by URL.
+        URLs are normalized before lookup to prevent duplicate inserts.
         
         Args:
             url: The product URL to check
@@ -190,8 +226,9 @@ class BaseScraper(ABC):
         Returns:
             Existing product dict if found, None otherwise
         """
+        normalized = self._normalize_url(url)
         try:
-            result = self.supabase.table("products").select("*").eq("url", url).execute()
+            result = self.supabase.table("products").select("*").eq("url", normalized).execute()
             return result.data[0] if result.data else None
         except Exception as e:
             if "column products.url does not exist" in str(e):
@@ -349,7 +386,7 @@ class BaseScraper(ABC):
         Update an existing product in the database.
         
         Protects immutable fields (source, url, external_id) from modification.
-        This prevents scrapers from accidentally changing product identity or attribution.
+        Preserves existing slug to avoid unique constraint conflicts on updates.
         
         Args:
             product_id: ID of the product to update
@@ -370,6 +407,7 @@ class BaseScraper(ABC):
             product_data.pop('url', None)
             product_data.pop('external_id', None)
             product_data.pop('scraped_at', None)  # Keep original scrape time
+            product_data.pop('slug', None)  # Never update slug on existing product
             # Use ISO string to avoid JSON serialization failures when sending to Supabase
             product_data['updated_at'] = datetime.now(UTC).replace(tzinfo=None).isoformat()
             # Recursively convert any datetime fields to ISO strings
