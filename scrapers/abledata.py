@@ -262,6 +262,8 @@ class AbleDataScraper(BaseScraper):
                 
                 try:
                     # Get full product details from detail page
+                    # Normalize URL early for consistent deduping
+                    base_info['url'] = self._normalize_url(base_info.get('url'))
                     product_data = await self._extract_product_details(base_info['url'], base_info)
                     
                     if not product_data:
@@ -271,6 +273,9 @@ class AbleDataScraper(BaseScraper):
                     existing = await self._product_exists(product_data['url'])
                     
                     if existing:
+                        # Preserve existing slug to avoid unique constraint conflicts on updates
+                        if existing.get('slug'):
+                            product_data['slug'] = existing['slug']
                         # Update existing product
                         await self._update_product(existing['id'], product_data)
                         results['products_updated'] += 1
@@ -375,7 +380,7 @@ class AbleDataScraper(BaseScraper):
                 
                 products.append({
                     'name': name,
-                    'url': product_url,
+                    'url': self._normalize_url(product_url),
                     'image': image_url,
                     'source': self.get_source_name(),
                     'type': 'Assistive Technology'
@@ -511,11 +516,13 @@ class AbleDataScraper(BaseScraper):
             # Extract last updated date
             page_date = self._extract_date_from_page(soup)
             
+            normalized_url = self._normalize_url(base_info.get('url') or product_url)
+
             # Build complete product dict
             product = {
                 'name': base_info.get('name'),
                 'description': description,
-                'url': base_info.get('url'),
+                'url': normalized_url,
                 'image': base_info.get('image'),
                 'source': self.get_source_name(),
                 'type': 'Assistive Technology',
@@ -548,22 +555,36 @@ class AbleDataScraper(BaseScraper):
             datetime object or None
         """
         try:
+            def _parse_date_text(raw: str) -> Optional[datetime]:
+                """Parse a raw date string using common AbleData formats."""
+                cleaned = re.sub(r'(?i)^price\s*check\s*date:?', '', raw).strip()
+                cleaned = re.sub(r'\s+', ' ', cleaned)
+                for fmt in ['%B %d, %Y', '%B %d %Y', '%m/%d/%Y', '%B %Y']:
+                    try:
+                        parsed = datetime.strptime(cleaned, fmt)
+                        # If the format lacks a day (e.g., %B %Y), default to the first
+                        if fmt == '%B %Y':
+                            parsed = parsed.replace(day=1)
+                        return parsed
+                    except Exception:
+                        continue
+                return None
+
+            # Prefer the explicit price check date span within the price-check group
+            price_check_span = soup.select_one('div.group-price-check div.item-field_price_check_date span')
+            if price_check_span:
+                parsed = _parse_date_text(price_check_span.get_text(strip=True))
+                if parsed:
+                    return parsed
+
             # First, try to find the price check date div
             price_check_div = soup.find('div', class_=re.compile(r'field-group-inline-item.*item-field_price_check_date', re.I))
             if price_check_div:
                 date_text = price_check_div.get_text(strip=True)
                 if date_text:
-                    # Try to parse the date text
-                    try:
-                        return datetime.strptime(date_text, '%B %d, %Y')
-                    except:
-                        try:
-                            return datetime.strptime(date_text, '%B %d %Y')
-                        except:
-                            try:
-                                return datetime.strptime(date_text, '%m/%d/%Y')
-                            except:
-                                pass
+                    parsed = _parse_date_text(date_text)
+                    if parsed:
+                        return parsed
             
             # Fallback: Look for common date patterns in page text
             text = soup.get_text()
