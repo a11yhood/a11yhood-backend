@@ -156,6 +156,9 @@ class ThingiverseScraper(BaseScraper):
                         print(f"[Thingiverse] Skip id={thing.get('id')} (no details)")
                         continue
                     
+                    # Add search term to thing details for tracking
+                    thing_details['_search_term'] = term
+                    
                     # Check if product already exists by URL
                     url = thing_details.get('public_url') or f"https://www.thingiverse.com/thing:{thing['id']}"
                     existing = await self._product_exists(url)
@@ -169,7 +172,7 @@ class ThingiverseScraper(BaseScraper):
                         result = await self._update_product(existing["id"], thing_details)
                         if result:
                             products_updated += 1
-                            print(f"[Thingiverse] Updated existing product url={url}")
+                            print(f"[Thingiverse] Updated existing product url={url} (found via term='{term}')")
                         else:
                             print(f"[Thingiverse] Failed to update existing product url={url}")
                     else:
@@ -177,7 +180,7 @@ class ThingiverseScraper(BaseScraper):
                         result = await self._create_product(thing_details)
                         if result:
                             products_added += 1
-                            print(f"[Thingiverse] Added product url={url}")
+                            print(f"[Thingiverse] Added product url={url} (found via term='{term}')")
                         else:
                             print(f"[Thingiverse] Failed to add product url={url}")
             
@@ -403,6 +406,9 @@ class ThingiverseScraper(BaseScraper):
             except Exception as e:
                 print(f"[Thingiverse] Failed to parse last updated date: {e}")
         
+        # Extract search term if provided
+        search_term = thing.get('_search_term')
+        
         return {
             'name': thing['name'],
             'description': thing.get('description', ''),
@@ -424,6 +430,7 @@ class ThingiverseScraper(BaseScraper):
                 'likes': thing.get('like_count', 0),
                 'favorites': thing.get('favorite_count', 0),
                 'categories': [cat.get('name') for cat in thing.get('categories', [])],
+                'search_term': search_term,  # Track which search term found this product
             }
         }
     

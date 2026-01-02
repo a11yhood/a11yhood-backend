@@ -38,6 +38,7 @@ class CollectionFromSearchCreate(CollectionBase):
 
 class CollectionResponse(CollectionBase):
     id: str
+    slug: str
     user_id: str
     user_name: str
     product_ids: List[str] = Field(default_factory=list)

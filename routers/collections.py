@@ -10,6 +10,7 @@ from datetime import datetime, UTC
 from models.collections import CollectionCreate, CollectionUpdate, CollectionResponse, ProductIdsRequest, CollectionFromSearchCreate
 from services.database import get_db
 from services.auth import get_current_user, get_current_user_optional
+from services.id_generator import generate_id_with_uniqueness_check
 import uuid
 
 router = APIRouter(prefix="/api/collections", tags=["collections"])
@@ -39,9 +40,12 @@ async def create_collection(
     if collection_data.description and len(collection_data.description) > 1000:
         raise HTTPException(status_code=400, detail="Description must be 1000 characters or less")
     
-    # Generate UUID primary key (schema expects UUID)
+    # Generate UUID primary key and slug
+    slug = generate_id_with_uniqueness_check(collection_data.name, db, "collections", column="slug")
+    
     collection = {
         "id": str(uuid.uuid4()),
+        "slug": slug,
         "user_id": user_id,
         "user_name": user_name,
         "name": collection_data.name,
@@ -196,9 +200,12 @@ async def create_collection_from_search(
                 if p.get("id") and _rating_meets_threshold(p, ratings_map, collection_data.min_rating)
             ]
     
-    # Create the collection with the search results
+    # Generate slug and create the collection with the search results
+    slug = generate_id_with_uniqueness_check(collection_data.name, db, "collections", column="slug")
+    
     collection = {
         "id": str(uuid.uuid4()),
+        "slug": slug,
         "user_id": user_id,
         "user_name": user_name,
         "name": collection_data.name,
@@ -361,14 +368,14 @@ async def get_public_collections(
     return collections
 
 
-@router.get("/{collection_id}", response_model=CollectionResponse)
+@router.get("/{collection_slug}", response_model=CollectionResponse)
 async def get_collection(
-    collection_id: str,
+    collection_slug: str,
     current_user: Optional[dict] = Depends(get_current_user_optional),
     db = Depends(get_db),
 ):
     """Get collection details - public collections viewable by all, private only by owner"""
-    response = db.table("collections").select("*").eq("id", collection_id).execute()
+    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
     
     if not response.data:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -383,9 +390,9 @@ async def get_collection(
     return collection
 
 
-@router.put("/{collection_id}", response_model=CollectionResponse)
+@router.put("/{collection_slug}", response_model=CollectionResponse)
 async def update_collection(
-    collection_id: str,
+    collection_slug: str,
     collection_data: CollectionUpdate,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
@@ -397,7 +404,7 @@ async def update_collection(
     user_id = current_user.get("id")
     
     # Get collection
-    response = db.table("collections").select("*").eq("id", collection_id).execute()
+    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Collection not found")
     
@@ -416,9 +423,12 @@ async def update_collection(
         raise HTTPException(status_code=400, detail="Description must be 1000 characters or less")
     
     # Build update data
+    collection_id = collection.get("id")
     update_data = {}
     if collection_data.name is not None:
         update_data["name"] = collection_data.name
+        # Regenerate slug when name changes
+        update_data["slug"] = generate_id_with_uniqueness_check(collection_data.name, db, "collections", column="slug")
     if collection_data.description is not None:
         update_data["description"] = collection_data.description
     if collection_data.is_public is not None:
@@ -432,9 +442,9 @@ async def update_collection(
     return response.data[0]
 
 
-@router.delete("/{collection_id}", status_code=204)
+@router.delete("/{collection_slug}", status_code=204)
 async def delete_collection(
-    collection_id: str,
+    collection_slug: str,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
@@ -445,11 +455,12 @@ async def delete_collection(
     user_id = current_user.get("id")
     
     # Get collection
-    response = db.table("collections").select("*").eq("id", collection_id).execute()
+    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Collection not found")
     
     collection = response.data[0]
+    collection_id = collection.get("id")
     
     # Check ownership
     if collection.get("user_id") != user_id:
@@ -461,34 +472,37 @@ async def delete_collection(
     return None
 
 
-@router.post("/{collection_id}/products/{product_id}", response_model=CollectionResponse)
+@router.post("/{collection_slug}/products/{product_slug}", response_model=CollectionResponse)
 async def add_product_to_collection(
-    collection_id: str,
-    product_id: str,
+    collection_slug: str,
+    product_slug: str,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Add a product to a collection"""
+    """Add a product to a collection (using collection and product slugs)"""
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     user_id = current_user.get("id")
     
-    # Get collection
-    response = db.table("collections").select("*").eq("id", collection_id).execute()
+    # Get collection by slug
+    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Collection not found")
     
     collection = response.data[0]
+    collection_id = collection.get("id")
     
     # Check ownership
     if collection.get("user_id") != user_id:
         raise HTTPException(status_code=403, detail="Only the owner can modify this collection")
     
-    # Check product exists
-    products = db.table("products").select("id").eq("id", product_id).execute()
+    # Get product by slug
+    products = db.table("products").select("id").eq("slug", product_slug).execute()
     if not products.data:
         raise HTTPException(status_code=404, detail="Product not found")
+    
+    product_id = products.data[0].get("id")
     
     # Add product if not already in collection
     product_ids = collection.get("product_ids", []) or []
@@ -506,25 +520,33 @@ async def add_product_to_collection(
     return response.data[0]
 
 
-@router.delete("/{collection_id}/products/{product_id}", response_model=CollectionResponse)
+@router.delete("/{collection_slug}/products/{product_slug}", response_model=CollectionResponse)
 async def remove_product_from_collection(
-    collection_id: str,
-    product_id: str,
+    collection_slug: str,
+    product_slug: str,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Remove a product from a collection"""
+    """Remove a product from a collection (using collection and product slugs)"""
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     user_id = current_user.get("id")
     
-    # Get collection
-    response = db.table("collections").select("*").eq("id", collection_id).execute()
+    # Get collection by slug
+    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Collection not found")
     
     collection = response.data[0]
+    collection_id = collection.get("id")
+    
+    # Get product by slug to resolve to ID
+    product_response = db.table("products").select("id").eq("slug", product_slug).execute()
+    if not product_response.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    product_id = product_response.data[0].get("id")
     
     # Check ownership
     if collection.get("user_id") != user_id:
@@ -546,9 +568,9 @@ async def remove_product_from_collection(
     return response.data[0]
 
 
-@router.delete("/{collection_id}/products", response_model=CollectionResponse)
+@router.delete("/{collection_slug}/products", response_model=CollectionResponse)
 async def remove_all_products_from_collection(
-    collection_id: str,
+    collection_slug: str,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
@@ -558,12 +580,13 @@ async def remove_all_products_from_collection(
     
     user_id = current_user.get("id")
     
-    # Get collection
-    response = db.table("collections").select("*").eq("id", collection_id).execute()
+    # Get collection by slug
+    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Collection not found")
     
     collection = response.data[0]
+    collection_id = collection.get("id")
     
     # Check ownership
     if collection.get("user_id") != user_id:
@@ -580,26 +603,27 @@ async def remove_all_products_from_collection(
     return response.data[0]
 
 
-@router.post("/{collection_id}/products", response_model=CollectionResponse)
+@router.post("/{collection_slug}/products", response_model=CollectionResponse)
 async def add_multiple_products_to_collection(
-    collection_id: str,
+    collection_slug: str,
     request: ProductIdsRequest,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Add multiple products to a collection at once"""
+    """Add multiple products to a collection at once (product_ids can be UUIDs or slugs)"""
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     user_id = current_user.get("id")
     product_ids = request.product_ids
     
-    # Get collection
-    response = db.table("collections").select("*").eq("id", collection_id).execute()
+    # Get collection by slug
+    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Collection not found")
     
     collection = response.data[0]
+    collection_id = collection.get("id")
     
     # Check ownership
     if collection.get("user_id") != user_id:
@@ -610,15 +634,24 @@ async def add_multiple_products_to_collection(
         response = db.table("collections").select("*").eq("id", collection_id).execute()
         return response.data[0]
     
-    # Verify all products exist
-    for prod_id in product_ids:
-        products = db.table("products").select("id").eq("id", prod_id).execute()
-        if not products.data:
-            raise HTTPException(status_code=404, detail=f"Product {prod_id} not found")
+    # Resolve product slugs to IDs - try as ID first, then as slug
+    resolved_product_ids = []
+    for prod_identifier in product_ids:
+        # Try as ID first
+        products = db.table("products").select("id").eq("id", prod_identifier).execute()
+        if products.data:
+            resolved_product_ids.append(products.data[0].get("id"))
+        else:
+            # Try as slug
+            products = db.table("products").select("id").eq("slug", prod_identifier).execute()
+            if products.data:
+                resolved_product_ids.append(products.data[0].get("id"))
+            else:
+                raise HTTPException(status_code=404, detail=f"Product {prod_identifier} not found")
     
     # Add products, avoiding duplicates
     current_product_ids = collection.get("product_ids", []) or []
-    for prod_id in product_ids:
+    for prod_id in resolved_product_ids:
         if prod_id not in current_product_ids:
             current_product_ids.append(prod_id)
     

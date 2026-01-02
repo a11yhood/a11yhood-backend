@@ -278,6 +278,7 @@
   -- ============================================================================
   CREATE TABLE collections (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    slug TEXT UNIQUE NOT NULL,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     user_name TEXT NOT NULL,
     name TEXT NOT NULL,
