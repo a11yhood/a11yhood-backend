@@ -202,6 +202,7 @@ class Collection(Base):
     __tablename__ = "collections"
     
     id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    slug = Column(String, unique=True, nullable=False)
     user_id = Column(String, nullable=False)
     user_name = Column(String, nullable=False)
     name = Column(String, nullable=False)
