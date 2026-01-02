@@ -34,6 +34,7 @@ Base.metadata.create_all(bind=engine)
 test_collections = [
     {
         "id": "coll-admin-public-001",
+        "slug": "accessible-software-tools",
         "user_id": "49366adb-2d13-412f-9ae5-4c35dbffab10",  # admin_user
         "user_name": "admin_user",
         "name": "Accessible Software Tools",
@@ -45,6 +46,7 @@ test_collections = [
     },
     {
         "id": "coll-regular-private-001",
+        "slug": "my-personal-collection",
         "user_id": "f8f9fa4b-d03e-4a5c-85f5-4e6f3c9d7a2b",  # regular_user
         "user_name": "regular_user",
         "name": "My Personal Collection",
@@ -56,6 +58,7 @@ test_collections = [
     },
     {
         "id": "coll-admin-public-002",
+        "slug": "empty-collection",
         "user_id": "49366adb-2d13-412f-9ae5-4c35dbffab10",  # admin_user
         "user_name": "admin_user",
         "name": "Empty Collection",
