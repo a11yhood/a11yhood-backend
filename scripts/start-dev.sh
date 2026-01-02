@@ -161,7 +161,7 @@ fi
 if [ "$SEED_DB" = true ]; then
   echo ""
   echo -e "${YELLOW}🌱 Seeding database inside container...${NC} (t=$(ts))"
-  if docker exec -w /app a11yhood-backend-dev python seed_scripts/seed_all.py; then
+  if docker exec -w /app a11yhood-backend-dev bash -c "export ENV_FILE=.env.test && /usr/local/bin/python3 seed_scripts/seed_all.py" >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Database seeded${NC}"
   else
     echo -e "${RED}✗ Seeding failed${NC}"
