@@ -5,6 +5,7 @@ Supports URL-based upsert for scrapers and tag management via relationship table
 Security: Mutations require authentication; updates/deletes enforce ownership or admin role.
 """
 import os
+import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from typing import Optional, Iterable, Callable
@@ -36,6 +37,15 @@ def _normalize_list(values: Optional[Iterable[str]]) -> list[str]:
             if item:
                 normalized.append(item)
     return normalized
+
+
+def _looks_like_uuid(value: str) -> bool:
+    """Check if a string resembles a UUID (best-effort, non-raising)."""
+    try:
+        uuid.UUID(str(value))
+        return True
+    except Exception:
+        return False
 
 
 def _canonicalize_sources(db, values: list[str]) -> list[str]:
@@ -1392,20 +1402,23 @@ def _ensure_moderator_or_admin(current_user: dict):
         raise HTTPException(status_code=403, detail="Moderator or admin access required")
 
 
-@router.post("/{product_id}/ban", response_model=ProductResponse)
+@router.post("/{product_slug}/ban", response_model=ProductResponse)
 async def ban_product(
-    product_id: str,
+    product_slug: str,
     payload: dict = None,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Ban a product from scraper updates (moderator/admin)."""
+    """Ban a product from scraper updates (moderator/admin) by slug."""
     _ensure_moderator_or_admin(current_user)
 
-    # Ensure product exists
-    product_response = db.table("products").select("*").eq("id", product_id).limit(1).execute()
+    # Resolve slug to product ID; fall back to ID if provided
+    product_response = db.table("products").select("id").eq("slug", product_slug).limit(1).execute()
+    if not product_response.data and _looks_like_uuid(product_slug):
+        product_response = db.table("products").select("id").eq("id", product_slug).limit(1).execute()
     if not product_response.data:
         raise HTTPException(status_code=404, detail="Product not found")
+    product_id = product_response.data[0]["id"]
 
     reason = None
     if payload:
@@ -1426,14 +1439,22 @@ async def ban_product(
     return _normalize_product(product, db)
 
 
-@router.post("/{product_id}/unban", response_model=ProductResponse)
+@router.post("/{product_slug}/unban", response_model=ProductResponse)
 async def unban_product(
-    product_id: str,
+    product_slug: str,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Remove ban from a product (moderator/admin)."""
+    """Remove ban from a product (moderator/admin) by slug."""
     _ensure_moderator_or_admin(current_user)
+
+    # Resolve slug to product ID; fall back to ID if provided
+    product_response = db.table("products").select("id").eq("slug", product_slug).limit(1).execute()
+    if not product_response.data and _looks_like_uuid(product_slug):
+        product_response = db.table("products").select("id").eq("id", product_slug).limit(1).execute()
+    if not product_response.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+    product_id = product_response.data[0]["id"]
 
     updated = db.table("products").update({
         "banned": False,
