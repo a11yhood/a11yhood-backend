@@ -4,6 +4,8 @@ Handles CRUD operations for products with ownership tracking via product_editors
 Supports URL-based upsert for scrapers and tag management via relationship tables.
 Security: Mutations require authentication; updates/deletes enforce ownership or admin role.
 """
+import os
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from typing import Optional, Iterable, Callable
 from datetime import datetime, UTC, timedelta
@@ -76,6 +78,107 @@ def _canonicalize_source_value_db(db, value: Optional[str]) -> Optional[str]:
     key = str(value).strip().lower()
     name_map = _get_supported_source_name_map(db)
     return name_map.get(key, value)
+
+
+async def _enrich_manual_product_metadata(db, source_name: str, source_url: str, product: ProductCreate, db_data: dict):
+    """Fetch metadata from source scrapers for manually submitted products.
+
+    Best-effort: silently continue if tokens are missing or scraping fails.
+    Populates source_last_updated and enriches description/image/external_id/ratings when available.
+    """
+    if not source_name or not source_url:
+        return
+
+    source_key = str(source_name).strip().lower()
+
+    def _get_token(platform: str, env_keys: list[str]) -> Optional[str]:
+        token = None
+        try:
+            resp = db.table("oauth_configs").select("access_token").eq("platform", platform).limit(1).execute()
+            token = (resp.data or [{}])[0].get("access_token")
+        except Exception:
+            token = None
+        if not token:
+            for key in env_keys:
+                token = os.getenv(key)
+                if token:
+                    break
+        return token
+
+    scraper_map = {
+        "thingiverse": {
+            "platform": "thingiverse",
+            "factory": lambda token: __import__("scrapers.thingiverse", fromlist=["ThingiverseScraper"]).ThingiverseScraper(db, token),
+            "env_keys": ["THINGIVERSE_ACCESS_TOKEN", "THINGIVERSE_TOKEN"],
+            "requires_token": True,
+        },
+        "github": {
+            "platform": "github",
+            "factory": lambda token: __import__("scrapers.github", fromlist=["GitHubScraper"]).GitHubScraper(db, token),
+            "env_keys": ["GITHUB_TOKEN", "GITHUB_ACCESS_TOKEN"],
+            "requires_token": False,
+        },
+        "ravelry": {
+            "platform": "ravelry",
+            "factory": lambda token: __import__("scrapers.ravelry", fromlist=["RavelryScraper"]).RavelryScraper(db, token),
+            "env_keys": ["RAVELRY_ACCESS_TOKEN", "RAVELRY_APP_KEY"],
+            "requires_token": True,
+        },
+        "goat": {
+            "platform": "goat",
+            "factory": lambda token: __import__("scrapers.goat", fromlist=["GOATScraper"]).GOATScraper(db, token),
+            "env_keys": ["GOAT_API_KEY", "LIBRARYTHING_API_KEY", "LIBRARYTHING_TOKEN"],
+            "requires_token": False,
+        },
+        "librarything": {
+            "platform": "goat",
+            "factory": lambda token: __import__("scrapers.goat", fromlist=["GOATScraper"]).GOATScraper(db, token),
+            "env_keys": ["GOAT_API_KEY", "LIBRARYTHING_API_KEY", "LIBRARYTHING_TOKEN"],
+            "requires_token": False,
+        },
+        "abledata": {
+            "platform": "abledata",
+            "factory": lambda token: __import__("scrapers.abledata", fromlist=["AbleDataScraper"]).AbleDataScraper(db, token),
+            "env_keys": [],
+            "requires_token": False,
+        },
+    }
+
+    config = scraper_map.get(source_key)
+    if not config:
+        return
+
+    token = _get_token(config["platform"], config["env_keys"])
+    if config["requires_token"] and not token:
+        return
+
+    scraper = None
+    try:
+        scraper = config["factory"](token)
+        scraped_data = await scraper.scrape_url(source_url)
+        if not scraped_data:
+            return
+        # Populate fields when present
+        if scraped_data.get("source_last_updated"):
+            db_data["source_last_updated"] = scraped_data["source_last_updated"]
+        if not product.description and scraped_data.get("description"):
+            db_data["description"] = scraped_data["description"]
+        if not product.image_url and scraped_data.get("image"):
+            db_data["image"] = scraped_data["image"]
+        if scraped_data.get("external_id"):
+            db_data["external_id"] = scraped_data["external_id"]
+        if scraped_data.get("source_rating"):
+            db_data["source_rating"] = scraped_data["source_rating"]
+        if scraped_data.get("source_rating_count"):
+            db_data["source_rating_count"] = scraped_data["source_rating_count"]
+    except Exception as e:
+        print(f"Warning: Failed to fetch metadata for source '{source_name}': {e}")
+    finally:
+        try:
+            if scraper and hasattr(scraper, "close"):
+                await scraper.close()
+        except Exception:
+            pass
 
 
 class BulkDeleteRequest(BaseModel):
@@ -879,6 +982,9 @@ async def create_product(
         "external_id": product.external_id,
         "created_by": current_user["id"]
     }
+    
+    # Enrich metadata from source scrapers (best-effort)
+    await _enrich_manual_product_metadata(db, determined_source, source_url, product, db_data)
 
     # Upsert behavior: If URL provided and product exists, update instead of creating.
     # This prevents duplicate products from scrapers while allowing manual updates.
