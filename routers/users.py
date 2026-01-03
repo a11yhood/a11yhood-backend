@@ -130,6 +130,42 @@ async def get_user_by_username(
     )
 
 
+@router.get("/me", response_model=UserAccountResponse, response_model_by_alias=False)
+async def get_current_user_profile(
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_db)
+):
+    """Get current authenticated user's full profile.
+    
+    Security: Requires authentication. Returns full user data including email and preferences.
+    """
+    user_id = current_user.get("id")
+    response = db.table("users").select("*").eq("id", user_id).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user = response.data[0]
+    role = user.get("role", "user")
+    username_display = user.get("username", "")
+    return UserAccountResponse(
+        id=user["id"],
+        username=username_display,
+        username_display=username_display,
+        avatar_url=user.get("avatar_url"),
+        email=user.get("email"),
+        role=role,
+        display_name=user.get("display_name"),
+        bio=user.get("bio"),
+        location=user.get("location"),
+        website=user.get("website"),
+        preferences=user.get("preferences"),
+        created_at=user.get("created_at"),
+        updated_at=user.get("updated_at"),
+        joined_at=user.get("joined_at"),
+        last_active=user.get("last_active")
+    )
+
+
 @router.put("/{identifier}", response_model=UserAccountResponse, response_model_by_alias=False)
 @router.post("/{identifier}", response_model=UserAccountResponse, response_model_by_alias=False)
 async def create_or_update_user_account(
