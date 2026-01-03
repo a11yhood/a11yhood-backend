@@ -111,51 +111,6 @@ async def get_user_account(
     identifier: str,
     db = Depends(get_db)
 ):
-    """Get current authenticated user's full profile.
-    
-    Security: Requires authentication. Returns full user data including email and preferences.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    user_id = current_user.get("id")
-    logger.info(f"[/me] current_user from token: {current_user}")
-    logger.info(f"[/me] Querying database for user_id: {user_id}")
-    
-    response = db.table("users").select("*").eq("id", user_id).execute()
-    logger.info(f"[/me] Database response data: {response.data}")
-    
-    if not response.data:
-        logger.error(f"[/me] ERROR: No user found in database for id={user_id}")
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    user = response.data[0]
-    role = user.get("role", "user")
-    username_display = user.get("username", "")
-    return UserAccountResponse(
-        id=user["id"],
-        username=username_display,
-        username_display=username_display,
-        avatar_url=user.get("avatar_url"),
-        email=user.get("email"),
-        role=role,
-        display_name=user.get("display_name"),
-        bio=user.get("bio"),
-        location=user.get("location"),
-        website=user.get("website"),
-        preferences=user.get("preferences"),
-        created_at=user.get("created_at"),
-        updated_at=user.get("updated_at"),
-        joined_at=user.get("joined_at"),
-        last_active=user.get("last_active")
-    )
-
-
-@router.get("/{identifier}", response_model=PublicUserAccountResponse, response_model_by_alias=False)
-async def get_user_account(
-    identifier: str,
-    db = Depends(get_db)
-):
     """Get user account by username.
     """
     user = _get_user_by_identifier(db, identifier)
