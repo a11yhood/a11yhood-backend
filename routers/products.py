@@ -171,6 +171,8 @@ async def _enrich_manual_product_metadata(db, source_name: str, source_url: str,
         # Populate fields when present
         if scraped_data.get("source_last_updated"):
             db_data["source_last_updated"] = scraped_data["source_last_updated"]
+        if scraped_data.get("image_alt"):
+            db_data["image_alt"] = scraped_data["image_alt"]
         if not product.description and scraped_data.get("description"):
             db_data["description"] = scraped_data["description"]
         if not product.image_url and scraped_data.get("image"):
@@ -939,6 +941,8 @@ def _normalize_product(product: dict, db) -> dict:
     product["stars"] = product.get("source_rating_count") or 0
     if "image" in product:
         product["image_url"] = product.get("image")
+    if "image_alt" in product:
+        product["image_alt"] = product.get("image_alt")
     if "url" in product:
         product["source_url"] = product.get("url")
     attach_rating_fields(db, product)
@@ -987,6 +991,7 @@ async def create_product(
         "description": product.description,
         "url": source_url,
         "image": str(product.image_url) if product.image_url else None,
+        "image_alt": product.image_alt,
         "source": determined_source,  # Auto-assigned, not from user input
         "type": product.type or "Other",
         "external_id": product.external_id,
@@ -1006,7 +1011,7 @@ async def create_product(
                 raise HTTPException(status_code=403, detail="Product is banned and cannot be resubmitted")
             # Build update data, excluding immutable fields like created_by
             update_data = {k: v for k, v in db_data.items() if k in {
-                "name", "description", "url", "image", "source", "type", "external_id"
+                "name", "description", "url", "image", "image_alt", "source", "type", "external_id", "source_last_updated"
             } and v is not None}
 
             # Ensure legacy rows get a slug assigned
@@ -1122,6 +1127,8 @@ async def update_product(
         db_data["url"] = str(product.source_url)
     if "image_url" in product_data and product.image_url is not None:
         db_data["image"] = str(product.image_url)
+    if "image_alt" in product_data:
+        db_data["image_alt"] = product.image_alt
     if "source" in product_data:
         db_data["source"] = _canonicalize_source_value_db(db, product_data["source"]) or product_data["source"]
     if "type" in product_data and product.type is not None:
@@ -1194,6 +1201,8 @@ async def patch_product(
         db_data["url"] = str(product.source_url)
     if "image_url" in product_data and product.image_url is not None:
         db_data["image"] = str(product.image_url)
+    if "image_alt" in product_data:
+        db_data["image_alt"] = product.image_alt
     if "source" in product_data:
         db_data["source"] = _canonicalize_source_value_db(db, product_data["source"]) or product_data["source"]
     if "type" in product_data and product.type is not None:
