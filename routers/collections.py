@@ -4,7 +4,7 @@ Supports user-curated product collections with public/private visibility.
 All mutations require authentication and enforce ownership checks.
 Security: Users can only modify their own collections unless admin.
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from typing import List, Optional
 from datetime import datetime, UTC
 from models.collections import CollectionCreate, CollectionUpdate, CollectionResponse, ProductIdsRequest, CollectionFromSearchCreate
@@ -391,6 +391,7 @@ async def get_public_collections(
 @router.get("/{collection_slug}", response_model=CollectionResponse)
 async def get_collection(
     collection_slug: str,
+    request: Request,
     current_user: Optional[dict] = Depends(get_current_user_optional),
     db = Depends(get_db),
 ):
@@ -412,6 +413,7 @@ async def get_collection(
 async def update_collection(
     collection_slug: str,
     collection_data: CollectionUpdate,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
@@ -461,6 +463,7 @@ async def update_collection(
 @router.delete("/{collection_slug}", status_code=204)
 async def delete_collection(
     collection_slug: str,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
@@ -484,6 +487,7 @@ async def delete_collection(
 async def add_product_to_collection(
     collection_slug: str,
     product_slug: str,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
@@ -532,6 +536,7 @@ async def add_product_to_collection(
 async def remove_product_from_collection(
     collection_slug: str,
     product_slug: str,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):

@@ -233,6 +233,7 @@ class RoleUpdate(BaseModel):
 async def update_user_role(
     username: str,
     role_update: RoleUpdate,
+    request: Request,
     db = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
