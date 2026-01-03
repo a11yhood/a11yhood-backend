@@ -4,7 +4,7 @@ Supports user-curated product collections with public/private visibility.
 All mutations require authentication and enforce ownership checks.
 Security: Users can only modify their own collections unless admin.
 """
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional
 from datetime import datetime, UTC
 from models.collections import CollectionCreate, CollectionUpdate, CollectionResponse, ProductIdsRequest, CollectionFromSearchCreate
@@ -391,7 +391,6 @@ async def get_public_collections(
 @router.get("/{collection_slug}", response_model=CollectionResponse)
 async def get_collection(
     collection_slug: str,
-    request: Request,
     current_user: Optional[dict] = Depends(get_current_user_optional),
     db = Depends(get_db),
 ):
@@ -399,10 +398,6 @@ async def get_collection(
     
     Public collections viewable by all; private collections only by owner.
     """
-    # Add deprecation header if UUID was used
-    if _looks_like_uuid(collection_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     collection = _get_collection_by_slug_or_id(db, collection_slug)
     
     # Check access
@@ -417,17 +412,12 @@ async def get_collection(
 async def update_collection(
     collection_slug: str,
     collection_data: CollectionUpdate,
-    request: Request,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
     """Update collection by slug - only owner can edit.
         
     """
-    # Add deprecation header if UUID was used
-    if _looks_like_uuid(collection_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
@@ -471,16 +461,11 @@ async def update_collection(
 @router.delete("/{collection_slug}", status_code=204)
 async def delete_collection(
     collection_slug: str,
-    request: Request,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
     """Delete collection by slug - only owner can delete.
     """
-    # Add deprecation header if UUID was used
-    if _looks_like_uuid(collection_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     collection = _get_collection_by_slug_or_id(db, collection_slug)
@@ -499,17 +484,12 @@ async def delete_collection(
 async def add_product_to_collection(
     collection_slug: str,
     product_slug: str,
-    request: Request,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
     """Add a product to a collection by slug.
     
     """
-    # Add deprecation header if UUIDs were used
-    if _looks_like_uuid(collection_slug) or _looks_like_uuid(product_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
@@ -552,16 +532,11 @@ async def add_product_to_collection(
 async def remove_product_from_collection(
     collection_slug: str,
     product_slug: str,
-    request: Request,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
     """Remove a product from a collection by slug.
     """
-    # Add deprecation header if UUIDs were used
-    if _looks_like_uuid(collection_slug) or _looks_like_uuid(product_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
