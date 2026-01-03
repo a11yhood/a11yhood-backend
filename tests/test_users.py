@@ -110,3 +110,39 @@ def test_get_nonexistent_user_returns_404(client):
     """Test that getting a nonexistent user returns 404"""
     response = client.get("/api/users/nonexistent_user_id")
     assert response.status_code == 404
+
+
+def test_get_current_user_me_endpoint(auth_client, test_user):
+    """Test that /api/users/me returns authenticated user's full profile"""
+    response = auth_client.get("/api/users/me")
+    
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Should return full authenticated user data
+    assert data["id"] == test_user["id"]
+    assert data["username"] == test_user["username"]
+    assert data["role"] == test_user.get("role", "user")
+    assert "email" in data  # Full profile includes email
+    assert "preferences" in data  # Full profile includes preferences
+
+
+def test_me_endpoint_requires_auth(client):
+    """Test that /api/users/me requires authentication"""
+    response = client.get("/api/users/me")
+    assert response.status_code == 401
+
+
+def test_me_endpoint_returns_full_profile_with_email(auth_client, test_user):
+    """Test that /api/users/me includes email (unlike public endpoint)"""
+    # /api/users/me returns full profile with email
+    response = auth_client.get("/api/users/me")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] == test_user.get("email")
+    
+    # Public endpoint /api/users/by-username/{username} hides email
+    response = auth_client.get(f"/api/users/by-username/{test_user['username']}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] is None  # Public profile excludes email
