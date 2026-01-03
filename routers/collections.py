@@ -317,6 +317,17 @@ def _rating_meets_threshold(product: dict, ratings_map: dict[str, dict], min_rat
     return display_rating >= min_rating
 
 
+def _get_collection_by_slug_or_id(db, slug_or_id: str) -> dict:
+    """Fetch collection by slug; fall back to id."""
+    resp = db.table("collections").select("*").eq("slug", slug_or_id).limit(1).execute()
+    if resp.data:
+        return resp.data[0]
+    resp = db.table("collections").select("*").eq("id", slug_or_id).limit(1).execute()
+    if resp.data:
+        return resp.data[0]
+    raise HTTPException(status_code=404, detail="Collection not found")
+
+
 
 @router.get("", response_model=List[CollectionResponse])
 async def get_user_collections(
@@ -375,12 +386,7 @@ async def get_collection(
     db = Depends(get_db),
 ):
     """Get collection details - public collections viewable by all, private only by owner"""
-    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
-    
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    collection = response.data[0]
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
     
     # Check access
     if not collection.get("is_public"):
@@ -404,11 +410,7 @@ async def update_collection(
     user_id = current_user.get("id")
     
     # Get collection
-    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    collection = response.data[0]
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
     
     # Check ownership
     if collection.get("user_id") != user_id:
@@ -451,23 +453,14 @@ async def delete_collection(
     """Delete collection - only owner can delete"""
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    user_id = current_user.get("id")
-    
-    # Get collection
-    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    collection = response.data[0]
-    collection_id = collection.get("id")
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
     
     # Check ownership
-    if collection.get("user_id") != user_id:
+    if collection.get("user_id") != current_user.get("id"):
         raise HTTPException(status_code=403, detail="Only the owner can delete this collection")
     
     # Delete from database
-    db.table("collections").delete().eq("id", collection_id).execute()
+    db.table("collections").delete().eq("id", collection.get("id")).execute()
     
     return None
 
@@ -479,26 +472,24 @@ async def add_product_to_collection(
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Add a product to a collection (using collection and product slugs)"""
+    """Add a product to a collection (using collection and product slugs or IDs)"""
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     user_id = current_user.get("id")
     
-    # Get collection by slug
-    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    collection = response.data[0]
+    # Get collection by slug or id
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
     collection_id = collection.get("id")
     
     # Check ownership
     if collection.get("user_id") != user_id:
         raise HTTPException(status_code=403, detail="Only the owner can modify this collection")
     
-    # Get product by slug
-    products = db.table("products").select("id").eq("slug", product_slug).execute()
+    # Get product by id first, then by slug
+    products = db.table("products").select("id").eq("id", product_slug).execute()
+    if not products.data:
+        products = db.table("products").select("id").eq("slug", product_slug).execute()
     if not products.data:
         raise HTTPException(status_code=404, detail="Product not found")
     
@@ -527,22 +518,20 @@ async def remove_product_from_collection(
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Remove a product from a collection (using collection and product slugs)"""
+    """Remove a product from a collection (using collection and product slugs or IDs)"""
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     user_id = current_user.get("id")
     
-    # Get collection by slug
-    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    collection = response.data[0]
+    # Get collection by slug or id
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
     collection_id = collection.get("id")
     
-    # Get product by slug to resolve to ID
-    product_response = db.table("products").select("id").eq("slug", product_slug).execute()
+    # Get product by id first, then by slug
+    product_response = db.table("products").select("id").eq("id", product_slug).execute()
+    if not product_response.data:
+        product_response = db.table("products").select("id").eq("slug", product_slug).execute()
     if not product_response.data:
         raise HTTPException(status_code=404, detail="Product not found")
     
@@ -580,12 +569,8 @@ async def remove_all_products_from_collection(
     
     user_id = current_user.get("id")
     
-    # Get collection by slug
-    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    collection = response.data[0]
+    # Get collection by slug or id
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
     collection_id = collection.get("id")
     
     # Check ownership
@@ -617,12 +602,8 @@ async def add_multiple_products_to_collection(
     user_id = current_user.get("id")
     product_ids = request.product_ids
     
-    # Get collection by slug
-    response = db.table("collections").select("*").eq("slug", collection_slug).execute()
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    collection = response.data[0]
+    # Get collection by slug or id
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
     collection_id = collection.get("id")
     
     # Check ownership

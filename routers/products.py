@@ -479,14 +479,10 @@ async def get_products(
     # Always apply ordering before range for consistent results
     query = query.order("created_at", desc=True)
 
-    # For min_rating filters, we need to filter by source_rating in SQL first
-    # This is more efficient than fetching everything and filtering in Python
-    # Note: This only filters by source_rating, not user ratings
-    # Products without user ratings but with source_rating >= min_rating will be included
-    if min_rating is not None:
-        # Filter products that have source_rating >= min_rating
-        # This significantly reduces the dataset before pagination
-        query = query.gte("source_rating", min_rating)
+    # Note: For min_rating filters, we don't filter by source_rating in SQL because
+    # some products may have no source_rating but could have user ratings that meet the threshold.
+    # We'll fetch products without the source_rating filter and apply the rating threshold in Python
+    # after computing display_rating from both user and source ratings.
     
     # Apply pagination
     query = query.range(offset, offset + limit - 1)
