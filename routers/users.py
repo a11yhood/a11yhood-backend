@@ -74,10 +74,16 @@ class UserAccountResponse(PublicUserAccountResponse):
 @router.get("/{identifier}", response_model=PublicUserAccountResponse, response_model_by_alias=False)
 async def get_user_account(
     identifier: str,
+    request: Request,
     db = Depends(get_db)
 ):
-    """Get user account by username or id."""
+    """Get user account by username.
+    """
     user = _get_user_by_identifier(db, identifier)
+    
+    # Add deprecation header if UUID was used
+    if _looks_like_uuid(identifier):
+        request.headers.__dict__["deprecation"] = "true"
     role = user.get("role", "user")
     username_display = user.get("username", "")
     return PublicUserAccountResponse(
@@ -139,7 +145,12 @@ async def create_or_update_user_account(
     db = Depends(get_db),
     current_user: dict = Depends(get_current_user_optional)
 ):
-    """Create or update user account (keyed by username or id)."""
+    """Create or update user account by username.
+    """
+    # Add deprecation header if UUID was used
+    if _looks_like_uuid(identifier):
+        request.headers.__dict__["deprecation"] = "true"
+    
     auth_header = request.headers.get("Authorization")
     print(f"[users] create_or_update_user_account: identifier={identifier} auth_present={bool(auth_header)}")
 
@@ -236,10 +247,16 @@ class RoleUpdate(BaseModel):
 async def update_user_role(
     username: str,
     role_update: RoleUpdate,
+    request: Request,
     db = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Update a user's role by username. Require admin regardless of TEST_MODE."""
+    """Update a user's role by username.
+    """
+    # Add deprecation header if UUID was used
+    if _looks_like_uuid(username):
+        request.headers.__dict__["deprecation"] = "true"
+    
     new_role = role_update.role
     if new_role not in {"user", "moderator", "admin"}:
         raise HTTPException(status_code=400, detail="Invalid role")
