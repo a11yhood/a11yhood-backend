@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from services.database import get_db
 from services.auth import get_current_user, get_current_user_optional, ensure_admin, DEV_USER_IDS
 from services.security_logger import log_role_change
-from fastapi import Request
 from config import settings
 import os
 import uuid
@@ -74,16 +73,11 @@ class UserAccountResponse(PublicUserAccountResponse):
 @router.get("/{identifier}", response_model=PublicUserAccountResponse, response_model_by_alias=False)
 async def get_user_account(
     identifier: str,
-    request: Request,
     db = Depends(get_db)
 ):
     """Get user account by username.
     """
     user = _get_user_by_identifier(db, identifier)
-    
-    # Add deprecation header if UUID was used
-    if _looks_like_uuid(identifier):
-        request.headers.__dict__["deprecation"] = "true"
     role = user.get("role", "user")
     username_display = user.get("username", "")
     return PublicUserAccountResponse(
@@ -141,19 +135,11 @@ async def get_user_by_username(
 async def create_or_update_user_account(
     identifier: str,
     account_data: UserAccountCreate,
-    request: Request,
     db = Depends(get_db),
     current_user: dict = Depends(get_current_user_optional)
 ):
     """Create or update user account by username.
     """
-    # Add deprecation header if UUID was used
-    if _looks_like_uuid(identifier):
-        request.headers.__dict__["deprecation"] = "true"
-    
-    auth_header = request.headers.get("Authorization")
-    print(f"[users] create_or_update_user_account: identifier={identifier} auth_present={bool(auth_header)}")
-
     # Check if user exists by username first, then by id
     existing_resp = db.table("users").select("*").eq("username", identifier).limit(1).execute()
     existing_user = existing_resp.data[0] if existing_resp.data else None
@@ -253,10 +239,6 @@ async def update_user_role(
 ):
     """Update a user's role by username.
     """
-    # Add deprecation header if UUID was used
-    if _looks_like_uuid(username):
-        request.headers.__dict__["deprecation"] = "true"
-    
     new_role = role_update.role
     if new_role not in {"user", "moderator", "admin"}:
         raise HTTPException(status_code=400, detail="Invalid role")

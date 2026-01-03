@@ -399,10 +399,6 @@ async def get_collection(
     
     Public collections viewable by all; private collections only by owner.
     """
-    # Add deprecation header if UUID was used
-    if _looks_like_uuid(collection_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     collection = _get_collection_by_slug_or_id(db, collection_slug)
     
     # Check access
@@ -424,10 +420,6 @@ async def update_collection(
     """Update collection by slug - only owner can edit.
         
     """
-    # Add deprecation header if UUID was used
-    if _looks_like_uuid(collection_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
@@ -477,10 +469,6 @@ async def delete_collection(
 ):
     """Delete collection by slug - only owner can delete.
     """
-    # Add deprecation header if UUID was used
-    if _looks_like_uuid(collection_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     collection = _get_collection_by_slug_or_id(db, collection_slug)
@@ -506,10 +494,6 @@ async def add_product_to_collection(
     """Add a product to a collection by slug.
     
     """
-    # Add deprecation header if UUIDs were used
-    if _looks_like_uuid(collection_slug) or _looks_like_uuid(product_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
@@ -558,10 +542,6 @@ async def remove_product_from_collection(
 ):
     """Remove a product from a collection by slug.
     """
-    # Add deprecation header if UUIDs were used
-    if _looks_like_uuid(collection_slug) or _looks_like_uuid(product_slug):
-        request.headers.__dict__["deprecation"] = "true"
-    
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     

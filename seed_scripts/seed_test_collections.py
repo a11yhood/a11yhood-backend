@@ -47,7 +47,7 @@ test_collections = [
     {
         "id": "coll-regular-private-001",
         "slug": "my-personal-collection",
-        "user_id": "f8f9fa4b-d03e-4a5c-85f5-4e6f3c9d7a2b",  # regular_user
+        "user_id": "2a3b7c3e-971b-4b42-9c8c-0f1843486c50",  # regular_user
         "user_name": "regular_user",
         "name": "My Personal Collection",
         "description": "Private collection of products I like",
