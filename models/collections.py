@@ -42,6 +42,7 @@ class CollectionResponse(CollectionBase):
     user_id: str
     user_name: str
     product_ids: List[str] = Field(default_factory=list)
+    product_slugs: List[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     
