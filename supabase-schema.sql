@@ -66,6 +66,9 @@
     UNIQUE(username)
   );
 
+  -- Ensure fast lookups by username for public routes
+  CREATE UNIQUE INDEX IF NOT EXISTS users_username_idx ON public.users (username);
+
   -- ==== Users table hardening: role constraints, RLS, and admin-only role change ====
 
   -- Ensure role is constrained and defaults to 'user'
