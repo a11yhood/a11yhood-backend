@@ -767,6 +767,51 @@ async def get_product_by_slug(
     return result
 
 
+@router.get("/{slug}/collections")
+async def get_product_collections(
+    slug: str,
+    current_user: Optional[dict] = Depends(get_current_user_optional),
+    db = Depends(get_db),
+):
+    """Get all collections that contain this product.
+    
+    Returns public collections for unauthenticated users.
+    Returns public + user's private collections for authenticated users.
+    """
+    # Get product by slug
+    product_resp = db.table("products").select("id").eq("slug", slug).execute()
+    if not product_resp.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    product_id = product_resp.data[0]["id"]
+    
+    # Get collection IDs from junction table
+    junction_resp = db.table("collection_products").select("collection_id").eq("product_id", product_id).execute()
+    collection_ids = [row["collection_id"] for row in (junction_resp.data or [])]
+    
+    if not collection_ids:
+        return []
+    
+    # Fetch collections
+    collections_resp = db.table("collections").select("*").in_("id", collection_ids).execute()
+    collections = collections_resp.data or []
+    
+    # Filter based on authentication
+    user_id = current_user.get("id") if current_user else None
+    filtered_collections = [
+        c for c in collections
+        if c.get("is_public") or (user_id and c.get("user_id") == user_id)
+    ]
+    
+    # Populate product_ids and product_slugs for each collection
+    for collection in filtered_collections:
+        products_resp = db.table("collection_products").select("product_id, products(slug)").eq("collection_id", collection["id"]).order("position").execute()
+        collection["product_ids"] = [p["product_id"] for p in (products_resp.data or [])]
+        collection["product_slugs"] = [p["products"]["slug"] if p.get("products") else None for p in (products_resp.data or [])]
+    
+    return filtered_collections
+
+
 def _normalize_product(product: dict, db) -> dict:
     """Attach derived fields (owners, tags, stars, url/image aliases)."""
     pid = product.get("id")

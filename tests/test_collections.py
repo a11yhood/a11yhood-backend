@@ -619,3 +619,204 @@ class TestAddMultipleProductsToCollection:
             json={"product_ids": [test_product["id"]]}
         )
         assert response.status_code == 403
+
+
+class TestProductCollections:
+    """Tests for GET /api/products/{slug}/collections endpoint"""
+
+    def test_get_product_collections_public(self, client, test_user, test_product, auth_headers):
+        """Test getting public collections containing a product"""
+        # Create two public collections with the product
+        collection1 = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Collection 1", "is_public": True}
+        ).json()
+        
+        collection2 = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Collection 2", "is_public": True}
+        ).json()
+        
+        # Add product to both collections
+        client.post(
+            f"/api/collections/{collection1['id']}/products/{test_product['id']}",
+            headers=auth_headers(test_user)
+        )
+        client.post(
+            f"/api/collections/{collection2['id']}/products/{test_product['id']}",
+            headers=auth_headers(test_user)
+        )
+        
+        # Get collections for product (unauthenticated)
+        response = client.get(f"/api/products/{test_product['slug']}/collections")
+        assert response.status_code == 200
+        collections = response.json()
+        assert len(collections) == 2
+        collection_names = {c["name"] for c in collections}
+        assert "Collection 1" in collection_names
+        assert "Collection 2" in collection_names
+
+    def test_get_product_collections_private_filtered(self, client, test_user, test_user_2, test_product, auth_headers):
+        """Test that private collections are filtered for unauthenticated users"""
+        # Create public and private collections
+        public_collection = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Public", "is_public": True}
+        ).json()
+        
+        private_collection = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Private", "is_public": False}
+        ).json()
+        
+        # Add product to both
+        client.post(
+            f"/api/collections/{public_collection['id']}/products/{test_product['id']}",
+            headers=auth_headers(test_user)
+        )
+        client.post(
+            f"/api/collections/{private_collection['id']}/products/{test_product['id']}",
+            headers=auth_headers(test_user)
+        )
+        
+        # Unauthenticated request should only see public
+        response = client.get(f"/api/products/{test_product['slug']}/collections")
+        assert response.status_code == 200
+        collections = response.json()
+        assert len(collections) == 1
+        assert collections[0]["name"] == "Public"
+
+    def test_get_product_collections_private_owner_can_see(self, client, test_user, test_product, auth_headers):
+        """Test that collection owner can see their private collections"""
+        # Create private collection
+        private_collection = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Private", "is_public": False}
+        ).json()
+        
+        # Add product
+        client.post(
+            f"/api/collections/{private_collection['id']}/products/{test_product['id']}",
+            headers=auth_headers(test_user)
+        )
+        
+        # Owner should see their private collection
+        response = client.get(
+            f"/api/products/{test_product['slug']}/collections",
+            headers=auth_headers(test_user)
+        )
+        assert response.status_code == 200
+        collections = response.json()
+        assert len(collections) == 1
+        assert collections[0]["name"] == "Private"
+
+    def test_get_product_collections_not_found(self, client):
+        """Test 404 for non-existent product"""
+        response = client.get("/api/products/nonexistent-slug/collections")
+        assert response.status_code == 404
+
+    def test_get_product_collections_empty(self, client, test_product):
+        """Test empty array when product is not in any collections"""
+        response = client.get(f"/api/products/{test_product['slug']}/collections")
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+class TestJunctionTableBehavior:
+    """Tests for junction table implementation"""
+
+    def test_product_position_maintained(self, client, test_user, test_product, auth_headers, db):
+        """Test that products maintain their insertion order via position field"""
+        collection = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Ordered Collection"}
+        ).json()
+        
+        # Create multiple products
+        product_ids = []
+        for i in range(3):
+            product = client.post(
+                "/api/products",
+                headers=auth_headers(test_user),
+                json={
+                    "name": f"Product {i}",
+                    "url": f"https://example.com/product-{i}",
+                    "type": "software"
+                }
+            ).json()
+            product_ids.append(product["id"])
+            
+            # Add to collection
+            client.post(
+                f"/api/collections/{collection['id']}/products/{product['id']}",
+                headers=auth_headers(test_user)
+            )
+        
+        # Get collection and verify order
+        response = client.get(
+            f"/api/collections/{collection['id']}",
+            headers=auth_headers(test_user)
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["product_ids"] == product_ids
+
+    def test_duplicate_product_prevented(self, client, test_user, test_product, auth_headers):
+        """Test that adding the same product twice doesn't create duplicates"""
+        collection = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "No Duplicates"}
+        ).json()
+        
+        # Add product twice
+        client.post(
+            f"/api/collections/{collection['id']}/products/{test_product['id']}",
+            headers=auth_headers(test_user)
+        )
+        client.post(
+            f"/api/collections/{collection['id']}/products/{test_product['id']}",
+            headers=auth_headers(test_user)
+        )
+        
+        # Should only appear once
+        response = client.get(
+            f"/api/collections/{collection['id']}",
+            headers=auth_headers(test_user)
+        )
+        data = response.json()
+        assert data["product_ids"].count(test_product["id"]) == 1
+
+    def test_junction_table_cascade_delete(self, client, test_user, test_product, auth_headers, db):
+        """Test that deleting a collection removes junction table entries"""
+        collection = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Temporary"}
+        ).json()
+        
+        # Add product
+        client.post(
+            f"/api/collections/{collection['id']}/products/{test_product['id']}",
+            headers=auth_headers(test_user)
+        )
+        
+        # Verify junction entry exists
+        junction_check = db.table("collection_products").select("*").eq("collection_id", collection["id"]).execute()
+        assert len(junction_check.data) == 1
+        
+        # Delete collection
+        client.delete(
+            f"/api/collections/{collection['id']}",
+            headers=auth_headers(test_user)
+        )
+        
+        # Verify junction entry removed (CASCADE)
+        junction_check = db.table("collection_products").select("*").eq("collection_id", collection["id"]).execute()
+        assert len(junction_check.data) == 0

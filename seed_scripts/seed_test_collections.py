@@ -6,22 +6,30 @@ Creates sample collections for testing and development:
 2. Private collection (regular user)
 3. Empty public collection (admin user)
 
+Uses junction table (collection_products) for many-to-many relationship.
+
 Run with: uv run python seed_test_collections.py
 """
 
 import os
 import sys
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from database_adapter import Collection, Base
-import uuid
+from database_adapter import Base
 from datetime import datetime, UTC
 
-# Load environment variables
-load_dotenv('.env.test')
+# Load environment variables - prefer ENV_FILE if set, otherwise use .env.test
+env_file = os.getenv('ENV_FILE', '.env.test')
+if not os.path.exists(env_file):
+    print(f"Warning: {env_file} not found, using defaults")
+else:
+    load_dotenv(env_file)
 
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./test.db')
+DATABASE_URL = os.getenv('DATABASE_URL')
+if not DATABASE_URL:
+    print("Error: DATABASE_URL not set")
+    sys.exit(1)
 
 # Create database engine and session
 engine = create_engine(DATABASE_URL.replace('sqlite+aiosqlite', 'sqlite'), echo=False)
@@ -39,7 +47,6 @@ test_collections = [
         "user_name": "admin_user",
         "name": "Accessible Software Tools",
         "description": "A curated collection of software tools with excellent accessibility features",
-        "product_ids": ["product1"],  # Will contain test product if it exists
         "is_public": True,
         "created_at": datetime.now(UTC).replace(tzinfo=None),
         "updated_at": datetime.now(UTC).replace(tzinfo=None),
@@ -51,7 +58,6 @@ test_collections = [
         "user_name": "regular_user",
         "name": "My Personal Collection",
         "description": "Private collection of products I like",
-        "product_ids": [],
         "is_public": False,
         "created_at": datetime.now(UTC).replace(tzinfo=None),
         "updated_at": datetime.now(UTC).replace(tzinfo=None),
@@ -63,11 +69,16 @@ test_collections = [
         "user_name": "admin_user",
         "name": "Empty Collection",
         "description": "A public collection waiting for products",
-        "product_ids": [],
         "is_public": True,
         "created_at": datetime.now(UTC).replace(tzinfo=None),
         "updated_at": datetime.now(UTC).replace(tzinfo=None),
     },
+]
+
+# Products to add to collections via junction table
+# Format: (collection_id, product_slug, position)
+collection_products = [
+    ("coll-admin-public-001", "test-product", 0),  # Test product from seed_test_product
 ]
 
 def seed_collections():
@@ -79,29 +90,87 @@ def seed_collections():
     try:
         for coll_data in test_collections:
             # Check if collection already exists
-            existing = session.query(Collection).filter(Collection.id == coll_data["id"]).first()
+            result = session.execute(
+                text("SELECT * FROM collections WHERE id = :id"),
+                {"id": coll_data["id"]}
+            ).fetchone()
             
-            if existing:
+            if result:
                 # Update existing collection
-                for key, value in coll_data.items():
-                    setattr(existing, key, value)
-                session.commit()
+                session.execute(
+                    text("""
+                        UPDATE collections 
+                        SET slug = :slug, user_id = :user_id, user_name = :user_name,
+                            name = :name, description = :description, is_public = :is_public,
+                            updated_at = :updated_at
+                        WHERE id = :id
+                    """),
+                    coll_data
+                )
                 print(f"  ✓ Updated collection '{coll_data['name']}' (ID: {coll_data['id']})")
             else:
                 # Create new collection
-                collection = Collection(**coll_data)
-                session.add(collection)
-                session.commit()
+                session.execute(
+                    text("""
+                        INSERT INTO collections (id, slug, user_id, user_name, name, description, 
+                                                is_public, created_at, updated_at)
+                        VALUES (:id, :slug, :user_id, :user_name, :name, :description,
+                               :is_public, :created_at, :updated_at)
+                    """),
+                    coll_data
+                )
                 print(f"  ✓ Created collection '{coll_data['name']}' (ID: {coll_data['id']})")
+        
+        session.commit()
+        
+        # Add products to collections via junction table
+        print("\nAdding products to collections...")
+        for collection_id, product_slug, position in collection_products:
+            # Get product ID from slug
+            product_result = session.execute(
+                text("SELECT id FROM products WHERE slug = :slug"),
+                {"slug": product_slug}
+            ).fetchone()
+            
+            if product_result:
+                product_id = product_result[0]
+                
+                # Check if junction entry already exists
+                existing = session.execute(
+                    text("SELECT * FROM collection_products WHERE collection_id = :cid AND product_id = :pid"),
+                    {"cid": collection_id, "pid": product_id}
+                ).fetchone()
+                
+                if not existing:
+                    # Create junction entry
+                    session.execute(
+                        text("""
+                            INSERT INTO collection_products (collection_id, product_id, position)
+                            VALUES (:collection_id, :product_id, :position)
+                        """),
+                        {
+                            "collection_id": collection_id,
+                            "product_id": product_id,
+                            "position": position
+                        }
+                    )
+                    session.commit()
+                    print(f"  ✓ Added product '{product_slug}' to collection '{collection_id}'")
+                else:
+                    print(f"  - Product '{product_slug}' already in collection '{collection_id}'")
+            else:
+                print(f"  ! Product '{product_slug}' not found, skipping")
         
         print("\n✓ Test collections setup complete!")
         
     except Exception as e:
         session.rollback()
-        print(f"\n✗ Error: {str(e)}")
+        print(f"Error seeding collections: {e}")
         sys.exit(1)
     finally:
         session.close()
 
 if __name__ == "__main__":
+    seed_collections()
+
     seed_collections()

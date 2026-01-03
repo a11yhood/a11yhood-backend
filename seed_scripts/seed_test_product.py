@@ -57,24 +57,40 @@ def seed_product():
         # Accessibility-focused test product aligned with frontend tests
         # Using github.com URL (one of the supported sources)
         product_name = "Test Product"
+        product_url = "https://github.com/test/product"
         tags = ["accessibility", "testing"]
 
-        # Always generate a fresh slug and let the DB generate a UUID id
-        slug = generate_slug(product_name, db)
-        product = Product(
-            name=product_name,
-            url="https://github.com/test/product",
-            type="Software",
-            source="Github",  # Must match supported sources: Ravelry, Github, Thingiverse
-            description="A test product for accessibility",
-            slug=slug,
-            created_at=datetime.now(UTC).replace(tzinfo=None),
-            updated_at=datetime.now(UTC).replace(tzinfo=None),
-            source_last_updated=datetime.now(UTC).replace(tzinfo=None),
-        )
-        db.add(product)
-        db.commit()
-        print(f"  ✓ Created product: {product_name} (ID: {product.id}, Slug: {slug})")
+        # Check if product already exists by URL
+        existing_product = db.query(Product).filter(Product.url == product_url).first()
+        
+        if existing_product:
+            # Update existing product
+            existing_product.name = product_name
+            existing_product.type = "Software"
+            existing_product.source = "Github"
+            existing_product.description = "A test product for accessibility"
+            existing_product.updated_at = datetime.now(UTC).replace(tzinfo=None)
+            existing_product.source_last_updated = datetime.now(UTC).replace(tzinfo=None)
+            db.commit()
+            product = existing_product
+            print(f"  ✓ Updated existing product: {product_name} (ID: {product.id}, Slug: {product.slug})")
+        else:
+            # Create new product
+            slug = generate_slug(product_name, db)
+            product = Product(
+                name=product_name,
+                url=product_url,
+                type="Software",
+                source="Github",  # Must match supported sources: Ravelry, Github, Thingiverse
+                description="A test product for accessibility",
+                slug=slug,
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+                updated_at=datetime.now(UTC).replace(tzinfo=None),
+                source_last_updated=datetime.now(UTC).replace(tzinfo=None),
+            )
+            db.add(product)
+            db.commit()
+            print(f"  ✓ Created product: {product_name} (ID: {product.id}, Slug: {slug})")
 
         # Attach tags (mirrors Supabase schema: tags + product_tags)
         for tag_name in tags:
@@ -84,10 +100,19 @@ def seed_product():
                 db.add(tag)
                 db.commit()
                 print(f"  ✓ Created tag: {tag_name}")
-            link = ProductTag(product_id=product.id, tag_id=tag.id)
-            db.add(link)
-            db.commit()
-        print(f"  ✓ Linked tags: {', '.join(tags)}")
+            
+            # Check if tag already linked
+            existing_link = db.query(ProductTag).filter(
+                ProductTag.product_id == product.id,
+                ProductTag.tag_id == tag.id
+            ).first()
+            
+            if not existing_link:
+                link = ProductTag(product_id=product.id, tag_id=tag.id)
+                db.add(link)
+                db.commit()
+                
+        print(f"  ✓ Tags ensured: {', '.join(tags)}")
 
         print("\n✓ Test product setup complete!")
         
