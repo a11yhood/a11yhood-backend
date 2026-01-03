@@ -5,7 +5,7 @@ This allows tests to use SQLite (fast, local) while production uses Supabase.
 The adapter provides a unified interface that works with both backends.
 """
 from typing import Optional, Dict, List, Any, Union
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, UniqueConstraint
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, UniqueConstraint, ForeignKey, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, UTC
 import uuid
@@ -207,10 +207,19 @@ class Collection(Base):
     user_name = Column(String, nullable=False)
     name = Column(String, nullable=False)
     description = Column(Text)
-    product_ids = Column(JSON, default=list)  # List of product UUIDs
     is_public = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
+
+
+class CollectionProduct(Base):
+    """Junction table for many-to-many relationship between collections and products"""
+    __tablename__ = "collection_products"
+    
+    collection_id = Column(UUID(as_uuid=False), ForeignKey("collections.id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    product_id = Column(UUID(as_uuid=False), ForeignKey("products.id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    position = Column(Integer, default=0)  # Position in collection for ordering
+    added_at = Column(DateTime, default=utcnow_naive)
 
 
 class BlogPost(Base):
@@ -285,7 +294,11 @@ class DatabaseAdapter:
             self.backend = "sqlite"
             # Remove aiosqlite:// prefix for synchronous engine
             db_url = self.settings.DATABASE_URL.replace("sqlite+aiosqlite://", "sqlite://")
-            self.engine = create_engine(db_url, echo=False)
+            self.engine = create_engine(db_url, echo=False, connect_args={"check_same_thread": False})
+            # Enable foreign keys for SQLite (required for CASCADE deletes)
+            with self.engine.connect() as conn:
+                conn.execute(text("PRAGMA foreign_keys = ON;"))
+                conn.commit()
             self.Session = sessionmaker(bind=self.engine)
         elif self.settings.SUPABASE_URL:
             # Use Supabase (production)
@@ -301,12 +314,20 @@ class DatabaseAdapter:
     def init(self):
         """Initialize database (create tables for SQLite)"""
         if self.backend == "sqlite" and not self._initialized:
+            # Enable foreign keys for SQLite (required for CASCADE deletes)
+            with self.engine.connect() as conn:
+                conn.execute(text("PRAGMA foreign_keys = ON;"))
+                conn.commit()
             Base.metadata.create_all(self.engine)
             self._initialized = True
     
     def cleanup(self):
         """Clean up database (for testing)"""
         if self.backend == "sqlite":
+            # Enable foreign keys for SQLite (required for CASCADE deletes)
+            with self.engine.connect() as conn:
+                conn.execute(text("PRAGMA foreign_keys = ON;"))
+                conn.commit()
             Base.metadata.drop_all(self.engine)
             Base.metadata.create_all(self.engine)
     
@@ -340,6 +361,7 @@ class SQLiteTable:
         "tags": Tag,
         "product_tags": ProductTag,
         "collections": Collection,
+        "collection_products": CollectionProduct,
         "blog_posts": BlogPost,
         "supported_sources": SupportedSource,
         "scraper_search_terms": ScraperSearchTerms,

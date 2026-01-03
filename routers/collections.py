@@ -346,10 +346,21 @@ def _get_collection_with_products(db, collection_id: str) -> dict:
     
     collection = collection_resp.data[0]
     
-    # Get product IDs and slugs from junction table, ordered by position
-    products_resp = db.table("collection_products").select("product_id, products(slug)").eq("collection_id", collection_id).order("position").execute()
-    collection["product_ids"] = [p["product_id"] for p in (products_resp.data or [])]
-    collection["product_slugs"] = [p["products"]["slug"] if p.get("products") else None for p in (products_resp.data or [])]
+    # Get product IDs from junction table, ordered by position
+    junction_resp = db.table("collection_products").select("product_id").eq("collection_id", collection_id).order("position").execute()
+    product_ids = [p["product_id"] for p in (junction_resp.data or [])]
+    
+    # Get product slugs by querying products table with the IDs
+    product_slugs = []
+    if product_ids:
+        products_resp = db.table("products").select("id, slug").in_("id", product_ids).execute()
+        # Create a map of product_id -> slug for fast lookup
+        id_to_slug = {p["id"]: p["slug"] for p in (products_resp.data or [])}
+        # Build slugs list in the same order as product_ids
+        product_slugs = [id_to_slug.get(pid, None) for pid in product_ids]
+    
+    collection["product_ids"] = product_ids
+    collection["product_slugs"] = product_slugs
     
     return collection
 
@@ -569,11 +580,17 @@ async def add_product_to_collection(
     
     product_id = products.data[0].get("id")
     
+    # Check if product is already in collection (idempotent behavior)
+    existing_resp = db.table("collection_products").select("product_id").eq("collection_id", collection_id).eq("product_id", product_id).execute()
+    if existing_resp.data:
+        # Product already in collection, return collection unchanged
+        return _get_collection_with_products(db, collection_id)
+    
     # Get current position for new product
     position_result = db.table("collection_products").select("position").eq("collection_id", collection_id).order("position", desc=True).limit(1).execute()
     next_position = (position_result.data[0]["position"] + 1) if position_result.data else 0
     
-    # Add product to junction table if not already in collection
+    # Add product to junction table
     db.table("collection_products").insert({
         "collection_id": collection_id,
         "product_id": product_id,
@@ -707,12 +724,21 @@ async def add_multiple_products_to_collection(
         else:
             raise HTTPException(status_code=404, detail=f"Product {prod_identifier} not found")
     
+    # Deduplicate the resolved product IDs (in case request had duplicates)
+    # Preserve order while removing duplicates
+    seen = set()
+    deduplicated_product_ids = []
+    for pid in resolved_product_ids:
+        if pid not in seen:
+            seen.add(pid)
+            deduplicated_product_ids.append(pid)
+    
     # Get current product IDs from junction table
     current_resp = db.table("collection_products").select("product_id").eq("collection_id", collection_id).execute()
     existing_product_ids = {p["product_id"] for p in (current_resp.data or [])}
     
     # Add new products to junction table (avoiding duplicates)
-    new_products = [pid for pid in resolved_product_ids if pid not in existing_product_ids]
+    new_products = [pid for pid in deduplicated_product_ids if pid not in existing_product_ids]
     
     if new_products:
         # Get current max position

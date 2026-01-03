@@ -730,7 +730,7 @@ class TestProductCollections:
 class TestJunctionTableBehavior:
     """Tests for junction table implementation"""
 
-    def test_product_position_maintained(self, client, test_user, test_product, auth_headers, db):
+    def test_product_position_maintained(self, client, test_user, test_product, auth_headers, sqlite_db):
         """Test that products maintain their insertion order via position field"""
         collection = client.post(
             "/api/collections",
@@ -746,7 +746,7 @@ class TestJunctionTableBehavior:
                 headers=auth_headers(test_user),
                 json={
                     "name": f"Product {i}",
-                    "url": f"https://example.com/product-{i}",
+                    "source_url": f"https://github.com/test/product-{i}",
                     "type": "software"
                 }
             ).json()
@@ -793,7 +793,7 @@ class TestJunctionTableBehavior:
         data = response.json()
         assert data["product_ids"].count(test_product["id"]) == 1
 
-    def test_junction_table_cascade_delete(self, client, test_user, test_product, auth_headers, db):
+    def test_junction_table_cascade_delete(self, client, test_user, test_product, auth_headers, sqlite_db):
         """Test that deleting a collection removes junction table entries"""
         collection = client.post(
             "/api/collections",
@@ -808,7 +808,7 @@ class TestJunctionTableBehavior:
         )
         
         # Verify junction entry exists
-        junction_check = db.table("collection_products").select("*").eq("collection_id", collection["id"]).execute()
+        junction_check = sqlite_db.table("collection_products").select("*").eq("collection_id", collection["id"]).execute()
         assert len(junction_check.data) == 1
         
         # Delete collection
@@ -818,5 +818,5 @@ class TestJunctionTableBehavior:
         )
         
         # Verify junction entry removed (CASCADE)
-        junction_check = db.table("collection_products").select("*").eq("collection_id", collection["id"]).execute()
+        junction_check = sqlite_db.table("collection_products").select("*").eq("collection_id", collection["id"]).execute()
         assert len(junction_check.data) == 0
