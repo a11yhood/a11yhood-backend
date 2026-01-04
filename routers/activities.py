@@ -27,9 +27,9 @@ async def log_user_activity(
         "user_id": activity.user_id,
         "type": activity.type,
         "product_id": activity.product_id,
-        "timestamp": activity.timestamp,
+        "timestamp": activity.timestamp.isoformat(),
         "activity_metadata": activity.metadata,  # Use activity_metadata column name
-        "created_at": now,
+        "created_at": now.isoformat(),
     }
     
     response = db.table("user_activities").insert(activity_data).execute()

@@ -14,8 +14,8 @@ class BlogPostBase(BaseModel):
     tags: List[str] = Field(default_factory=list)
     featured: bool = False
     published: bool = False
-    publish_date: Optional[int] = None
-    published_at: Optional[int] = None
+    publish_date: Optional[datetime] = None
+    published_at: Optional[datetime] = None
     author_ids: Optional[List[str]] = None
     author_names: Optional[List[str]] = None
 
@@ -35,8 +35,8 @@ class BlogPostUpdate(BaseModel):
     tags: Optional[List[str]] = None
     featured: Optional[bool] = None
     published: Optional[bool] = None
-    publish_date: Optional[int] = None
-    published_at: Optional[int] = None
+    publish_date: Optional[datetime] = None
+    published_at: Optional[datetime] = None
     author_id: Optional[str] = None
     author_name: Optional[str] = None
     author_ids: Optional[List[str]] = None
@@ -47,7 +47,7 @@ class BlogPostResponse(BlogPostBase):
     id: str
     author_id: str
     author_name: str
-    created_at: int
-    updated_at: int
+    created_at: datetime
+    updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

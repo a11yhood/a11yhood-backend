@@ -3,6 +3,7 @@ User activity models for tracking user actions.
 """
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 
 
 class UserActivityCreate(BaseModel):
@@ -10,7 +11,7 @@ class UserActivityCreate(BaseModel):
     user_id: str
     type: str  # 'product_submit' | 'rating' | 'discussion' | 'tag'
     product_id: Optional[str] = None
-    timestamp: int  # milliseconds since epoch
+    timestamp: datetime
     metadata: Optional[dict] = None
 
 
@@ -20,6 +21,6 @@ class UserActivityResponse(BaseModel):
     user_id: str
     type: str
     product_id: Optional[str] = None
-    timestamp: int
-    created_at: Optional[str] = None
+    timestamp: datetime
+    created_at: Optional[datetime] = None
     metadata: Optional[dict] = None
