@@ -5,6 +5,7 @@ This allows tests to use SQLite (fast, local) while production uses Supabase.
 The adapter provides a unified interface that works with both backends.
 """
 from typing import Optional, Dict, List, Any, Union
+from contextvars import ContextVar
 from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, UniqueConstraint, ForeignKey, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, UTC
@@ -12,6 +13,19 @@ import uuid
 from services.id_generator import normalize_to_snake_case
 
 Base = declarative_base()
+
+# Per-request Supabase JWT for RLS-aware queries
+_supabase_auth_token: ContextVar[Optional[str]] = ContextVar("supabase_auth_token", default=None)
+
+
+def set_supabase_auth_token(token: Optional[str]):
+    """Store the active Supabase JWT in a context variable for this request."""
+    _supabase_auth_token.set(token)
+
+
+def get_supabase_auth_token() -> Optional[str]:
+    """Retrieve the Supabase JWT for the current request, if set."""
+    return _supabase_auth_token.get()
 
 
 def utcnow_naive():
@@ -286,7 +300,11 @@ class DatabaseAdapter:
         self.engine = None
         self.Session = None
         self.supabase = None
+        self._supabase_client_factory = None
+        self._supabase_url = None
+        self._supabase_key = None
         self._initialized = False
+        self._request_auth_token = None  # Store user JWT for this request
         
         # Determine which backend to use
         if self.settings.DATABASE_URL:
@@ -304,6 +322,9 @@ class DatabaseAdapter:
             # Use Supabase (production)
             self.backend = "supabase"
             from supabase import create_client
+            self._supabase_client_factory = create_client
+            self._supabase_url = self.settings.SUPABASE_URL
+            self._supabase_key = self.settings.SUPABASE_KEY
             self.supabase = create_client(
                 self.settings.SUPABASE_URL,
                 self.settings.SUPABASE_KEY
@@ -336,7 +357,13 @@ class DatabaseAdapter:
         if self.backend == "sqlite":
             return SQLiteTable(table_name, self.Session)
         else:
+            # Use base Supabase client with service key
+            # Authorization is handled at application level in route handlers
             return self.supabase.table(table_name)
+    
+    def set_request_auth_token(self, token: str):
+        """Set the auth token for this request (for use when context var is not available)."""
+        self._request_auth_token = token
 
 
 class SQLiteTable:
