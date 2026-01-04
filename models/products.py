@@ -11,6 +11,7 @@ class ProductBase(BaseModel):
     source_url: Optional[HttpUrl] = None  # URL to the source product
     type: Optional[str] = None  # Product type/category (e.g., Knitting, 3D Printed, Software)
     image_url: Optional[HttpUrl] = None
+    image_alt: Optional[str] = None
     external_id: Optional[str] = None  # ID from external source
     tags: Optional[list[str]] = Field(default_factory=list)
     source_last_updated: Optional[datetime] = None  # Last updated timestamp from source platform
@@ -27,6 +28,7 @@ class ProductUpdate(BaseModel):
     source_url: Optional[HttpUrl] = None
     type: Optional[str] = None
     image_url: Optional[HttpUrl] = None
+    image_alt: Optional[str] = None
     external_id: Optional[str] = None
     tags: Optional[list[str]] = None
     source_last_updated: Optional[datetime] = None
