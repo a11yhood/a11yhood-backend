@@ -90,6 +90,16 @@ def _canonicalize_source_value_db(db, value: Optional[str]) -> Optional[str]:
     return name_map.get(key, value)
 
 
+def _get_product_by_identifier(db, identifier: str) -> Optional[dict]:
+    """Fetch a product by ID or slug without triggering UUID parse errors."""
+    if _looks_like_uuid(identifier):
+        resp = db.table("products").select("*").eq("id", identifier).limit(1).execute()
+        if resp.data:
+            return resp.data[0]
+    resp = db.table("products").select("*").eq("slug", identifier).limit(1).execute()
+    return resp.data[0] if resp.data else None
+
+
 async def _enrich_manual_product_metadata(db, source_name: str, source_url: str, product: ProductCreate, db_data: dict):
     """Fetch metadata from source scrapers for manually submitted products.
 
@@ -1103,17 +1113,18 @@ async def update_product(
     Security: Enforces ownership via product_editors table OR admin role.
     Prevents unauthorized users from modifying products they don't manage.
     """
-    # Check if product exists and user has permission
-    existing = db.table("products").select("*").eq("id", product_id).execute()
-    
-    if not existing.data:
+    product_row = _get_product_by_identifier(db, product_id)
+    if not product_row:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    if existing.data[0].get("banned"):
+    if product_row.get("banned"):
         raise HTTPException(status_code=403, detail="Product is banned and cannot be edited")
-
-    if existing.data[0]["created_by"] != current_user["id"] and not current_user.get("role") == "admin":
-        raise HTTPException(status_code=403, detail="Not authorized to update this product")
+    product_id = product_row["id"]
+    # Authorization: prefer RLS to make the decision. We only short-circuit when clearly allowed.
+    is_creator = product_row.get("created_by") == current_user["id"]
+    role = current_user.get("role")
+    is_admin_or_moderator = role in ("admin", "moderator")
+    # If not creator/admin/moderator, we rely on RLS (product_editors membership) to permit or deny.
     
     # Map API fields to database columns (use attributes to avoid alias issues)
     product_data = product.model_dump(exclude_unset=True)
@@ -1138,6 +1149,9 @@ async def update_product(
     # Apply basic field updates
     
     response = db.table("products").update(db_data).eq("id", product_id).execute()
+    if not response.data:
+        # Likely blocked by RLS or no rows updated
+        raise HTTPException(status_code=403, detail="Not authorized to update this product")
     
     # Update tag relationships if requested
     if "tags" in product_data:
@@ -1167,27 +1181,29 @@ async def patch_product(
     db = Depends(get_db),
 ):
     """Partially update a product (manager or admin only)"""
-    # Check if product exists
-    existing = db.table("products").select("*").eq("id", product_id).execute()
-    
-    if not existing.data:
+    product_row = _get_product_by_identifier(db, product_id)
+    if not product_row:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    # Check authorization: must be creator, product manager, or admin
-    product_row = existing.data[0]
+    # Check authorization: must be creator, product manager, admin, or moderator
     if product_row.get("banned"):
         raise HTTPException(status_code=403, detail="Product is banned and cannot be edited")
-    is_creator = product_row["created_by"] == current_user["id"]
-    is_admin = current_user.get("role") == "admin"
+    product_id = product_row["id"]
+    is_creator = product_row.get("created_by") == current_user["id"]
+    role = current_user.get("role")
+    is_admin_or_moderator = role in ("admin", "moderator")
     
-    # Check if user is a product manager
-    is_product_owner = False
-    if not (is_creator or is_admin):
-        owner_response = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-        is_product_owner = bool(owner_response.data)
+    # Check if user is in product_editors if not creator/admin/moderator
+    is_editor = False
+    if not is_creator and not is_admin_or_moderator:
+        # Need to check product_editors table using service key to avoid RLS issues
+        from services.database import db_adapter
+        editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+        is_editor = bool(editors_check.data)
     
-    if not (is_creator or is_admin or is_product_owner):
-        raise HTTPException(status_code=403, detail="Only product editors or admins can edit this product")
+    # Require at least one authorization path
+    if not (is_creator or is_admin_or_moderator or is_editor):
+        raise HTTPException(status_code=403, detail="Not authorized to update this product")
     
     # Map API fields to database columns
     product_data = product.model_dump(exclude_unset=True)
@@ -1209,8 +1225,19 @@ async def patch_product(
         db_data["type"] = product.type
     if "external_id" in product_data:
         db_data["external_id"] = product_data["external_id"]
+    if "source_last_updated" in product_data and product.source_last_updated is not None:
+        db_data["source_last_updated"] = product.source_last_updated
     
-    response = db.table("products").update(db_data).eq("id", product_id).execute()
+    try:
+        # Use service key (base client) for update since we've already checked permissions in Python
+        from services.database import db_adapter
+        response = db_adapter.supabase.table("products").update(db_data).eq("id", product_id).execute()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update product: {str(e)}")
+    
+    if not response.data:
+        # Should not happen since we verified permissions above
+        raise HTTPException(status_code=500, detail="Update failed unexpectedly")
     
     # Update tag relationships if requested
     if "tags" in product_data:
@@ -1253,13 +1280,19 @@ async def delete_product(
             detail=f"Admin access required. Your current role: {current_user.get('role', 'user')}"
         )
     
-    # Check if product exists first; accept either ID or slug for convenience
-    check = db.table("products").select("id").eq("id", product_id).execute()
-    if not check.data:
+    # Check if product exists first; accept either ID or slug for convenience.
+    # Avoid UUID parsing errors by only querying id when the input resembles a UUID.
+    resolved_id = None
+    if _looks_like_uuid(product_id):
+        check = db.table("products").select("id").eq("id", product_id).limit(1).execute()
+        if check.data:
+            resolved_id = check.data[0]["id"]
+    if not resolved_id:
         slug_lookup = db.table("products").select("id").eq("slug", product_id).limit(1).execute()
         if not slug_lookup.data:
             raise HTTPException(status_code=404, detail="Product not found")
-        product_id = slug_lookup.data[0]["id"]
+        resolved_id = slug_lookup.data[0]["id"]
+    product_id = resolved_id
     
     # The database schema has ON DELETE CASCADE for most relationships,
     # so they should auto-delete. But we can be explicit for safety.
