@@ -50,6 +50,7 @@ class ProductResponse(ProductBase):
     source_rating: Optional[float] = None
     source_rating_count: Optional[int] = None
     source_last_updated: Optional[datetime] = None
+    computed_rating: Optional[float] = None  # Computed display rating (PostgreSQL trigger or manual in tests)
     stars: Optional[int] = None
     urls: list[ProductUrlResponse] = Field(default_factory=list)
     editor_ids: list[str] = Field(default_factory=list)
