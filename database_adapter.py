@@ -6,7 +6,7 @@ The adapter provides a unified interface that works with both backends.
 """
 from typing import Optional, Dict, List, Any, Union
 from contextvars import ContextVar
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, UniqueConstraint, ForeignKey, text
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, UniqueConstraint, ForeignKey, text, Numeric
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, UTC
 import uuid
@@ -60,6 +60,7 @@ class Product(Base):
     banned_at = Column(DateTime)
     created_by = Column(String)  # User who created/added the product
     editor_ids = Column(JSON)  # List of editor user IDs
+    computed_rating = Column(Numeric(3, 2))  # Computed display rating (user average or source rating)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
     last_edited_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
@@ -162,7 +163,7 @@ class UserRequest(Base):
     updated_at = Column(DateTime, default=utcnow_naive)
 
 
-class ProductOwner(Base):
+class ProductEditor(Base):
     __tablename__ = "product_editors"
     
     id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -382,7 +383,7 @@ class SQLiteTable:
         "scraping_logs": ScrapingLog,
         "oauth_configs": OAuthConfig,
         "user_requests": UserRequest,
-        "product_editors": ProductOwner,
+        "product_editors": ProductEditor,
         "product_urls": ProductUrl,
         "user_activities": UserActivity,
         "tags": Tag,

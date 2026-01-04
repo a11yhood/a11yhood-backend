@@ -369,11 +369,22 @@ def rating_meets_threshold(product: dict, ratings_map: dict[str, dict], min_rati
 
 def attach_rating_fields(db, product: dict, ratings_map: Optional[dict[str, dict]] = None) -> dict:
     """Attach average, count, and display rating to a single product record."""
-    effective_map = ratings_map if ratings_map is not None else build_display_rating_map(db, [product])
-    rating_info = effective_map.get(product.get("id"), {}) if effective_map else {}
-    product["average_rating"] = rating_info.get("average_rating")
-    product["rating_count"] = rating_info.get("rating_count", product.get("rating_count") or 0)
-    product["display_rating"] = rating_info.get("display_rating")
+    # Use computed_rating from database for display_rating
+    product["display_rating"] = product.get("computed_rating")
+    
+    # Only fetch detailed breakdown if needed
+    if ratings_map is None and product.get("computed_rating") is not None:
+        # Fetch rating details for this one product
+        ratings_map = build_display_rating_map(db, [product])
+    
+    if ratings_map:
+        rating_info = ratings_map.get(product.get("id"), {})
+        product["average_rating"] = rating_info.get("average_rating")
+        product["rating_count"] = rating_info.get("rating_count", 0)
+    else:
+        product["average_rating"] = None
+        product["rating_count"] = 0
+    
     return product
 
 
@@ -545,6 +556,8 @@ async def get_products(
     created_by: Optional[str] = None,
     include_banned: bool = Query(False, description="Include banned products (admin/mod only)"),
     include_ratings: bool = Query(False, description="Include rating data (average_rating, rating_count, display_rating). Set to true only when displaying ratings."),
+    sort_by: str = Query("created_at", pattern="^(created_at|updated_at|rating)$", description="Sort by: created_at (default), updated_at, or rating"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order: desc (default) or asc"),
     limit: int = Query(50, le=100),
     offset: int = Query(0, ge=0),
     current_user: Optional[dict] = Depends(get_current_user_optional),
@@ -601,15 +614,27 @@ async def get_products(
     if updated_since is not None:
         query = query.gte("source_last_updated", updated_since)
 
-    # Always apply ordering before range for consistent results
-    query = query.order("created_at", desc=True)
+    # Filter by minimum rating using computed_rating column
+    if min_rating is not None:
+        query = query.gte("computed_rating", min_rating)
 
-    # Note: For min_rating filters, we don't filter by source_rating in SQL because
-    # some products may have no source_rating but could have user ratings that meet the threshold.
-    # We'll fetch products without the source_rating filter and apply the rating threshold in Python
-    # after computing display_rating from both user and source ratings.
+    # Apply ordering based on sort_by parameter
+    # Now all sorting happens in SQL thanks to computed_rating column
+    if sort_by == "rating":
+        sort_field = "computed_rating"
+    elif sort_by == "updated_at":
+        sort_field = "source_last_updated"
+    else:
+        sort_field = "created_at"
     
-    # Apply pagination
+    is_desc = (sort_order == "desc")
+    # For rating sort, put NULL values last regardless of sort direction
+    if sort_by == "rating":
+        query = query.order(sort_field, desc=is_desc, nullsfirst=False)
+    else:
+        query = query.order(sort_field, desc=is_desc)
+    
+    # Apply pagination in SQL
     query = query.range(offset, offset + limit - 1)
     
     response = query.execute()
@@ -617,16 +642,10 @@ async def get_products(
     # Collect product IDs
     products = response.data or []
     
-    # Only fetch ratings when needed for filtering OR when explicitly requested
+    # Fetch ratings only when explicitly requested for display
     ratings_map = {}
-    if min_rating is not None or include_ratings:
+    if include_ratings:
         ratings_map = build_display_rating_map(db, products)
-    
-    # If min_rating is set, we need to additionally filter by user ratings
-    # because the SQL filter only checked source_rating
-    if min_rating is not None:
-        # Filter again to ensure display_rating (which considers user ratings) meets threshold
-        products = [p for p in products if rating_meets_threshold(p, ratings_map, min_rating)]
 
     product_ids = [p["id"] for p in products]
 
@@ -661,17 +680,19 @@ async def get_products(
         # Add top-level stars derived from source_rating_count
         item["stars"] = item.get("source_rating_count") or 0
         
-        # Only compute rating fields if we fetched ratings
+        # Use computed_rating for display_rating (already in database)
+        item["display_rating"] = item.get("computed_rating")
+        
+        # Only fetch detailed rating breakdown if explicitly requested
         if ratings_map:
             rating_info = ratings_map.get(item["id"], {})
             item["average_rating"] = rating_info.get("average_rating")
-            item["rating_count"] = rating_info.get("rating_count", item.get("rating_count") or 0)
-            item["display_rating"] = rating_info.get("display_rating")
+            item["rating_count"] = rating_info.get("rating_count", 0)
         else:
-            # Set defaults when ratings not fetched (performance optimization)
+            # Set defaults when detailed ratings not fetched
             item["average_rating"] = None
             item["rating_count"] = 0
-            item["display_rating"] = None
+        
         # Normalize fields for API clients
         if "image" in item:
             item["image_url"] = item.get("image")
@@ -684,6 +705,8 @@ async def get_products(
         item["tags"] = tags_by_product.get(item["id"], [])
         item["editor_ids"] = owners_by_product.get(item["id"], [])
         normalized.append(item)
+
+    return normalized
 
     return normalized
 
@@ -1120,11 +1143,30 @@ async def update_product(
     if product_row.get("banned"):
         raise HTTPException(status_code=403, detail="Product is banned and cannot be edited")
     product_id = product_row["id"]
-    # Authorization: prefer RLS to make the decision. We only short-circuit when clearly allowed.
+    # Authorization check
     is_creator = product_row.get("created_by") == current_user["id"]
     role = current_user.get("role")
     is_admin_or_moderator = role in ("admin", "moderator")
-    # If not creator/admin/moderator, we rely on RLS (product_editors membership) to permit or deny.
+    
+    # Check if user is in product_editors if not creator/admin/moderator
+    is_editor = False
+    if not is_creator and not is_admin_or_moderator:
+        # Need to check product_editors table
+        from services.database import db_adapter
+        # In test environment (SQLite), use the database adapter's table API
+        if db_adapter.supabase is not None:
+            # Production: use Supabase client with service key to avoid RLS issues
+            editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+            is_editor = bool(editors_check.data)
+        else:
+            # Test environment: use database adapter's table API
+            from database_adapter import ProductEditor
+            editor_check = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+            is_editor = bool(editor_check.data)
+    
+    # Require at least one authorization path
+    if not (is_creator or is_admin_or_moderator or is_editor):
+        raise HTTPException(status_code=403, detail="Not authorized to update this product")
     
     # Map API fields to database columns (use attributes to avoid alias issues)
     product_data = product.model_dump(exclude_unset=True)
@@ -1196,10 +1238,18 @@ async def patch_product(
     # Check if user is in product_editors if not creator/admin/moderator
     is_editor = False
     if not is_creator and not is_admin_or_moderator:
-        # Need to check product_editors table using service key to avoid RLS issues
+        # Need to check product_editors table
         from services.database import db_adapter
-        editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-        is_editor = bool(editors_check.data)
+        # In test environment (SQLite), use the database adapter's query methods
+        if db_adapter.supabase is not None:
+            # Production: use Supabase client with service key to avoid RLS issues
+            editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+            is_editor = bool(editors_check.data)
+        else:
+            # Test environment: use database adapter's table API
+            from database_adapter import ProductEditor
+            editor_check = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+            is_editor = bool(editor_check.data)
     
     # Require at least one authorization path
     if not (is_creator or is_admin_or_moderator or is_editor):
@@ -1229,9 +1279,8 @@ async def patch_product(
         db_data["source_last_updated"] = product.source_last_updated
     
     try:
-        # Use service key (base client) for update since we've already checked permissions in Python
-        from services.database import db_adapter
-        response = db_adapter.supabase.table("products").update(db_data).eq("id", product_id).execute()
+        # Update the product (permissions already checked above)
+        response = db.table("products").update(db_data).eq("id", product_id).execute()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update product: {str(e)}")
     

@@ -288,6 +288,7 @@ def test_get_products_filters_by_min_display_rating(client, clean_database, test
             "source": "Github",
             "type": "Software",
             "source_rating": 4.5,
+            "computed_rating": 4.5,  # Set computed_rating for test
             "url": "https://github.com/example/rating-high",
             "created_by": test_user["id"],
         },
@@ -298,6 +299,7 @@ def test_get_products_filters_by_min_display_rating(client, clean_database, test
             "source": "Github",
             "type": "Software",
             "source_rating": 2.0,
+            "computed_rating": 2.0,  # Will be updated after ratings inserted
             "url": "https://github.com/example/rating-mixed",
             "created_by": test_user["id"],
         },
@@ -316,14 +318,18 @@ def test_get_products_filters_by_min_display_rating(client, clean_database, test
         {"product_id": mixed_id, "user_id": test_user["id"], "rating": 4},
         {"product_id": user_only_id, "user_id": test_user["id"], "rating": 5},
     ]).execute()
+    
+    # Manually update computed_rating since SQLite doesn't have the trigger
+    clean_database.table("products").update({"computed_rating": 4.0}).eq("id", mixed_id).execute()
+    clean_database.table("products").update({"computed_rating": 5.0}).eq("id", user_only_id).execute()
 
     resp = client.get("/api/products?search=RatingCase&min_rating=3.5")
     assert resp.status_code == 200
     data = resp.json()
     ids = {item["id"] for item in data}
-    assert high_id in ids
-    assert user_only_id in ids
-    assert mixed_id not in ids
+    assert high_id in ids  # source_rating=4.5 >= 3.5
+    assert mixed_id in ids  # computed_rating=4.0 >= 3.5 (user rating overrides source_rating=2.0)
+    assert user_only_id in ids  # computed_rating=5.0 >= 3.5
     for item in data:
         assert item.get("display_rating") is not None
 
