@@ -222,7 +222,7 @@ async def add_security_headers(request: Request, call_next):
         # Production: Allow CDN for Swagger/ReDoc UI documentation
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "img-src 'self' data: https:; "
             "font-src 'self' https://cdn.jsdelivr.net; "
