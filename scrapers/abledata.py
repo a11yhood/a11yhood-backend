@@ -383,7 +383,7 @@ class AbleDataScraper(BaseScraper):
                     'url': self._normalize_url(product_url),
                     'image': image_url,
                     'source': self.get_source_name(),
-                    'type': 'Assistive Technology'
+                    'type': 'Assistive Tech'
                 })
                 
             except Exception as e:
@@ -525,7 +525,7 @@ class AbleDataScraper(BaseScraper):
                 'url': normalized_url,
                 'image': base_info.get('image'),
                 'source': self.get_source_name(),
-                'type': 'Assistive Technology',
+                'type': 'Assistive Tech',
                 'tags': tags if tags else None,
                 'source_rating': source_rating,
                 'source_rating_count': source_rating_count,

@@ -347,7 +347,7 @@
   CREATE TABLE user_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK (type IN ('moderator', 'admin', 'product-ownership')),
+    type TEXT NOT NULL CHECK (type IN ('moderator', 'admin', 'product-ownership', 'source-domain')),
     reason TEXT,
     message TEXT,
     product_id UUID REFERENCES products(id) ON DELETE SET NULL,
