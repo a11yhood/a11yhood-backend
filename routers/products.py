@@ -212,9 +212,9 @@ class BulkDeleteRequest(BaseModel):
 async def get_product_sources(
     db = Depends(get_db),
 ):
-    """Get all unique source values from products table.
+    """Get all unique source values from products table with product counts.
     
-    Returns a sorted list of distinct sources for filter UI.
+    Returns a list of sources with their product counts for filter UI.
     Uses supported_sources as the canonical list and unions with actual
     source values found in products. All values are camelcased to canonical
     names when available; otherwise title-cased.
@@ -230,44 +230,45 @@ async def get_product_sources(
         canonical_set = set(canonical_list)
         name_map = {n.lower(): n for n in canonical_list}
 
-        # Distinct sources present in products
-        product_sources: set[str] = set()
-        try:
-            if getattr(db, "backend", None) == "supabase":
-                resp = db.table("products").select("source", distinct=True).execute()
-                product_sources = {
-                    str(row.get("source")).strip()
-                    for row in (resp.data or [])
-                    if row.get("source") and str(row.get("source")).strip()
-                }
-            else:
-                raise TypeError("distinct not supported for this backend")
-        except TypeError:
-            # Fallback: paginate through products and collect unique sources
-            page_size = 1000
-            offset = 0
-            while True:
-                resp = db.table("products").select("source").range(offset, offset + page_size - 1).execute()
-                rows = resp.data or []
-                if not rows:
-                    break
-                for row in rows:
-                    s = row.get("source")
-                    if s and str(s).strip():
-                        product_sources.add(str(s).strip())
-                if len(rows) < page_size:
-                    break
-                offset += page_size
+        # Count products by source
+        source_counts: dict[str, int] = {}
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = db.table("products").select("source").range(offset, offset + page_size - 1).execute()
+            rows = resp.data or []
+            if not rows:
+                break
+            for row in rows:
+                s = row.get("source")
+                if s and str(s).strip():
+                    raw_source = str(s).strip()
+                    # Canonicalize to supported_sources name
+                    canonical_source = name_map.get(raw_source.lower(), raw_source.title())
+                    source_counts[canonical_source] = source_counts.get(canonical_source, 0) + 1
+            if len(rows) < page_size:
+                break
+            offset += page_size
 
-        # Canonicalize product sources to supported_sources names; fallback to title case
-        canonicalized_products = set()
-        for s in product_sources:
-            key = s.lower()
-            canonicalized_products.add(name_map.get(key, s.title()))
-
-        # Union canonical and product-derived lists
-        combined = canonical_set.union(canonicalized_products)
-        return {"sources": sorted(combined)}
+        # Build result list with all canonical sources (even if count is 0)
+        result = []
+        for source in canonical_set:
+            result.append({
+                "name": source,
+                "count": source_counts.get(source, 0)
+            })
+        
+        # Add any non-canonical sources that have products
+        for source, count in source_counts.items():
+            if source not in canonical_set:
+                result.append({
+                    "name": source,
+                    "count": count
+                })
+        
+        # Sort by name
+        result.sort(key=lambda x: x["name"])
+        return {"sources": result}
     except Exception:
         return {"sources": []}
 

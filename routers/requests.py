@@ -191,14 +191,15 @@ def create_user_request(
         )
     
     # Create the request
+    now = datetime.now(UTC)
     request_data = {
         "user_id": current_user['id'],
         "type": request.type,
         "status": "pending",
         "product_id": request.product_id,
         "reason": request.reason,
-        "created_at": datetime.now(UTC),
-        "updated_at": datetime.now(UTC)
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat()
     }
     
     try:
@@ -248,11 +249,12 @@ def update_user_request(
     request_data = request_response.data[0]
     
     # Update the request
+    now = datetime.now(UTC)
     update_data = {
         "status": update.status,
         "reviewed_by": current_user['id'],
-        "reviewed_at": datetime.now(UTC),
-        "updated_at": datetime.now(UTC)
+        "reviewed_at": now.isoformat(),
+        "updated_at": now.isoformat()
     }
     
     response = db.table("user_requests").update(update_data).eq("id", request_id).execute()
@@ -277,7 +279,7 @@ def _grant_permission(db, request_data: dict):
         owner_data = {
             "product_id": request_data['product_id'],
             "user_id": user_id,
-            "created_at": datetime.now(UTC)
+            "created_at": datetime.now(UTC).isoformat()
         }
         db.table("product_editors").insert(owner_data).execute()
     
@@ -304,17 +306,22 @@ def _grant_permission(db, request_data: dict):
             if not domain:
                 return
 
+            # Normalize domain by removing www. prefix (consistent with extract_domain)
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            
             # If exists, skip; else create with name = domain
             existing = db.table("supported_sources").select("*").eq("domain", domain).limit(1).execute()
             if existing.data:
                 return
 
             # Generate minimal record
+            now = datetime.now(UTC).isoformat()
             data = {
                 "domain": domain,
                 "name": domain,
-                "created_at": datetime.now(UTC),
-                "updated_at": datetime.now(UTC),
+                "created_at": now,
+                "updated_at": now,
             }
             db.table("supported_sources").insert(data).execute()
         except Exception:
