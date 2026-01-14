@@ -291,15 +291,25 @@ async def update_user_role(
     # Call database function to update role with admin privileges
     # This function verifies admin status and updates the role
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Calling admin_update_user_role with admin_user_id={current_user['id']}, target_user_id={user_id}, new_role={new_role}")
+        
         response = db.rpc('admin_update_user_role', {
             'admin_user_id': current_user["id"],
             'target_user_id': user_id,
             'new_role': new_role
         }).execute()
         
+        logger.info(f"RPC response: {response}")
+        
         # The function returns the updated user as JSONB
         updated_user = response.data if response.data else target_user
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"RPC error: {type(e).__name__}: {str(e)}")
+        
         # Handle database errors (user not found, permission denied, etc.)
         error_msg = str(e)
         if "Only admins can change roles" in error_msg:
