@@ -273,6 +273,8 @@ async def update_user_role(
     current_user: dict = Depends(get_current_user)
 ):
     """Update a user's role by username.
+    
+    Requires admin role. RLS policy must allow admins to update user roles.
     """
     new_role = role_update.role
     if new_role not in {"user", "moderator", "admin"}:
