@@ -354,13 +354,29 @@ class DatabaseAdapter:
             Base.metadata.create_all(self.engine)
     
     def table(self, table_name: str):
-        """Get table interface (compatible with Supabase API)"""
+        """Get table interface (compatible with Supabase API)
+        
+        For Supabase: Creates a user-scoped client with the request's JWT token
+        so that RLS policies can access auth.uid() correctly.
+        Falls back to service role client if no token is available.
+        """
         if self.backend == "sqlite":
             return SQLiteTable(table_name, self.Session)
         else:
-            # Use base Supabase client with service key
-            # Authorization is handled at application level in route handlers
-            return self.supabase.table(table_name)
+            # Try to get the user's JWT token for RLS
+            user_token = get_supabase_auth_token() or getattr(self, '_request_auth_token', None)
+            
+            if user_token:
+                # Create a user-scoped client for RLS to work properly with auth.uid()
+                user_client = self._supabase_client_factory(
+                    self._supabase_url,
+                    self._supabase_key,
+                    options={"headers": {"Authorization": f"Bearer {user_token}"}}
+                )
+                return user_client.table(table_name)
+            else:
+                # Fall back to service role client (for background tasks, etc.)
+                return self.supabase.table(table_name)
     
     def set_request_auth_token(self, token: str):
         """Set the auth token for this request (for use when context var is not available)."""

@@ -194,15 +194,19 @@ def get_cors_origins():
 # ============================================================================
 
 # CORS middleware - must be added before app startup
-cors_origins = get_cors_origins()
-logger.info(f"CORS origins at startup: {cors_origins}")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["*"],
-)
+# Guard against multiple additions (e.g., in tests that reload modules)
+if not any(isinstance(m, type) and issubclass(m, type) and 
+           getattr(m, '__name__', None) == 'CORSMiddleware' 
+           for m in [type(middleware) for middleware in getattr(app, 'user_middleware', [])]):
+    cors_origins = get_cors_origins()
+    logger.info(f"CORS origins at startup: {cors_origins}")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 # Security headers middleware
 @app.middleware("http")
