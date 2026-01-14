@@ -310,6 +310,9 @@ async def update_user_role(
         logger = logging.getLogger(__name__)
         logger.error(f"RPC error: {type(e).__name__}: {str(e)}")
         
+        # The function returns the updated user as JSONB
+        updated_user = response.data if response.data else target_user
+    except Exception as e:
         # Handle database errors (user not found, permission denied, etc.)
         error_msg = str(e)
         if "Only admins can change roles" in error_msg:
