@@ -207,6 +207,17 @@ def get_cors_origins():
 # Security Middleware
 # ============================================================================
 
+# CORS middleware - must be added before app startup
+cors_origins = get_cors_origins()
+logger.info(f"CORS origins at startup: {cors_origins}")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 # Security headers middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
