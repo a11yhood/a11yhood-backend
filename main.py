@@ -38,12 +38,30 @@ async def validate_security_configuration():
     
     Prevents common misconfigurations that could compromise security.
     Raises RuntimeError for critical issues that must be fixed before running.
+    Initialize CORS middleware with fresh environment settings.
     """
     # Reload settings within the function so tests that patch environment
     # (e.g., startup security tests) observe the updated values without
     # weakening production behavior.
     # Use a fresh settings instance so env patches in tests are respected.
     local_settings = load_settings_from_env()
+    
+    # Initialize CORS middleware with current environment settings
+    # This ensures production environment changes are picked up without restart
+    cors_origins = get_cors_origins()
+    logger.info(f"CORS origins configured: {cors_origins}")
+    # Re-add the CORS middleware to refresh the origins list
+    app.user_middleware = [
+        m for m in app.user_middleware 
+        if m.cls != CORSMiddleware
+    ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["*"],
+    )
     
     # Detect production environment by checking for production indicators
     is_production = any([
@@ -185,8 +203,6 @@ def get_cors_origins():
     
     return list(origins)
 
-origins = get_cors_origins()
-
 # ============================================================================
 # Security Middleware
 # ============================================================================
@@ -245,15 +261,6 @@ async def add_security_headers(request: Request, call_next):
     )
     
     return response
-
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,  # Explicit allowlist only
-    allow_credentials=True,  # Required for Authorization headers
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # Include OPTIONS for CORS preflight
-    allow_headers=["*"],  # Allow all headers (browsers send various sec-fetch-* headers)
-)
 
 # Trusted hosts (prevent host header injection)
 allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0"]
