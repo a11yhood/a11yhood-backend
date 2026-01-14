@@ -274,7 +274,8 @@ async def update_user_role(
 ):
     """Update a user's role by username.
     
-    Requires admin role. RLS policy must allow admins to update user roles.
+    Uses admin_update_user_role database function to properly handle
+    role changes with admin verification at the database level.
     """
     new_role = role_update.role
     if new_role not in {"user", "moderator", "admin"}:
@@ -287,8 +288,28 @@ async def update_user_role(
     old_role = target_user.get("role", "user")
     user_id = target_user["id"]
     
-    response = db.table("users").update({"role": new_role}).eq("id", user_id).execute()
-    updated_user = response.data[0] if response.data else target_user
+    # Call database function to update role with admin privileges
+    # This function verifies admin status and updates the role
+    try:
+        response = db.rpc('admin_update_user_role', {
+            'admin_user_id': current_user["id"],
+            'target_user_id': user_id,
+            'new_role': new_role
+        }).execute()
+        
+        # The function returns the updated user as JSONB
+        updated_user = response.data if response.data else target_user
+    except Exception as e:
+        # Handle database errors (user not found, permission denied, etc.)
+        error_msg = str(e)
+        if "Only admins can change roles" in error_msg:
+            raise HTTPException(status_code=403, detail="Only admins can change roles")
+        elif "User not found" in error_msg:
+            raise HTTPException(status_code=404, detail="User not found")
+        elif "Invalid role" in error_msg:
+            raise HTTPException(status_code=400, detail="Invalid role")
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to update role: {error_msg}")
     
     # Log security event for role change
     log_role_change(
@@ -299,7 +320,7 @@ async def update_user_role(
     )
     
     return {
-        "id": updated_user["id"],
+        "id": updated_user.get("id"),
         "username": updated_user.get("username", ""),
         "avatar_url": updated_user.get("avatar_url"),
         "email": updated_user.get("email"),
