@@ -38,6 +38,7 @@ async def validate_security_configuration():
     
     Prevents common misconfigurations that could compromise security.
     Raises RuntimeError for critical issues that must be fixed before running.
+    Initialize CORS middleware with fresh environment settings.
     """
     # Reload settings within the function so tests that patch environment
     # (e.g., startup security tests) observe the updated values without
@@ -45,9 +46,22 @@ async def validate_security_configuration():
     # Use a fresh settings instance so env patches in tests are respected.
     local_settings = load_settings_from_env()
     
-    # Log CORS configuration
+    # Initialize CORS middleware with current environment settings
+    # This ensures production environment changes are picked up without restart
     cors_origins = get_cors_origins()
     logger.info(f"CORS origins configured: {cors_origins}")
+    # Re-add the CORS middleware to refresh the origins list
+    app.user_middleware = [
+        m for m in app.user_middleware 
+        if m.cls != CORSMiddleware
+    ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["*"],
+    )
     
     # Detect production environment by checking for production indicators
     is_production = any([
