@@ -362,6 +362,14 @@ class DatabaseAdapter:
             # Authorization is handled at application level in route handlers
             return self.supabase.table(table_name)
     
+    def rpc(self, function_name: str, params: dict = None):
+        """Call a Supabase database function (RPC)"""
+        if self.backend == "sqlite":
+            raise NotImplementedError(f"RPC functions not supported in SQLite mode")
+        else:
+            # Call Supabase RPC
+            return self.supabase.rpc(function_name, params)
+    
     def set_request_auth_token(self, token: str):
         """Set the auth token for this request (for use when context var is not available)."""
         self._request_auth_token = token
