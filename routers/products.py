@@ -7,7 +7,7 @@ Security: Mutations require authentication; updates/deletes enforce ownership or
 import os
 import uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from typing import Optional, Iterable, Callable
 from datetime import datetime, UTC, timedelta
 import httpx
@@ -210,6 +210,7 @@ class BulkDeleteRequest(BaseModel):
 
 @router.get("/sources")
 async def get_product_sources(
+    response: Response,
     db = Depends(get_db),
 ):
     """Get all unique source values from products table with product counts.
@@ -230,24 +231,36 @@ async def get_product_sources(
         canonical_set = set(canonical_list)
         name_map = {n.lower(): n for n in canonical_list}
 
-        # Count products by source
+        # Count products by source using SQL aggregation
         source_counts: dict[str, int] = {}
-        page_size = 1000
-        offset = 0
-        while True:
-            resp = db.table("products").select("source").range(offset, offset + page_size - 1).execute()
-            rows = resp.data or []
-            if not rows:
-                break
-            for row in rows:
-                s = row.get("source")
-                if s and str(s).strip():
-                    raw_source = str(s).strip()
+        try:
+            # Use RPC function for aggregation (faster than fetching all rows)
+            rpc_resp = db.rpc('get_product_source_counts').execute()
+            for row in (rpc_resp.data or []):
+                raw_source = str(row.get("source", "")).strip()
+                count = int(row.get("count", 0))
+                if raw_source:
                     # Canonicalize to supported_sources name
                     canonical_source = name_map.get(raw_source.lower(), raw_source.title())
-                    source_counts[canonical_source] = source_counts.get(canonical_source, 0) + 1
-            if len(rows) < page_size:
-                break
+                    source_counts[canonical_source] = source_counts.get(canonical_source, 0) + count
+        except Exception as e:
+            # Fallback to manual aggregation if RPC not available
+            print(f"RPC not available, using fallback: {e}")
+            page_size = 1000
+            offset = 0
+            while True:
+                resp = db.table("products").select("source").range(offset, offset + page_size - 1).execute()
+                rows = resp.data or []
+                if not rows:
+                    break
+                for row in rows:
+                    s = row.get("source")
+                    if s and str(s).strip():
+                        raw_source = str(s).strip()
+                        canonical_source = name_map.get(raw_source.lower(), raw_source.title())
+                        source_counts[canonical_source] = source_counts.get(canonical_source, 0) + 1
+                if len(rows) < page_size:
+                    break
             offset += page_size
 
         # Build result list with all canonical sources (even if count is 0)
@@ -268,6 +281,8 @@ async def get_product_sources(
         
         # Sort by name
         result.sort(key=lambda x: x["name"])
+        # Cache for a short time to reduce repeated load
+        response.headers["Cache-Control"] = "public, max-age=120"
         return {"sources": result}
     except Exception:
         return {"sources": []}
@@ -391,6 +406,7 @@ def attach_rating_fields(db, product: dict, ratings_map: Optional[dict[str, dict
 
 @router.get("/types")
 async def get_product_types(
+    response: Response,
     db = Depends(get_db),
 ):
     """Get all unique type values from products table.
@@ -411,35 +427,47 @@ async def get_product_types(
         # Distinct types present in products
         product_types: set[str] = set()
         try:
-            if getattr(db, "backend", None) == "supabase":
-                resp = db.table("products").select("type", distinct=True).execute()
-                product_types = {
-                    str(row.get("type")).strip()
-                    for row in (resp.data or [])
-                    if row.get("type") and str(row.get("type")).strip()
-                }
-            else:
-                raise TypeError("distinct not supported for this backend")
-        except TypeError:
-            # Fallback: paginate through products and collect unique types (avoids default caps)
-            page_size = 1000
-            offset = 0
-            while True:
-                resp = db.table("products").select("type").range(offset, offset + page_size - 1).execute()
-                rows = resp.data or []
-                if not rows:
-                    break
-                for row in rows:
-                    t = row.get("type")
-                    if t and str(t).strip():
-                        product_types.add(str(t).strip())
-                if len(rows) < page_size:
-                    break
-                offset += page_size
+            # Try RPC function for better performance
+            rpc_resp = db.rpc('get_product_types').execute()
+            product_types = {
+                str(row.get("type")).strip()
+                for row in (rpc_resp.data or [])
+                if row.get("type") and str(row.get("type")).strip()
+            }
+        except Exception:
+            # Fallback to distinct query
+            try:
+                if getattr(db, "backend", None) == "supabase":
+                    resp = db.table("products").select("type", distinct=True).execute()
+                    product_types = {
+                        str(row.get("type")).strip()
+                        for row in (resp.data or [])
+                        if row.get("type") and str(row.get("type")).strip()
+                    }
+                else:
+                    raise TypeError("distinct not supported for this backend")
+            except TypeError:
+                # Final fallback: paginate (slow but works)
+                page_size = 1000
+                offset = 0
+                while True:
+                    resp = db.table("products").select("type").range(offset, offset + page_size - 1).execute()
+                    rows = resp.data or []
+                    if not rows:
+                        break
+                    for row in rows:
+                        t = row.get("type")
+                        if t and str(t).strip():
+                            product_types.add(str(t).strip())
+                    if len(rows) < page_size:
+                        break
+                    offset += page_size
 
         # Combine canonical list and discovered product types
         combined = canonical_types.union(product_types)
-        return {"types": sorted(combined)}
+        payload = sorted(combined)
+        response.headers["Cache-Control"] = "public, max-age=120"
+        return {"types": payload}
     except Exception as e:
         return {"types": []}
 
@@ -457,6 +485,7 @@ async def get_tags(
     tag_search: Optional[str] = Query(None, description="Case-insensitive substring filter on tag name"),
     limit: Optional[int] = Query(None, le=1000, description="Optional cap; omit to return all tags"),
     current_user: Optional[dict] = Depends(get_current_user_optional),
+    response: Response = None,
     db = Depends(get_db),
 ):
     """Get tag names for products matching the provided filters.
@@ -468,15 +497,38 @@ async def get_tags(
     - include_banned: set to true to include banned products (requires admin/moderator role).
     """
     try:
+        # Try optimized RPC function first
+        source_values = set(_normalize_list(source) + _normalize_list(sources))
+        source_values = set(_canonicalize_sources(db, list(source_values)))
+        type_values = set(_normalize_list(type) + _normalize_list(types))
+        
+        try:
+            params = {
+                "p_sources": list(source_values) if source_values else None,
+                "p_types": list(type_values) if type_values else None,
+                "p_name_search": search,
+                "p_tag_search": tag_search,
+                "p_limit": limit,
+                "p_created_by": created_by,
+                "p_updated_since": updated_since,
+                "p_include_banned": include_banned
+            }
+            rpc_resp = db.rpc('get_product_tags_filtered', params).execute()
+            names = [row.get("tag_name") for row in (rpc_resp.data or []) if row.get("tag_name")]
+            # Cache for a short time since tags list changes infrequently
+            response.headers["Cache-Control"] = "public, max-age=120"
+            return {"tags": names}
+        except Exception as e:
+            print(f"RPC not available, using fallback: {e}")
+            # Fallback to original implementation
+            pass
+
         # First, find product_ids matching filters (consistent with /products)
         product_query = db.table("products").select("id")
 
-        source_values = set(_normalize_list(source) + _normalize_list(sources))
-        source_values = set(_canonicalize_sources(db, list(source_values)))
         if source_values:
             product_query = product_query.in_("source", list(source_values))
 
-        type_values = set(_normalize_list(type) + _normalize_list(types))
         if type_values:
             product_query = product_query.in_("type", list(type_values))
 
@@ -533,7 +585,8 @@ async def get_tags(
         names = sorted(names_set)
         if limit is not None:
             names = names[:max(limit, 0)]
-        
+
+        response.headers["Cache-Control"] = "public, max-age=120"
         return {"tags": names}
     except HTTPException:
         raise

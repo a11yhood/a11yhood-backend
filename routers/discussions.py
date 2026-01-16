@@ -4,7 +4,7 @@ Supports threaded discussions via parent_id for reply chains.
 Security: Users can only edit/delete their own comments.
 All discussion content should be sanitized before rendering to prevent XSS.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from typing import Optional
 from supabase import Client
 from datetime import datetime, timezone
@@ -24,6 +24,7 @@ async def get_discussions(
     parent_id: Optional[str] = None,
     limit: int = Query(50, le=100),
     offset: int = Query(0, ge=0),
+    response: Response = None,
     db = Depends(get_db),
 ):
     """Get discussions with optional filters"""
@@ -40,8 +41,11 @@ async def get_discussions(
     
     query = query.range(offset, offset + limit - 1).order("created_at", desc=True)
     
-    response = query.execute()
-    return response.data
+    db_resp = query.execute()
+    # Short cache for 15s to smooth bursts
+    if response is not None:
+        response.headers["Cache-Control"] = "public, max-age=15"
+    return db_resp.data
 
 
 @router.get("/{discussion_id}", response_model=DiscussionResponse)
