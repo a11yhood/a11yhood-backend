@@ -42,7 +42,7 @@ async def get_discussions(
     query = query.range(offset, offset + limit - 1).order("created_at", desc=True)
     
     db_resp = query.execute()
-    # Cache for 1 minute to reduce load (was 15s)
+    # Cache for 1 minute to reduce load
     if response is not None:
         response.headers["Cache-Control"] = "public, max-age=60"
     return db_resp.data

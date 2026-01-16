@@ -492,6 +492,7 @@ async def get_tags(
     tag_search: Optional[str] = Query(None, description="Case-insensitive substring filter on tag name"),
     limit: Optional[int] = Query(None, le=1000, description="Optional cap; omit to return all tags"),
     current_user: Optional[dict] = Depends(get_current_user_optional),
+    response: Response = None,
     db = Depends(get_db),
 ):
     """Get tag names for products matching the provided filters.

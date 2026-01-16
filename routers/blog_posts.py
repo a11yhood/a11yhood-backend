@@ -258,7 +258,7 @@ async def list_blog_posts(
 
     db_resp = query.execute()
     posts = [_normalize_post(p) for p in (db_resp.data or [])]
-    # Cache for 5 minutes for public listing (was 60s)
+    # Cache for 5 minutes for public listing 
     if response is not None and not include_unpublished:
         response.headers["Cache-Control"] = "public, max-age=300"
     return posts
