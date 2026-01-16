@@ -192,6 +192,7 @@
     last_edited_at TIMESTAMPTZ,
     last_edited_by UUID REFERENCES users(id) ON DELETE SET NULL,
     editor_ids UUID[],
+    matched_search_terms JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 

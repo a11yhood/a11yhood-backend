@@ -129,6 +129,9 @@ class RavelryScraper(BaseScraper):
                             print(f"[Ravelry] Failed to fetch details for pattern {pattern_id}, skipping")
                             continue
 
+                        # Track which PA category matched this pattern
+                        full_pattern['_matched_pa_category'] = pa_category
+
                         url = f"https://www.ravelry.com/patterns/library/{full_pattern['permalink']}"
                         existing = await self._product_exists(url)
 
@@ -376,6 +379,11 @@ class RavelryScraper(BaseScraper):
             except Exception as e:
                 print(f"[Ravelry] Failed to parse last updated date: {e}")
         
+        # Track which PA category matched (passed via _matched_pa_category)
+        matched_search_terms = []
+        if pattern.get('_matched_pa_category'):
+            matched_search_terms.append(pattern['_matched_pa_category'])
+        
         return {
             'name': pattern['name'],
             'description': description,
@@ -389,6 +397,7 @@ class RavelryScraper(BaseScraper):
             'source_rating': rating,
             'source_rating_count': rating_count,
             'source_last_updated': source_last_updated,
+            'matched_search_terms': matched_search_terms,
             'external_data': {
                 'rating': rating,
                 'rating_count': rating_count,
