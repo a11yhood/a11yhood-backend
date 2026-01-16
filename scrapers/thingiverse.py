@@ -436,7 +436,6 @@ class ThingiverseScraper(BaseScraper):
                 'likes': thing.get('like_count', 0),
                 'favorites': thing.get('favorite_count', 0),
                 'categories': [cat.get('name') for cat in thing.get('categories', [])],
-                'search_term': search_term,  # Track which search term found this product
             }
         }
     
