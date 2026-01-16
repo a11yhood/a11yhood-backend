@@ -220,9 +220,12 @@ async def get_product_sources(
     source values found in products. All values are camelcased to canonical
     names when available; otherwise title-cased.
     """
+    # Add caching headers (5 minutes)
+    response.headers["Cache-Control"] = "public, max-age=300"
+    
     try:
         # Canonical list and mapping from supported_sources
-        response = db.table("supported_sources").select("name").execute()
+        sources_resp = db.table("supported_sources").select("name").execute()
         canonical_list = [
             row["name"].strip()
             for row in (response.data or [])
@@ -415,12 +418,15 @@ async def get_product_types(
     Uses valid_categories as the canonical list so options stay stable
     regardless of current search filters.
     """
+    # Add caching headers (5 minutes)
+    response.headers["Cache-Control"] = "public, max-age=300"
+    
     try:
         # Canonical list from valid_categories
-        response = db.table("valid_categories").select("category").execute()
+        categories_resp = db.table("valid_categories").select("category").execute()
         canonical_types = {
             row["category"].strip()
-            for row in (response.data or [])
+            for row in (categories_resp.data or [])
             if row.get("category") and row.get("category").strip()
         }
 
@@ -474,6 +480,7 @@ async def get_product_types(
 
 @router.get("/tags")
 async def get_tags(
+    response: Response,
     source: Optional[list[str]] = Query(None, alias="source", description="Filter tags by product source"),
     sources: Optional[list[str]] = Query(None, description="Filter tags by product source"),
     type: Optional[list[str]] = Query(None, alias="type", description="Filter tags by product type"),
@@ -496,6 +503,9 @@ async def get_tags(
     - Optional limit (up to 1000); omit limit to return all.
     - include_banned: set to true to include banned products (requires admin/moderator role).
     """
+    # Add caching headers (2 minutes)
+    response.headers["Cache-Control"] = "public, max-age=120"
+    
     try:
         # Try optimized RPC function first
         source_values = set(_normalize_list(source) + _normalize_list(sources))
@@ -597,6 +607,7 @@ async def get_tags(
 
 @router.get("", response_model=list[ProductResponse])
 async def get_products(
+    response: Response,
     source: Optional[list[str]] = Query(None, alias="source", description="Comma-separated or repeated source values"),
     sources: Optional[list[str]] = Query(None, description="Comma-separated or repeated source values"),
     type: Optional[list[str]] = Query(None, alias="type", description="Comma-separated or repeated type values"),
@@ -760,8 +771,9 @@ async def get_products(
         item["editor_ids"] = owners_by_product.get(item["id"], [])
         normalized.append(item)
 
-    return normalized
-
+    # Add caching headers (1 minute for product listings)
+    response.headers["Cache-Control"] = "public, max-age=60"
+    
     return normalized
 
 

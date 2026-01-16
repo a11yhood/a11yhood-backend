@@ -4,7 +4,7 @@ Handles user profile CRUD, role management, and ownership tracking.
 Security: Role changes restricted to admins; users can only edit their own profiles.
 Privacy: Public username lookup excludes email and preferences.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from typing import Optional
 from pydantic import BaseModel
 from services.database import get_db
@@ -72,6 +72,7 @@ class UserAccountResponse(PublicUserAccountResponse):
 
 @router.get("/me", response_model=UserAccountResponse, response_model_by_alias=False)
 async def get_current_user_profile(
+    response: Response,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db)
 ):
@@ -79,6 +80,9 @@ async def get_current_user_profile(
     
     Security: Requires authentication. Returns full user data including email and preferences.
     """
+    # Add caching headers (30 seconds for user profile to reduce DB load)
+    response.headers["Cache-Control"] = "private, max-age=30"
+    
     user_id = current_user.get("id")
     response = db.table("users").select("*").eq("id", user_id).execute()
     if not response.data:
