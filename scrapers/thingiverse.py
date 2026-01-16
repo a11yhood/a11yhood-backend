@@ -409,6 +409,11 @@ class ThingiverseScraper(BaseScraper):
         # Extract search term if provided
         search_term = thing.get('_search_term')
         
+        # Track which search term matched
+        matched_search_terms = []
+        if search_term:
+            matched_search_terms.append(search_term)
+        
         return {
             'name': thing['name'],
             'description': thing.get('description', ''),
@@ -422,6 +427,7 @@ class ThingiverseScraper(BaseScraper):
             'source_rating': rating,
             'source_rating_count': rating_count,
             'source_last_updated': source_last_updated,
+            'matched_search_terms': matched_search_terms,
             'external_data': {
                 'rating': rating,
                 'rating_count': rating_count,
@@ -430,7 +436,6 @@ class ThingiverseScraper(BaseScraper):
                 'likes': thing.get('like_count', 0),
                 'favorites': thing.get('favorite_count', 0),
                 'categories': [cat.get('name') for cat in thing.get('categories', [])],
-                'search_term': search_term,  # Track which search term found this product
             }
         }
     
