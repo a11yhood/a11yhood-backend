@@ -8,7 +8,7 @@ from datetime import datetime, UTC
 import re
 from typing import List, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from models.blog_posts import BlogPostCreate, BlogPostResponse, BlogPostUpdate
 from services.auth import ensure_admin, get_current_user, get_current_user_optional
@@ -223,6 +223,9 @@ def _ensure_slug_unique(db, slug: str, exclude_id: Optional[str] = None):
 @router.get("", response_model=List[BlogPostResponse])
 async def list_blog_posts(
     include_unpublished: bool = Query(False, alias="includeUnpublished"),
+    limit: int = Query(20, le=100),
+    offset: int = Query(0, ge=0),
+    response: Response = None,
     current_user: Optional[dict] = Depends(get_current_user_optional),
     db=Depends(get_db),
 ):
@@ -233,15 +236,31 @@ async def list_blog_posts(
     if not include_unpublished:
         query = query.eq("published", True)
 
-    response = query.execute()
-    posts = [_normalize_post(p) for p in (response.data or [])]
-    posts.sort(
-        key=lambda p: p.get("publish_date")
-        or p.get("published_at")
-        or p.get("created_at")
-        or 0,
-        reverse=True,
-    )
+    # Push ordering to SQL: primary publish_date desc NULLS LAST, then published_at desc, then created_at desc
+    # Supabase/PostgREST supports multiple order clauses by repeating `order`.
+    # Some adapters (e.g., SQLite in tests) don't support nullsfirst kwarg
+    supports_nulls = getattr(db_adapter, "backend", "") == "supabase"
+    if supports_nulls:
+        query = (
+            query
+            .order("publish_date", desc=True, nullsfirst=False)
+            .order("published_at", desc=True, nullsfirst=False)
+            .order("created_at", desc=True)
+        )
+    else:
+        query = (
+            query
+            .order("publish_date", desc=True)
+            .order("published_at", desc=True)
+            .order("created_at", desc=True)
+        )
+    query = query.range(offset, offset + limit - 1)
+
+    db_resp = query.execute()
+    posts = [_normalize_post(p) for p in (db_resp.data or [])]
+    # Short cache for public listing
+    if response is not None and not include_unpublished:
+        response.headers["Cache-Control"] = "public, max-age=60"
     return posts
 
 
