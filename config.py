@@ -28,8 +28,9 @@ class Settings(BaseSettings):
     # CORS - strict allowlist for security
     # Dev: Uses Vite proxy (https://localhost:5173 -> http://localhost:8000)
     # Prod: Set to actual frontend domain (e.g., https://a11yhood.com)
-    FRONTEND_URL: str = "https://localhost:5173"
+    FRONTEND_URL: str = "https://localhost:4173"
     PRODUCTION_URL: str = ""
+    CORS_EXTRA_ORIGINS: str = ""  # Comma-separated additional origins
     
     # Environment mode (development, staging, production)
     ENVIRONMENT: Optional[str] = None  # 'production', 'staging', 'development'
