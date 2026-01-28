@@ -5,6 +5,7 @@ Logs full errors server-side for debugging while showing generic messages to cli
 """
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
 import logging
 from config import settings
 
@@ -38,7 +39,7 @@ async def handle_exception(request: Request, exc: Exception) -> JSONResponse:
     # Return sanitized error to client
     if settings.TEST_MODE:
         # Development: include details for debugging
-        return JSONResponse(
+        response = JSONResponse(
             status_code=500,
             content={
                 "detail": "Internal server error",
@@ -48,7 +49,21 @@ async def handle_exception(request: Request, exc: Exception) -> JSONResponse:
         )
     else:
         # Production: generic message only
-        return JSONResponse(
+        response = JSONResponse(
             status_code=500,
             content={"detail": "Internal server error occurred"}
         )
+    
+    # Add CORS headers to error responses so frontend can receive them
+    origin = request.headers.get("origin")
+    if origin:
+        # Import here to avoid circular dependency
+        from main import get_cors_origins
+        allowed_origins = get_cors_origins()
+        if origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+    
+    return response
