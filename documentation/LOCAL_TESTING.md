@@ -7,9 +7,43 @@ This guide helps you run a fully functional local version of a11yhood for testin
 - **Node.js 18+**: Frontend development
 - **Python 3.9+**: Backend development  
 - **uv**: Python package manager (`pip install uv`)
+- **Pixi**: Environment and task runner for backend (`pixi run run-dev`)
 - **npm**: Node package manager
 
+### Install Pixi (macOS)
+
+Visit https://pixi.prefix.dev for more information.
+
+Choose one option:
+
+```bash
+# Homebrew
+brew install pixi
+```
+
+```bash
+# Official installer
+curl -fsSL https://pixi.sh/install.sh | bash
+```
+
+Verify installation:
+
+```bash
+pixi --version
+```
+
 ## Quick Start
+
+### Start Backend with Pixi (recommended)
+
+```bash
+# Run backend in development mode (uses tasks.run-dev)
+pixi run run-dev
+```
+
+The `run-dev` task sets `ENVIRONMENT=development`, uses SQLite (`DATABASE_URL=sqlite:///./test.db`), and starts Uvicorn on port `8000`.
+
+Stop the server with `Ctrl+C`.
 
 ### One-Command Setup
 
