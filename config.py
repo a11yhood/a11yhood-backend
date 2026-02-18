@@ -52,7 +52,11 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_SECRET: Optional[str] = None
     
 
-
+    def model_post_init(self, ctx):
+        if not self.TEST_MODE:
+            self.TEST_MODE = self.ENVIRONMENT == "development"
+        return self
+    
 @lru_cache()
 def get_settings(env_file: str = ".env") -> Settings:
     """Get cached settings instance.

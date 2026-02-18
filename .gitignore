@@ -73,3 +73,6 @@ build/
 
 # Local helper scripts (not tracked)
 deploy-prod-image.sh
+# pixi environments
+.pixi/*
+!.pixi/config.toml
