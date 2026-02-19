@@ -5,7 +5,7 @@ This guide helps you run a fully functional local version of a11yhood for testin
 ## Prerequisites
 
 - **Node.js 18+**: Frontend development
-- **Python 3.9+**: Backend development  
+- **Python 3.14+**: Backend development  
 - **uv**: Python package manager (`pip install uv`)
 - **Pixi**: Environment and task runner for backend (`pixi run run-dev`)
 - **npm**: Node package manager
