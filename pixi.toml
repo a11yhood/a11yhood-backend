@@ -9,7 +9,7 @@ version = "0.1.0"
 test = {features = ["test", "default"] }
 
 [feature.test.tasks.run-tests]
-description = "run the application in development mode"
+description = "run the test suite"
 cmd = "pytest"
 
 
