@@ -2,7 +2,7 @@
 authors = ["tonyfast <tony.fast@uw.edu>"]
 channels = ["conda-forge"]
 name = "a11yhood-backend"
-platforms = ["osx-arm64"]
+platforms = ["osx-arm64", "osx-64", "linux-64"]
 version = "0.1.0"
 
 [environments]
