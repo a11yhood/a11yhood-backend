@@ -294,7 +294,7 @@ async def update_user_role(
     target_user = _get_user_by_identifier(db, username)
     old_role = target_user.get("role", "user")
     user_id = target_user["id"]
-    
+
     # Call database function to update role with admin privileges
     # This function verifies admin status and updates the role
     try:
@@ -308,10 +308,10 @@ async def update_user_role(
         }).execute()
         
         logger.info(f"RPC response: {response}")
+        updated_user = response.data if getattr(response, "data", None) else target_user
         
     except Exception as e:
         # The function returns the updated user as JSONB
-        updated_user = response.data if response.data else target_user
     
         logger = logging.getLogger(__name__)
         logger.error(f"RPC error: {type(e).__name__}: {str(e)}")
