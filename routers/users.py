@@ -13,7 +13,7 @@ from services.security_logger import log_role_change
 from config import settings
 import os
 import uuid
-
+import logging
 
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -24,6 +24,8 @@ def _looks_like_uuid(value: str) -> bool:
         uuid.UUID(str(value))
         return True
     except Exception:
+        logger = logging.getLogger(__name__)
+        logger.error(f"uuid error: {type(e).__name__}: {str(e)}")
         return False
 
 
@@ -241,7 +243,8 @@ async def create_or_update_user_account(
                 updated_user = response.data[0] if response.data else payload
                 print(f"[users] inserted user id={updated_user.get('id')} role={updated_user.get('role')}")
     except Exception as e:
-        print(f"[users] ERROR creating/updating user: {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"[users] ERROR creating/updating user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
     role = updated_user.get("role", "user")
@@ -295,7 +298,6 @@ async def update_user_role(
     # Call database function to update role with admin privileges
     # This function verifies admin status and updates the role
     try:
-        import logging
         logger = logging.getLogger(__name__)
         logger.info(f"Calling admin_update_user_role with admin_user_id={current_user['id']}, target_user_id={user_id}, new_role={new_role}")
         
@@ -307,16 +309,13 @@ async def update_user_role(
         
         logger.info(f"RPC response: {response}")
         
+    except Exception as e:
         # The function returns the updated user as JSONB
         updated_user = response.data if response.data else target_user
-    except Exception as e:
-        import logging
+    
         logger = logging.getLogger(__name__)
         logger.error(f"RPC error: {type(e).__name__}: {str(e)}")
         
-        # The function returns the updated user as JSONB
-        updated_user = response.data if response.data else target_user
-    except Exception as e:
         # Handle database errors (user not found, permission denied, etc.)
         error_msg = str(e)
         if "Only admins can change roles" in error_msg:
