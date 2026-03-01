@@ -237,7 +237,7 @@ async def get_product_sources(
         sources_resp = db.table("supported_sources").select("name").execute()
         canonical_list = [
             row["name"].strip()
-            for row in (response.data or [])
+            for row in (sources_resp.data or [])
             if row.get("name") and row.get("name").strip()
         ]
         canonical_set = set(canonical_list)
