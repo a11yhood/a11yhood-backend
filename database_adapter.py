@@ -6,7 +6,7 @@ The adapter provides a unified interface that works with both backends.
 """
 from typing import Optional, Dict, List, Any, Union
 from contextvars import ContextVar
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, UniqueConstraint, ForeignKey, text, Numeric
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, ForeignKey, text, Numeric
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, UTC
 import uuid
