@@ -44,8 +44,13 @@ async def create_supported_source(
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     
+    # Normalize domain by removing www. prefix (consistent with extract_domain)
+    domain = source.domain.lower()
+    if domain.startswith('www.'):
+        domain = domain[4:]
+    
     # Check if domain already exists
-    existing = db.table("supported_sources").select("*").eq("domain", source.domain.lower()).limit(1).execute()
+    existing = db.table("supported_sources").select("*").eq("domain", domain).limit(1).execute()
     if existing.data:
         raise HTTPException(status_code=409, detail="This domain is already supported")
     
@@ -54,7 +59,7 @@ async def create_supported_source(
     
     db_data = {
         "id": source_id,
-        "domain": source.domain.lower(),
+        "domain": domain,
         "name": source.name,
     }
     
@@ -91,11 +96,16 @@ async def update_supported_source(
     # Build update data (only non-None fields)
     update_data = {}
     if source.domain is not None:
+        # Normalize domain by removing www. prefix (consistent with extract_domain)
+        domain = source.domain.lower()
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        
         # Check if new domain already exists elsewhere
-        domain_check = db.table("supported_sources").select("*").eq("domain", source.domain.lower()).limit(1).execute()
+        domain_check = db.table("supported_sources").select("*").eq("domain", domain).limit(1).execute()
         if domain_check.data and domain_check.data[0]["id"] != source_id:
             raise HTTPException(status_code=409, detail="This domain is already supported")
-        update_data["domain"] = source.domain.lower()
+        update_data["domain"] = domain
     
     if source.name is not None:
         update_data["name"] = source.name

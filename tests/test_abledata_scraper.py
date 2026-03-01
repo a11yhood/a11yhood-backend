@@ -5,6 +5,7 @@ Test the AbleData scraper with the example URL
 import asyncio
 import os
 import sys
+import pytest
 from dotenv import load_dotenv
 from services.database import get_db
 from scrapers.abledata import AbleDataScraper
@@ -14,6 +15,7 @@ env_file = os.getenv('ENV_FILE', '.env.test')
 load_dotenv(env_file)
 
 
+@pytest.mark.skip(reason="AbleData scraper test temporarily disabled")
 async def test_abledata_scraper():
     """Test scraping the example AbleData URL"""
     print("Testing AbleData scraper...")

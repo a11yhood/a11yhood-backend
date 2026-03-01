@@ -45,6 +45,10 @@ async def validate_security_configuration():
     # Use a fresh settings instance so env patches in tests are respected.
     local_settings = load_settings_from_env()
     
+    # Log CORS configuration status
+    cors_origins = get_cors_origins()
+    logger.info(f"CORS origins configured: {cors_origins}")
+    
     # Detect production environment by checking for production indicators
     is_production = any([
         # Production Supabase URL (not localhost/dummy)
@@ -185,11 +189,24 @@ def get_cors_origins():
     
     return list(origins)
 
-origins = get_cors_origins()
-
 # ============================================================================
 # Security Middleware
 # ============================================================================
+
+# CORS middleware - must be added before app startup
+# Guard against multiple additions (e.g., in tests that reload modules)
+if not any(isinstance(m, type) and issubclass(m, type) and 
+           getattr(m, '__name__', None) == 'CORSMiddleware' 
+           for m in [type(middleware) for middleware in getattr(app, 'user_middleware', [])]):
+    cors_origins = get_cors_origins()
+    logger.info(f"CORS origins at startup: {cors_origins}")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 # Security headers middleware
 @app.middleware("http")
@@ -219,14 +236,14 @@ async def add_security_headers(request: Request, call_next):
             "frame-ancestors 'none'"
         )
     else:
-        # Production: strict CSP
+        # Production: Allow CDN for Swagger/ReDoc UI documentation
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "img-src 'self' data: https:; "
-            "font-src 'self'; "
-            "connect-src 'self'; "
+            "font-src 'self' https://cdn.jsdelivr.net; "
+            "connect-src 'self' https://cdn.jsdelivr.net; "
             "frame-ancestors 'none'"
         )
     
@@ -245,15 +262,6 @@ async def add_security_headers(request: Request, call_next):
     )
     
     return response
-
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,  # Explicit allowlist only
-    allow_credentials=True,  # Required for Authorization headers
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # Include OPTIONS for CORS preflight
-    allow_headers=["*"],  # Allow all headers (browsers send various sec-fetch-* headers)
-)
 
 # Trusted hosts (prevent host header injection)
 allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0"]

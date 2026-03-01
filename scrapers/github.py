@@ -124,6 +124,9 @@ class GitHubScraper(BaseScraper):
 
                         products_found += 1
 
+                        # Track which search term matched this repo
+                        repo['_matched_search_term'] = term
+
                         existing = await self._product_exists(repo["html_url"])
 
                         if existing:
@@ -166,10 +169,13 @@ class GitHubScraper(BaseScraper):
 
         Returns a tuple of (filtered_items, has_more).
         """
-        quoted_term = f'"{term}"'
+        # Don't quote the search term—GitHub's quoted searches are too strict
+        # and miss repos where the term is a compound word (e.g., "braille2latex")
+        # or has different capitalization (e.g., "Braille" in description).
+        # Unquoted search matches the term as word tokens anywhere in repo metadata.
         url = f"{self.API_BASE_URL}/search/repositories"
         params = {
-            'q': f'{quoted_term} stars:>3',
+            'q': f'{term} stars:>=3',
             'sort': 'stars',
             'order': 'desc',
             'per_page': self.RESULTS_PER_PAGE,
@@ -265,6 +271,11 @@ class GitHubScraper(BaseScraper):
             except Exception as e:
                 print(f"[GitHub] Failed to parse last updated date: {e}")
         
+        # Track which search term matched (passed via _matched_search_term)
+        matched_search_terms = []
+        if repo.get('_matched_search_term'):
+            matched_search_terms.append(repo['_matched_search_term'])
+        
         return {
             'name': repo['name'],
             'description': repo.get('description', ''),
@@ -278,6 +289,7 @@ class GitHubScraper(BaseScraper):
             'source_rating': star_rating,  # Normalized star rating (2-5)
             'source_rating_count': stars,  # Actual GitHub star count
             'source_last_updated': source_last_updated.isoformat() if source_last_updated else None,
+            'matched_search_terms': matched_search_terms,
             'external_data': {
                 'language': language,
                 'topics': topics,

@@ -1,6 +1,8 @@
 # a11yhood Backend API
 
-The a11yhood backend is designed to provide access to the a11yhood data and to support scraping of new data. See the a11yhood frontend (a11yhood/a11yhood.github.io) for the ux side of this project.
+The a11yhood backend is designed to provide access to the a11yhood data and to support scraping of new data. See the a11yhood frontend (a11yhood/a11yhood.github.io) for the ux side of this project. 
+
+Additional documentation files can be found in the documentation directory.
 
 ## Project Structure
 
@@ -188,7 +190,14 @@ See `.env.example` for a complete list of configuration options.
 
 ## 📖 Documentation
 
-Comprehensive documentation is available in the `documentation/` folder:
+## Starter Guides
+- [QUICK_START.md](documentation/QUICK_START.md) — One-command startup, URLs, seeded users, quick troubleshooting
+- [LOCAL_TESTING.md](documentation/LOCAL_TESTING.md) — Full local setup, env vars, test data seeding, common tasks
+- [DEVELOPER_GUIDE.md](documentation/DEVELOPER_GUIDE.md) — End-to-end development workflow
+- [PRD.md](documentation/PRD.md) — Product requirements
+- [AGENT_GUIDE.md](documentation/AGENT_GUIDE.md) — What an agent should read and the helper conventions to follow
+
+Additional documentation in the `documentation/` folder:
 
 - **[LOCAL_TESTING.md](documentation/LOCAL_TESTING.md)** - Local development and testing guide
 - **[API_REFERENCE.md](documentation/API_REFERENCE.md)** - Detailed API endpoint reference

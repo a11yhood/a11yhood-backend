@@ -5,13 +5,27 @@ This allows tests to use SQLite (fast, local) while production uses Supabase.
 The adapter provides a unified interface that works with both backends.
 """
 from typing import Optional, Dict, List, Any, Union
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, UniqueConstraint
+from contextvars import ContextVar
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Text, JSON, Float, UUID, ForeignKey, text, Numeric
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, UTC
 import uuid
 from services.id_generator import normalize_to_snake_case
 
 Base = declarative_base()
+
+# Per-request Supabase JWT for RLS-aware queries
+_supabase_auth_token: ContextVar[Optional[str]] = ContextVar("supabase_auth_token", default=None)
+
+
+def set_supabase_auth_token(token: Optional[str]):
+    """Store the active Supabase JWT in a context variable for this request."""
+    _supabase_auth_token.set(token)
+
+
+def get_supabase_auth_token() -> Optional[str]:
+    """Retrieve the Supabase JWT for the current request, if set."""
+    return _supabase_auth_token.get()
 
 
 def utcnow_naive():
@@ -46,6 +60,7 @@ class Product(Base):
     banned_at = Column(DateTime)
     created_by = Column(String)  # User who created/added the product
     editor_ids = Column(JSON)  # List of editor user IDs
+    computed_rating = Column(Numeric(3, 2))  # Computed display rating (user average or source rating)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
     last_edited_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
@@ -148,7 +163,7 @@ class UserRequest(Base):
     updated_at = Column(DateTime, default=utcnow_naive)
 
 
-class ProductOwner(Base):
+class ProductEditor(Base):
     __tablename__ = "product_editors"
     
     id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -202,14 +217,24 @@ class Collection(Base):
     __tablename__ = "collections"
     
     id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    slug = Column(String, unique=True, nullable=False)
     user_id = Column(String, nullable=False)
     user_name = Column(String, nullable=False)
     name = Column(String, nullable=False)
     description = Column(Text)
-    product_ids = Column(JSON, default=list)  # List of product UUIDs
     is_public = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
+
+
+class CollectionProduct(Base):
+    """Junction table for many-to-many relationship between collections and products"""
+    __tablename__ = "collection_products"
+    
+    collection_id = Column(UUID(as_uuid=False), ForeignKey("collections.id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    product_id = Column(UUID(as_uuid=False), ForeignKey("products.id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    position = Column(Integer, default=0)  # Position in collection for ordering
+    added_at = Column(DateTime, default=utcnow_naive)
 
 
 class BlogPost(Base):
@@ -276,7 +301,11 @@ class DatabaseAdapter:
         self.engine = None
         self.Session = None
         self.supabase = None
+        self._supabase_client_factory = None
+        self._supabase_url = None
+        self._supabase_key = None
         self._initialized = False
+        self._request_auth_token = None  # Store user JWT for this request
         
         # Determine which backend to use
         if self.settings.DATABASE_URL:
@@ -284,12 +313,19 @@ class DatabaseAdapter:
             self.backend = "sqlite"
             # Remove aiosqlite:// prefix for synchronous engine
             db_url = self.settings.DATABASE_URL.replace("sqlite+aiosqlite://", "sqlite://")
-            self.engine = create_engine(db_url, echo=False)
+            self.engine = create_engine(db_url, echo=False, connect_args={"check_same_thread": False})
+            # Enable foreign keys for SQLite (required for CASCADE deletes)
+            with self.engine.connect() as conn:
+                conn.execute(text("PRAGMA foreign_keys = ON;"))
+                conn.commit()
             self.Session = sessionmaker(bind=self.engine)
         elif self.settings.SUPABASE_URL:
             # Use Supabase (production)
             self.backend = "supabase"
             from supabase import create_client
+            self._supabase_client_factory = create_client
+            self._supabase_url = self.settings.SUPABASE_URL
+            self._supabase_key = self.settings.SUPABASE_KEY
             self.supabase = create_client(
                 self.settings.SUPABASE_URL,
                 self.settings.SUPABASE_KEY
@@ -300,12 +336,20 @@ class DatabaseAdapter:
     def init(self):
         """Initialize database (create tables for SQLite)"""
         if self.backend == "sqlite" and not self._initialized:
+            # Enable foreign keys for SQLite (required for CASCADE deletes)
+            with self.engine.connect() as conn:
+                conn.execute(text("PRAGMA foreign_keys = ON;"))
+                conn.commit()
             Base.metadata.create_all(self.engine)
             self._initialized = True
     
     def cleanup(self):
         """Clean up database (for testing)"""
         if self.backend == "sqlite":
+            # Enable foreign keys for SQLite (required for CASCADE deletes)
+            with self.engine.connect() as conn:
+                conn.execute(text("PRAGMA foreign_keys = ON;"))
+                conn.commit()
             Base.metadata.drop_all(self.engine)
             Base.metadata.create_all(self.engine)
     
@@ -314,7 +358,21 @@ class DatabaseAdapter:
         if self.backend == "sqlite":
             return SQLiteTable(table_name, self.Session)
         else:
+            # Use base Supabase client with service key
+            # Authorization is handled at application level in route handlers
             return self.supabase.table(table_name)
+    
+    def rpc(self, function_name: str, params: dict = None):
+        """Call a Supabase database function (RPC)"""
+        if self.backend == "sqlite":
+            raise NotImplementedError(f"RPC functions not supported in SQLite mode")
+        else:
+            # Call Supabase RPC
+            return self.supabase.rpc(function_name, params)
+    
+    def set_request_auth_token(self, token: str):
+        """Set the auth token for this request (for use when context var is not available)."""
+        self._request_auth_token = token
 
 
 class SQLiteTable:
@@ -333,12 +391,13 @@ class SQLiteTable:
         "scraping_logs": ScrapingLog,
         "oauth_configs": OAuthConfig,
         "user_requests": UserRequest,
-        "product_editors": ProductOwner,
+        "product_editors": ProductEditor,
         "product_urls": ProductUrl,
         "user_activities": UserActivity,
         "tags": Tag,
         "product_tags": ProductTag,
         "collections": Collection,
+        "collection_products": CollectionProduct,
         "blog_posts": BlogPost,
         "supported_sources": SupportedSource,
         "scraper_search_terms": ScraperSearchTerms,
@@ -615,6 +674,7 @@ class SQLiteTable:
 
         prepared: Dict[str, Any] = {}
         model_columns = {col.name for col in self.model.__table__.columns}
+        datetime_columns = {col.name for col in self.model.__table__.columns if isinstance(col.type, DateTime)}
 
         # Map newer fields to legacy columns where appropriate
         if "source_url" in item and "url" in model_columns and "url" not in item:
@@ -628,6 +688,16 @@ class SQLiteTable:
         # Only keep keys that exist on the model
         for key, value in item.items():
             if key in model_columns:
-                prepared[key] = value
+                # Convert datetime strings to datetime objects for SQLite
+                if key in datetime_columns and isinstance(value, str):
+                    try:
+                        from datetime import datetime
+                        # Parse ISO format datetime strings
+                        prepared[key] = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        # If parsing fails, store as-is and let SQLAlchemy handle it
+                        prepared[key] = value
+                else:
+                    prepared[key] = value
 
         return prepared

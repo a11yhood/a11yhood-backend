@@ -4,7 +4,11 @@ Handles CRUD operations for products with ownership tracking via product_editors
 Supports URL-based upsert for scrapers and tag management via relationship tables.
 Security: Mutations require authentication; updates/deletes enforce ownership or admin role.
 """
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+import os
+import uuid
+import logging
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from typing import Optional, Iterable, Callable
 from datetime import datetime, UTC, timedelta
 import httpx
@@ -36,6 +40,17 @@ def _normalize_list(values: Optional[Iterable[str]]) -> list[str]:
     return normalized
 
 
+def _looks_like_uuid(value: str) -> bool:
+    """Check if a string resembles a UUID (best-effort, non-raising)."""
+    try:
+        uuid.UUID(str(value))
+        return True
+    except Exception:
+        logger = logging.getLogger(__name__)
+        logger.error(f"uuid error: {type(e).__name__}: {str(e)}")
+        return False
+
+
 def _canonicalize_sources(db, values: list[str]) -> list[str]:
     """Map incoming source filter values to canonical names from supported_sources (case-insensitive).
 
@@ -60,6 +75,8 @@ def _canonicalize_sources(db, values: list[str]) -> list[str]:
                 unique.append(c)
         return unique
     except Exception:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Exception: {type(e).__name__}: {str(e)}")
         return values
 
 def _get_supported_source_name_map(db) -> dict[str, str]:
@@ -68,6 +85,8 @@ def _get_supported_source_name_map(db) -> dict[str, str]:
         rows = db.table("supported_sources").select("name").execute()
         return {str(r.get("name")).strip().lower(): str(r.get("name")).strip() for r in (rows.data or []) if r.get("name")}
     except Exception:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Supported Source Exception: {type(e).__name__}: {str(e)}")
         return {}
 
 def _canonicalize_source_value_db(db, value: Optional[str]) -> Optional[str]:
@@ -78,6 +97,124 @@ def _canonicalize_source_value_db(db, value: Optional[str]) -> Optional[str]:
     return name_map.get(key, value)
 
 
+def _get_product_by_identifier(db, identifier: str) -> Optional[dict]:
+    """Fetch a product by ID or slug without triggering UUID parse errors."""
+    if _looks_like_uuid(identifier):
+        resp = db.table("products").select("*").eq("id", identifier).limit(1).execute()
+        if resp.data:
+            return resp.data[0]
+    resp = db.table("products").select("*").eq("slug", identifier).limit(1).execute()
+    return resp.data[0] if resp.data else None
+
+
+async def _enrich_manual_product_metadata(db, source_name: str, source_url: str, product: ProductCreate, db_data: dict):
+    """Fetch metadata from source scrapers for manually submitted products.
+
+    Best-effort: silently continue if tokens are missing or scraping fails.
+    Populates source_last_updated and enriches description/image/external_id/ratings when available.
+    """
+    if not source_name or not source_url:
+        return
+
+    source_key = str(source_name).strip().lower()
+
+    def _get_token(platform: str, env_keys: list[str]) -> Optional[str]:
+        token = None
+        try:
+            resp = db.table("oauth_configs").select("access_token").eq("platform", platform).limit(1).execute()
+            token = (resp.data or [{}])[0].get("access_token")
+        except Exception:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Get Token Exception: {type(e).__name__}: {str(e)}")
+            token = None
+        if not token:
+            for key in env_keys:
+                token = os.getenv(key)
+                if token:
+                    break
+        return token
+
+    scraper_map = {
+        "thingiverse": {
+            "platform": "thingiverse",
+            "factory": lambda token: __import__("scrapers.thingiverse", fromlist=["ThingiverseScraper"]).ThingiverseScraper(db, token),
+            "env_keys": ["THINGIVERSE_ACCESS_TOKEN", "THINGIVERSE_TOKEN"],
+            "requires_token": True,
+        },
+        "github": {
+            "platform": "github",
+            "factory": lambda token: __import__("scrapers.github", fromlist=["GitHubScraper"]).GitHubScraper(db, token),
+            "env_keys": ["GITHUB_TOKEN", "GITHUB_ACCESS_TOKEN"],
+            "requires_token": False,
+        },
+        "ravelry": {
+            "platform": "ravelry",
+            "factory": lambda token: __import__("scrapers.ravelry", fromlist=["RavelryScraper"]).RavelryScraper(db, token),
+            "env_keys": ["RAVELRY_ACCESS_TOKEN", "RAVELRY_APP_KEY"],
+            "requires_token": True,
+        },
+        "goat": {
+            "platform": "goat",
+            "factory": lambda token: __import__("scrapers.goat", fromlist=["GOATScraper"]).GOATScraper(db, token),
+            "env_keys": ["GOAT_API_KEY", "LIBRARYTHING_API_KEY", "LIBRARYTHING_TOKEN"],
+            "requires_token": False,
+        },
+        "librarything": {
+            "platform": "goat",
+            "factory": lambda token: __import__("scrapers.goat", fromlist=["GOATScraper"]).GOATScraper(db, token),
+            "env_keys": ["GOAT_API_KEY", "LIBRARYTHING_API_KEY", "LIBRARYTHING_TOKEN"],
+            "requires_token": False,
+        },
+        "abledata": {
+            "platform": "abledata",
+            "factory": lambda token: __import__("scrapers.abledata", fromlist=["AbleDataScraper"]).AbleDataScraper(db, token),
+            "env_keys": [],
+            "requires_token": False,
+        },
+    }
+
+    config = scraper_map.get(source_key)
+    if not config:
+        return
+
+    token = _get_token(config["platform"], config["env_keys"])
+    if config["requires_token"] and not token:
+        return
+
+    scraper = None
+    try:
+        scraper = config["factory"](token)
+        scraped_data = await scraper.scrape_url(source_url)
+        if not scraped_data:
+            return
+        # Populate fields when present
+        if scraped_data.get("source_last_updated"):
+            db_data["source_last_updated"] = scraped_data["source_last_updated"]
+        if scraped_data.get("image_alt"):
+            db_data["image_alt"] = scraped_data["image_alt"]
+        if not product.description and scraped_data.get("description"):
+            db_data["description"] = scraped_data["description"]
+        if not product.image_url and scraped_data.get("image"):
+            db_data["image"] = scraped_data["image"]
+        if scraped_data.get("external_id"):
+            db_data["external_id"] = scraped_data["external_id"]
+        if scraped_data.get("source_rating"):
+            db_data["source_rating"] = scraped_data["source_rating"]
+        if scraped_data.get("source_rating_count"):
+            db_data["source_rating_count"] = scraped_data["source_rating_count"]
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to fetch metadata for source '{source_name}': {e}")
+    finally:
+        try:
+            if scraper and hasattr(scraper, "close"):
+                await scraper.close()
+        except Exception:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Exception: {e}")
+            pass
+
+
 class BulkDeleteRequest(BaseModel):
     source: Optional[str] = None
     product_ids: Optional[list[str]] = None
@@ -85,40 +222,43 @@ class BulkDeleteRequest(BaseModel):
 
 @router.get("/sources")
 async def get_product_sources(
+    response: Response,
     db = Depends(get_db),
 ):
-    """Get all unique source values from products table.
+    """Get all unique source values from products table with product counts.
     
-    Returns a sorted list of distinct sources for filter UI.
+    Returns a list of sources with their product counts for filter UI.
     Uses supported_sources as the canonical list and unions with actual
     source values found in products. All values are camelcased to canonical
     names when available; otherwise title-cased.
     """
     try:
         # Canonical list and mapping from supported_sources
-        response = db.table("supported_sources").select("name").execute()
+        sources_resp = db.table("supported_sources").select("name").execute()
         canonical_list = [
             row["name"].strip()
-            for row in (response.data or [])
+            for row in (sources_resp.data or [])
             if row.get("name") and row.get("name").strip()
         ]
         canonical_set = set(canonical_list)
         name_map = {n.lower(): n for n in canonical_list}
 
-        # Distinct sources present in products
-        product_sources: set[str] = set()
+        # Count products by source using SQL aggregation
+        source_counts: dict[str, int] = {}
         try:
-            if getattr(db, "backend", None) == "supabase":
-                resp = db.table("products").select("source", distinct=True).execute()
-                product_sources = {
-                    str(row.get("source")).strip()
-                    for row in (resp.data or [])
-                    if row.get("source") and str(row.get("source")).strip()
-                }
-            else:
-                raise TypeError("distinct not supported for this backend")
-        except TypeError:
-            # Fallback: paginate through products and collect unique sources
+            # Use RPC function for aggregation (faster than fetching all rows)
+            rpc_resp = db.rpc('get_product_source_counts').execute()
+            for row in (rpc_resp.data or []):
+                raw_source = str(row.get("source", "")).strip()
+                count = int(row.get("count", 0))
+                if raw_source:
+                    # Canonicalize to supported_sources name
+                    canonical_source = name_map.get(raw_source.lower(), raw_source.title())
+                    source_counts[canonical_source] = source_counts.get(canonical_source, 0) + count
+        except Exception as e:
+            # Fallback to manual aggregation if RPC not available
+            logger = logging.getLogger(__name__)
+            logger.error(f"RPC not available, using fallback: {e}")
             page_size = 1000
             offset = 0
             while True:
@@ -129,21 +269,35 @@ async def get_product_sources(
                 for row in rows:
                     s = row.get("source")
                     if s and str(s).strip():
-                        product_sources.add(str(s).strip())
+                        raw_source = str(s).strip()
+                        canonical_source = name_map.get(raw_source.lower(), raw_source.title())
+                        source_counts[canonical_source] = source_counts.get(canonical_source, 0) + 1
                 if len(rows) < page_size:
                     break
-                offset += page_size
+            offset += page_size
 
-        # Canonicalize product sources to supported_sources names; fallback to title case
-        canonicalized_products = set()
-        for s in product_sources:
-            key = s.lower()
-            canonicalized_products.add(name_map.get(key, s.title()))
-
-        # Union canonical and product-derived lists
-        combined = canonical_set.union(canonicalized_products)
-        return {"sources": sorted(combined)}
+        # Build result list with all canonical sources (even if count is 0)
+        result = []
+        for source in canonical_set:
+            result.append({
+                "name": source,
+                "count": source_counts.get(source, 0)
+            })
+        
+        # Add any non-canonical sources that have products
+        for source, count in source_counts.items():
+            if source not in canonical_set:
+                result.append({
+                    "name": source,
+                    "count": count
+                })
+        
+        # Sort by name
+        result.sort(key=lambda x: x["name"])
+        return {"sources": result}
     except Exception:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Exception: {e}")
         return {"sources": []}
 
 
@@ -244,16 +398,28 @@ def rating_meets_threshold(product: dict, ratings_map: dict[str, dict], min_rati
 
 def attach_rating_fields(db, product: dict, ratings_map: Optional[dict[str, dict]] = None) -> dict:
     """Attach average, count, and display rating to a single product record."""
-    effective_map = ratings_map if ratings_map is not None else build_display_rating_map(db, [product])
-    rating_info = effective_map.get(product.get("id"), {}) if effective_map else {}
-    product["average_rating"] = rating_info.get("average_rating")
-    product["rating_count"] = rating_info.get("rating_count", product.get("rating_count") or 0)
-    product["display_rating"] = rating_info.get("display_rating")
+    # Use computed_rating from database for display_rating
+    product["display_rating"] = product.get("computed_rating")
+    
+    # Only fetch detailed breakdown if needed
+    if ratings_map is None and product.get("computed_rating") is not None:
+        # Fetch rating details for this one product
+        ratings_map = build_display_rating_map(db, [product])
+    
+    if ratings_map:
+        rating_info = ratings_map.get(product.get("id"), {})
+        product["average_rating"] = rating_info.get("average_rating")
+        product["rating_count"] = rating_info.get("rating_count", 0)
+    else:
+        product["average_rating"] = None
+        product["rating_count"] = 0
+    
     return product
 
 
 @router.get("/types")
 async def get_product_types(
+    response: Response,
     db = Depends(get_db),
 ):
     """Get all unique type values from products table.
@@ -264,51 +430,65 @@ async def get_product_types(
     """
     try:
         # Canonical list from valid_categories
-        response = db.table("valid_categories").select("category").execute()
+        categories_resp = db.table("valid_categories").select("category").execute()
         canonical_types = {
             row["category"].strip()
-            for row in (response.data or [])
+            for row in (categories_resp.data or [])
             if row.get("category") and row.get("category").strip()
         }
 
         # Distinct types present in products
         product_types: set[str] = set()
         try:
-            if getattr(db, "backend", None) == "supabase":
-                resp = db.table("products").select("type", distinct=True).execute()
-                product_types = {
-                    str(row.get("type")).strip()
-                    for row in (resp.data or [])
-                    if row.get("type") and str(row.get("type")).strip()
-                }
-            else:
-                raise TypeError("distinct not supported for this backend")
-        except TypeError:
-            # Fallback: paginate through products and collect unique types (avoids default caps)
-            page_size = 1000
-            offset = 0
-            while True:
-                resp = db.table("products").select("type").range(offset, offset + page_size - 1).execute()
-                rows = resp.data or []
-                if not rows:
-                    break
-                for row in rows:
-                    t = row.get("type")
-                    if t and str(t).strip():
-                        product_types.add(str(t).strip())
-                if len(rows) < page_size:
-                    break
-                offset += page_size
+            # Try RPC function for better performance
+            rpc_resp = db.rpc('get_product_types').execute()
+            product_types = {
+                str(row.get("type")).strip()
+                for row in (rpc_resp.data or [])
+                if row.get("type") and str(row.get("type")).strip()
+            }
+        except Exception:
+            # Fallback to distinct query
+            try:
+                if getattr(db, "backend", None) == "supabase":
+                    resp = db.table("products").select("type", distinct=True).execute()
+                    product_types = {
+                        str(row.get("type")).strip()
+                        for row in (resp.data or [])
+                        if row.get("type") and str(row.get("type")).strip()
+                    }
+                else:
+                    raise TypeError("distinct not supported for this backend")
+            except TypeError:
+                # Final fallback: paginate (slow but works)
+                page_size = 1000
+                offset = 0
+                while True:
+                    resp = db.table("products").select("type").range(offset, offset + page_size - 1).execute()
+                    rows = resp.data or []
+                    if not rows:
+                        break
+                    for row in rows:
+                        t = row.get("type")
+                        if t and str(t).strip():
+                            product_types.add(str(t).strip())
+                    if len(rows) < page_size:
+                        break
+                    offset += page_size
 
         # Combine canonical list and discovered product types
         combined = canonical_types.union(product_types)
-        return {"types": sorted(combined)}
+        payload = sorted(combined)
+        return {"types": payload}
     except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Exception: {e}")
         return {"types": []}
 
 
 @router.get("/tags")
 async def get_tags(
+    response: Response,
     source: Optional[list[str]] = Query(None, alias="source", description="Filter tags by product source"),
     sources: Optional[list[str]] = Query(None, description="Filter tags by product source"),
     type: Optional[list[str]] = Query(None, alias="type", description="Filter tags by product type"),
@@ -331,15 +511,37 @@ async def get_tags(
     - include_banned: set to true to include banned products (requires admin/moderator role).
     """
     try:
+        # Try optimized RPC function first
+        source_values = set(_normalize_list(source) + _normalize_list(sources))
+        source_values = set(_canonicalize_sources(db, list(source_values)))
+        type_values = set(_normalize_list(type) + _normalize_list(types))
+        
+        try:
+            params = {
+                "p_sources": list(source_values) if source_values else None,
+                "p_types": list(type_values) if type_values else None,
+                "p_name_search": search,
+                "p_tag_search": tag_search,
+                "p_limit": limit,
+                "p_created_by": created_by,
+                "p_updated_since": updated_since,
+                "p_include_banned": include_banned
+            }
+            rpc_resp = db.rpc('get_product_tags_filtered', params).execute()
+            names = [row.get("tag_name") for row in (rpc_resp.data or []) if row.get("tag_name")]
+            return {"tags": names}
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"RPC not available, using fallback: {e}")
+            # Fallback to original implementation
+            pass
+
         # First, find product_ids matching filters (consistent with /products)
         product_query = db.table("products").select("id")
 
-        source_values = set(_normalize_list(source) + _normalize_list(sources))
-        source_values = set(_canonicalize_sources(db, list(source_values)))
         if source_values:
             product_query = product_query.in_("source", list(source_values))
 
-        type_values = set(_normalize_list(type) + _normalize_list(types))
         if type_values:
             product_query = product_query.in_("type", list(type_values))
 
@@ -396,12 +598,13 @@ async def get_tags(
         names = sorted(names_set)
         if limit is not None:
             names = names[:max(limit, 0)]
-        
+
         return {"tags": names}
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error fetching tags: {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Tag Fetch] Failed: {e}")
         return {"tags": []}
 
 
@@ -420,6 +623,8 @@ async def get_products(
     created_by: Optional[str] = None,
     include_banned: bool = Query(False, description="Include banned products (admin/mod only)"),
     include_ratings: bool = Query(False, description="Include rating data (average_rating, rating_count, display_rating). Set to true only when displaying ratings."),
+    sort_by: str = Query("created_at", pattern="^(created_at|updated_at|rating)$", description="Sort by: created_at (default), updated_at, or rating"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order: desc (default) or asc"),
     limit: int = Query(50, le=100),
     offset: int = Query(0, ge=0),
     current_user: Optional[dict] = Depends(get_current_user_optional),
@@ -476,31 +681,38 @@ async def get_products(
     if updated_since is not None:
         query = query.gte("source_last_updated", updated_since)
 
-    # Always apply ordering before range for consistent results
-    query = query.order("created_at", desc=True)
-
-    # Optimize min_rating queries: fetch a reasonable batch instead of everything
-    # This balances between fetching too much data and making multiple queries
+    # Filter by minimum rating using computed_rating column
     if min_rating is not None:
-        # Fetch 3x the limit to account for rating filtering, capped at 500
-        batch_size = min(limit * 3 + offset, 500)
-        query = query.range(0, batch_size - 1)
+        query = query.gte("computed_rating", min_rating)
+
+    # Apply ordering based on sort_by parameter
+    # Now all sorting happens in SQL thanks to computed_rating column
+    if sort_by == "rating":
+        sort_field = "computed_rating"
+    elif sort_by == "updated_at":
+        sort_field = "source_last_updated"
     else:
-        query = query.range(offset, offset + limit - 1)
+        sort_field = "created_at"
+    
+    is_desc = (sort_order == "desc")
+    # For rating sort, put NULL values last regardless of sort direction
+    if sort_by == "rating":
+        query = query.order(sort_field, desc=is_desc, nullsfirst=False)
+    else:
+        query = query.order(sort_field, desc=is_desc)
+    
+    # Apply pagination in SQL
+    query = query.range(offset, offset + limit - 1)
     
     response = query.execute()
 
     # Collect product IDs
     products = response.data or []
     
-    # Only fetch ratings when needed for filtering OR when explicitly requested
+    # Fetch ratings only when explicitly requested for display
     ratings_map = {}
-    if min_rating is not None or include_ratings:
+    if include_ratings:
         ratings_map = build_display_rating_map(db, products)
-    
-    if min_rating is not None:
-        products = [p for p in products if rating_meets_threshold(p, ratings_map, min_rating)]
-        products = products[offset:offset + limit]
 
     product_ids = [p["id"] for p in products]
 
@@ -535,17 +747,19 @@ async def get_products(
         # Add top-level stars derived from source_rating_count
         item["stars"] = item.get("source_rating_count") or 0
         
-        # Only compute rating fields if we fetched ratings
+        # Use computed_rating for display_rating (already in database)
+        item["display_rating"] = item.get("computed_rating")
+        
+        # Only fetch detailed rating breakdown if explicitly requested
         if ratings_map:
             rating_info = ratings_map.get(item["id"], {})
             item["average_rating"] = rating_info.get("average_rating")
-            item["rating_count"] = rating_info.get("rating_count", item.get("rating_count") or 0)
-            item["display_rating"] = rating_info.get("display_rating")
+            item["rating_count"] = rating_info.get("rating_count", 0)
         else:
-            # Set defaults when ratings not fetched (performance optimization)
+            # Set defaults when detailed ratings not fetched
             item["average_rating"] = None
             item["rating_count"] = 0
-            item["display_rating"] = None
+        
         # Normalize fields for API clients
         if "image" in item:
             item["image_url"] = item.get("image")
@@ -766,6 +980,51 @@ async def get_product_by_slug(
     return result
 
 
+@router.get("/{slug}/collections")
+async def get_product_collections(
+    slug: str,
+    current_user: Optional[dict] = Depends(get_current_user_optional),
+    db = Depends(get_db),
+):
+    """Get all collections that contain this product.
+    
+    Returns public collections for unauthenticated users.
+    Returns public + user's private collections for authenticated users.
+    """
+    # Get product by slug
+    product_resp = db.table("products").select("id").eq("slug", slug).execute()
+    if not product_resp.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    product_id = product_resp.data[0]["id"]
+    
+    # Get collection IDs from junction table
+    junction_resp = db.table("collection_products").select("collection_id").eq("product_id", product_id).execute()
+    collection_ids = [row["collection_id"] for row in (junction_resp.data or [])]
+    
+    if not collection_ids:
+        return []
+    
+    # Fetch collections
+    collections_resp = db.table("collections").select("*").in_("id", collection_ids).execute()
+    collections = collections_resp.data or []
+    
+    # Filter based on authentication
+    user_id = current_user.get("id") if current_user else None
+    filtered_collections = [
+        c for c in collections
+        if c.get("is_public") or (user_id and c.get("user_id") == user_id)
+    ]
+    
+    # Populate product_ids and product_slugs for each collection
+    for collection in filtered_collections:
+        products_resp = db.table("collection_products").select("product_id, products(slug)").eq("collection_id", collection["id"]).order("position").execute()
+        collection["product_ids"] = [p["product_id"] for p in (products_resp.data or [])]
+        collection["product_slugs"] = [p["products"]["slug"] if p.get("products") else None for p in (products_resp.data or [])]
+    
+    return filtered_collections
+
+
 def _normalize_product(product: dict, db) -> dict:
     """Attach derived fields (owners, tags, stars, url/image aliases)."""
     pid = product.get("id")
@@ -780,6 +1039,8 @@ def _normalize_product(product: dict, db) -> dict:
     product["stars"] = product.get("source_rating_count") or 0
     if "image" in product:
         product["image_url"] = product.get("image")
+    if "image_alt" in product:
+        product["image_alt"] = product.get("image_alt")
     if "url" in product:
         product["source_url"] = product.get("url")
     attach_rating_fields(db, product)
@@ -828,11 +1089,15 @@ async def create_product(
         "description": product.description,
         "url": source_url,
         "image": str(product.image_url) if product.image_url else None,
+        "image_alt": product.image_alt,
         "source": determined_source,  # Auto-assigned, not from user input
         "type": product.type or "Other",
         "external_id": product.external_id,
         "created_by": current_user["id"]
     }
+    
+    # Enrich metadata from source scrapers (best-effort)
+    await _enrich_manual_product_metadata(db, determined_source, source_url, product, db_data)
 
     # Upsert behavior: If URL provided and product exists, update instead of creating.
     # This prevents duplicate products from scrapers while allowing manual updates.
@@ -844,7 +1109,7 @@ async def create_product(
                 raise HTTPException(status_code=403, detail="Product is banned and cannot be resubmitted")
             # Build update data, excluding immutable fields like created_by
             update_data = {k: v for k, v in db_data.items() if k in {
-                "name", "description", "url", "image", "source", "type", "external_id"
+                "name", "description", "url", "image", "image_alt", "source", "type", "external_id", "source_last_updated"
             } and v is not None}
 
             # Ensure legacy rows get a slug assigned
@@ -936,16 +1201,36 @@ async def update_product(
     Security: Enforces ownership via product_editors table OR admin role.
     Prevents unauthorized users from modifying products they don't manage.
     """
-    # Check if product exists and user has permission
-    existing = db.table("products").select("*").eq("id", product_id).execute()
-    
-    if not existing.data:
+    product_row = _get_product_by_identifier(db, product_id)
+    if not product_row:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    if existing.data[0].get("banned"):
+    if product_row.get("banned"):
         raise HTTPException(status_code=403, detail="Product is banned and cannot be edited")
-
-    if existing.data[0]["created_by"] != current_user["id"] and not current_user.get("role") == "admin":
+    product_id = product_row["id"]
+    # Authorization check
+    is_creator = product_row.get("created_by") == current_user["id"]
+    role = current_user.get("role")
+    is_admin_or_moderator = role in ("admin", "moderator")
+    
+    # Check if user is in product_editors if not creator/admin/moderator
+    is_editor = False
+    if not is_creator and not is_admin_or_moderator:
+        # Need to check product_editors table
+        from services.database import db_adapter
+        # In test environment (SQLite), use the database adapter's table API
+        if db_adapter.supabase is not None:
+            # Production: use Supabase client with service key to avoid RLS issues
+            editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+            is_editor = bool(editors_check.data)
+        else:
+            # Test environment: use database adapter's table API
+            from database_adapter import ProductEditor
+            editor_check = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+            is_editor = bool(editor_check.data)
+    
+    # Require at least one authorization path
+    if not (is_creator or is_admin_or_moderator or is_editor):
         raise HTTPException(status_code=403, detail="Not authorized to update this product")
     
     # Map API fields to database columns (use attributes to avoid alias issues)
@@ -960,6 +1245,8 @@ async def update_product(
         db_data["url"] = str(product.source_url)
     if "image_url" in product_data and product.image_url is not None:
         db_data["image"] = str(product.image_url)
+    if "image_alt" in product_data:
+        db_data["image_alt"] = product.image_alt
     if "source" in product_data:
         db_data["source"] = _canonicalize_source_value_db(db, product_data["source"]) or product_data["source"]
     if "type" in product_data and product.type is not None:
@@ -969,6 +1256,9 @@ async def update_product(
     # Apply basic field updates
     
     response = db.table("products").update(db_data).eq("id", product_id).execute()
+    if not response.data:
+        # Likely blocked by RLS or no rows updated
+        raise HTTPException(status_code=403, detail="Not authorized to update this product")
     
     # Update tag relationships if requested
     if "tags" in product_data:
@@ -998,27 +1288,37 @@ async def patch_product(
     db = Depends(get_db),
 ):
     """Partially update a product (manager or admin only)"""
-    # Check if product exists
-    existing = db.table("products").select("*").eq("id", product_id).execute()
-    
-    if not existing.data:
+    product_row = _get_product_by_identifier(db, product_id)
+    if not product_row:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    # Check authorization: must be creator, product manager, or admin
-    product_row = existing.data[0]
+    # Check authorization: must be creator, product manager, admin, or moderator
     if product_row.get("banned"):
         raise HTTPException(status_code=403, detail="Product is banned and cannot be edited")
-    is_creator = product_row["created_by"] == current_user["id"]
-    is_admin = current_user.get("role") == "admin"
+    product_id = product_row["id"]
+    is_creator = product_row.get("created_by") == current_user["id"]
+    role = current_user.get("role")
+    is_admin_or_moderator = role in ("admin", "moderator")
     
-    # Check if user is a product manager
-    is_product_owner = False
-    if not (is_creator or is_admin):
-        owner_response = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-        is_product_owner = bool(owner_response.data)
+    # Check if user is in product_editors if not creator/admin/moderator
+    is_editor = False
+    if not is_creator and not is_admin_or_moderator:
+        # Need to check product_editors table
+        from services.database import db_adapter
+        # In test environment (SQLite), use the database adapter's query methods
+        if db_adapter.supabase is not None:
+            # Production: use Supabase client with service key to avoid RLS issues
+            editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+            is_editor = bool(editors_check.data)
+        else:
+            # Test environment: use database adapter's table API
+            from database_adapter import ProductEditor
+            editor_check = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+            is_editor = bool(editor_check.data)
     
-    if not (is_creator or is_admin or is_product_owner):
-        raise HTTPException(status_code=403, detail="Only product editors or admins can edit this product")
+    # Require at least one authorization path
+    if not (is_creator or is_admin_or_moderator or is_editor):
+        raise HTTPException(status_code=403, detail="Not authorized to update this product")
     
     # Map API fields to database columns
     product_data = product.model_dump(exclude_unset=True)
@@ -1032,14 +1332,28 @@ async def patch_product(
         db_data["url"] = str(product.source_url)
     if "image_url" in product_data and product.image_url is not None:
         db_data["image"] = str(product.image_url)
+    if "image_alt" in product_data:
+        db_data["image_alt"] = product.image_alt
     if "source" in product_data:
         db_data["source"] = _canonicalize_source_value_db(db, product_data["source"]) or product_data["source"]
     if "type" in product_data and product.type is not None:
         db_data["type"] = product.type
     if "external_id" in product_data:
         db_data["external_id"] = product_data["external_id"]
+    if "source_last_updated" in product_data and product.source_last_updated is not None:
+        db_data["source_last_updated"] = product.source_last_updated
     
-    response = db.table("products").update(db_data).eq("id", product_id).execute()
+    try:
+        # Update the product (permissions already checked above)
+        response = db.table("products").update(db_data).eq("id", product_id).execute()
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Update] Failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update product: {str(e)}")
+    
+    if not response.data:
+        # Should not happen since we verified permissions above
+        raise HTTPException(status_code=500, detail="Update failed unexpectedly")
     
     # Update tag relationships if requested
     if "tags" in product_data:
@@ -1082,13 +1396,19 @@ async def delete_product(
             detail=f"Admin access required. Your current role: {current_user.get('role', 'user')}"
         )
     
-    # Check if product exists first; accept either ID or slug for convenience
-    check = db.table("products").select("id").eq("id", product_id).execute()
-    if not check.data:
+    # Check if product exists first; accept either ID or slug for convenience.
+    # Avoid UUID parsing errors by only querying id when the input resembles a UUID.
+    resolved_id = None
+    if _looks_like_uuid(product_id):
+        check = db.table("products").select("id").eq("id", product_id).limit(1).execute()
+        if check.data:
+            resolved_id = check.data[0]["id"]
+    if not resolved_id:
         slug_lookup = db.table("products").select("id").eq("slug", product_id).limit(1).execute()
         if not slug_lookup.data:
             raise HTTPException(status_code=404, detail="Product not found")
-        product_id = slug_lookup.data[0]["id"]
+        resolved_id = slug_lookup.data[0]["id"]
+    product_id = resolved_id
     
     # The database schema has ON DELETE CASCADE for most relationships,
     # so they should auto-delete. But we can be explicit for safety.
@@ -1099,7 +1419,8 @@ async def delete_product(
         db.table("products").delete().eq("id", product_id).execute()
         print(f"[Delete] Success")
     except Exception as e:
-        print(f"[Delete] Failed: {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Delete] Failed: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete product: {str(e)}"
@@ -1228,7 +1549,8 @@ async def bulk_delete_products(
             "source": canonical_source if canonical_source else None
         }
     except Exception as e:
-        print(f"[Bulk Delete] Failed: {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Bulk Delete] Failed: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete products: {str(e)}"
@@ -1240,20 +1562,23 @@ def _ensure_moderator_or_admin(current_user: dict):
         raise HTTPException(status_code=403, detail="Moderator or admin access required")
 
 
-@router.post("/{product_id}/ban", response_model=ProductResponse)
+@router.post("/{product_slug}/ban", response_model=ProductResponse)
 async def ban_product(
-    product_id: str,
+    product_slug: str,
     payload: dict = None,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Ban a product from scraper updates (moderator/admin)."""
+    """Ban a product from scraper updates (moderator/admin) by slug."""
     _ensure_moderator_or_admin(current_user)
 
-    # Ensure product exists
-    product_response = db.table("products").select("*").eq("id", product_id).limit(1).execute()
+    # Resolve slug to product ID; fall back to ID if provided
+    product_response = db.table("products").select("id").eq("slug", product_slug).limit(1).execute()
+    if not product_response.data and _looks_like_uuid(product_slug):
+        product_response = db.table("products").select("id").eq("id", product_slug).limit(1).execute()
     if not product_response.data:
         raise HTTPException(status_code=404, detail="Product not found")
+    product_id = product_response.data[0]["id"]
 
     reason = None
     if payload:
@@ -1274,14 +1599,22 @@ async def ban_product(
     return _normalize_product(product, db)
 
 
-@router.post("/{product_id}/unban", response_model=ProductResponse)
+@router.post("/{product_slug}/unban", response_model=ProductResponse)
 async def unban_product(
-    product_id: str,
+    product_slug: str,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Remove ban from a product (moderator/admin)."""
+    """Remove ban from a product (moderator/admin) by slug."""
     _ensure_moderator_or_admin(current_user)
+
+    # Resolve slug to product ID; fall back to ID if provided
+    product_response = db.table("products").select("id").eq("slug", product_slug).limit(1).execute()
+    if not product_response.data and _looks_like_uuid(product_slug):
+        product_response = db.table("products").select("id").eq("id", product_slug).limit(1).execute()
+    if not product_response.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+    product_id = product_response.data[0]["id"]
 
     updated = db.table("products").update({
         "banned": False,

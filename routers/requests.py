@@ -14,6 +14,7 @@ from typing import List, Optional
 from datetime import datetime, UTC
 from services.auth import get_current_user
 from services.database import get_db
+from services.sources import extract_domain
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
 
@@ -126,8 +127,51 @@ def create_user_request(
             detail="Product management requests must include a product_id"
         )
     
+    # Source-domain requests must have a reason with a valid domain
+    if request.type == 'source-domain':
+        if not request.reason or not request.reason.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Source-domain requests must include a reason with domain information (e.g., 'Domain: example.com')"
+            )
+        
+        # Try to extract domain from reason
+        domain = None
+        try:
+            for line in str(request.reason).splitlines():
+                if line.lower().startswith('domain:'):
+                    domain = line.split(':', 1)[1].strip().lower()
+                    break
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error parsing domain from reason: {str(e)}"
+            )
+        
+        if not domain:
+            raise HTTPException(
+                status_code=400,
+                detail="Reason must include 'Domain: <domain>' (e.g., 'Domain: example.com')"
+            )
+        
+        # Validate domain format - extract_domain removes www. prefix and validates
+        try:
+            validated_domain = extract_domain(f"https://{domain}")
+            if not validated_domain:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid domain format: {domain}"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Domain validation error: {str(e)}"
+            )
+    
     # Check if user already has a pending request of this type
-    existing = db.table("user_requests").select("*").eq(
+    existing_query = db.table("user_requests").select("*").eq(
         "user_id", current_user['id']
     ).eq(
         "type", request.type
@@ -136,9 +180,9 @@ def create_user_request(
     )
     
     if request.type == 'product-ownership':
-        existing = existing.eq("product_id", request.product_id)
+        existing_query = existing_query.eq("product_id", request.product_id)
     
-    existing_response = existing.execute()
+    existing_response = existing_query.execute()
     
     if existing_response.data:
         raise HTTPException(
@@ -147,17 +191,27 @@ def create_user_request(
         )
     
     # Create the request
+    now = datetime.now(UTC)
     request_data = {
         "user_id": current_user['id'],
         "type": request.type,
         "status": "pending",
         "product_id": request.product_id,
         "reason": request.reason,
-        "created_at": datetime.now(UTC),
-        "updated_at": datetime.now(UTC)
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat()
     }
     
-    response = db.table("user_requests").insert(request_data).execute()
+    try:
+        response = db.table("user_requests").insert(request_data).execute()
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error creating user request: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create request: {str(e)}"
+        )
     
     if not response.data:
         raise HTTPException(status_code=500, detail="Failed to create request")
@@ -195,11 +249,12 @@ def update_user_request(
     request_data = request_response.data[0]
     
     # Update the request
+    now = datetime.now(UTC)
     update_data = {
         "status": update.status,
         "reviewed_by": current_user['id'],
-        "reviewed_at": datetime.now(UTC),
-        "updated_at": datetime.now(UTC)
+        "reviewed_at": now.isoformat(),
+        "updated_at": now.isoformat()
     }
     
     response = db.table("user_requests").update(update_data).eq("id", request_id).execute()
@@ -224,7 +279,7 @@ def _grant_permission(db, request_data: dict):
         owner_data = {
             "product_id": request_data['product_id'],
             "user_id": user_id,
-            "created_at": datetime.now(UTC)
+            "created_at": datetime.now(UTC).isoformat()
         }
         db.table("product_editors").insert(owner_data).execute()
     
@@ -251,17 +306,22 @@ def _grant_permission(db, request_data: dict):
             if not domain:
                 return
 
+            # Normalize domain by removing www. prefix (consistent with extract_domain)
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            
             # If exists, skip; else create with name = domain
             existing = db.table("supported_sources").select("*").eq("domain", domain).limit(1).execute()
             if existing.data:
                 return
 
             # Generate minimal record
+            now = datetime.now(UTC).isoformat()
             data = {
                 "domain": domain,
                 "name": domain,
-                "created_at": datetime.now(UTC),
-                "updated_at": datetime.now(UTC),
+                "created_at": now,
+                "updated_at": now,
             }
             db.table("supported_sources").insert(data).execute()
         except Exception:

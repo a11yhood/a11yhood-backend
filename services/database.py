@@ -5,7 +5,7 @@ Uses database_adapter for automatic backend selection based on settings.
 from typing import Optional
 from fastapi import HTTPException
 from config import settings
-from database_adapter import DatabaseAdapter
+from database_adapter import DatabaseAdapter, set_supabase_auth_token
 
 # Initialize database adapter - automatically chooses SQLite (if DATABASE_URL set) or Supabase
 db_adapter = DatabaseAdapter(settings)
@@ -44,5 +44,10 @@ def verify_token(token: str, adapter: Optional[DatabaseAdapter] = None):
 
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Make the JWT available for RLS in downstream queries (if needed)
+    set_supabase_auth_token(token)
+    if hasattr(db, "set_request_auth_token"):
+        db.set_request_auth_token(token)
 
     return getattr(user, "user", user)

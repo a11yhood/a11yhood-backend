@@ -11,9 +11,11 @@ class ProductBase(BaseModel):
     source_url: Optional[HttpUrl] = None  # URL to the source product
     type: Optional[str] = None  # Product type/category (e.g., Knitting, 3D Printed, Software)
     image_url: Optional[HttpUrl] = None
+    image_alt: Optional[str] = None
     external_id: Optional[str] = None  # ID from external source
     tags: Optional[list[str]] = Field(default_factory=list)
     source_last_updated: Optional[datetime] = None  # Last updated timestamp from source platform
+    matched_search_terms: Optional[list[str]] = Field(default_factory=list)  # Search terms/categories that matched
 
 
 class ProductCreate(ProductBase):
@@ -27,9 +29,11 @@ class ProductUpdate(BaseModel):
     source_url: Optional[HttpUrl] = None
     type: Optional[str] = None
     image_url: Optional[HttpUrl] = None
+    image_alt: Optional[str] = None
     external_id: Optional[str] = None
     tags: Optional[list[str]] = None
     source_last_updated: Optional[datetime] = None
+    matched_search_terms: Optional[list[str]] = None
 
 
 class ProductResponse(ProductBase):
@@ -48,8 +52,10 @@ class ProductResponse(ProductBase):
     source_rating: Optional[float] = None
     source_rating_count: Optional[int] = None
     source_last_updated: Optional[datetime] = None
+    computed_rating: Optional[float] = None  # Computed display rating (PostgreSQL trigger or manual in tests)
     stars: Optional[int] = None
     urls: list[ProductUrlResponse] = Field(default_factory=list)
     editor_ids: list[str] = Field(default_factory=list)
+    matched_search_terms: list[str] = Field(default_factory=list)
     
     model_config = ConfigDict(from_attributes=True)
