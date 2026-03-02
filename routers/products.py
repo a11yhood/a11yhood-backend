@@ -165,12 +165,6 @@ async def _enrich_manual_product_metadata(db, source_name: str, source_url: str,
             "env_keys": ["GOAT_API_KEY", "LIBRARYTHING_API_KEY", "LIBRARYTHING_TOKEN"],
             "requires_token": False,
         },
-        "abledata": {
-            "platform": "abledata",
-            "factory": lambda token: __import__("scrapers.abledata", fromlist=["AbleDataScraper"]).AbleDataScraper(db, token),
-            "env_keys": [],
-            "requires_token": False,
-        },
     }
 
     config = scraper_map.get(source_key)

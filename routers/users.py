@@ -23,7 +23,7 @@ def _looks_like_uuid(value: str) -> bool:
     try:
         uuid.UUID(str(value))
         return True
-    except Exception:
+    except Exception as e:
         logger = logging.getLogger(__name__)
         logger.error(f"uuid error: {type(e).__name__}: {str(e)}")
         return False
@@ -344,10 +344,10 @@ async def update_user_role(
         }).execute()
         
         logger.info(f"RPC response: {response}")
+        updated_user = response.data if getattr(response, "data", None) else target_user
         
     except Exception as e:
         # The function returns the updated user as JSONB
-        updated_user = response.data if response.data else target_user
     
         logger = logging.getLogger(__name__)
         logger.error(f"RPC error: {type(e).__name__}: {str(e)}")

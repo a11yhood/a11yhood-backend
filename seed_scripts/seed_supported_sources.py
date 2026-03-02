@@ -44,7 +44,6 @@ SUPPORTED_SOURCES = [
     {"domain": "ravelry.com", "name": "ravelry"},
     {"domain": "github.com", "name": "github"},
     {"domain": "thingiverse.com", "name": "thingiverse"},
-    {"domain": "abledata.com", "name": "AbleData"},
     {"domain": "example.com", "name": "example"},
 ]
 

@@ -62,11 +62,6 @@ async def _run_scraper_and_log(
                 test_mode=test_mode,
                 test_limit=test_limit
             )
-        elif source == "abledata":
-            result = await scraper_service.scrape_abledata(
-                test_mode=test_mode,
-                test_limit=test_limit
-            )
         elif source == "goat":
             result = await scraper_service.scrape_goat(
                 access_token=access_token,
