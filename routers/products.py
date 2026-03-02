@@ -295,7 +295,7 @@ async def get_product_sources(
         # Sort by name
         result.sort(key=lambda x: x["name"])
         return {"sources": result}
-    except Exception:
+    except Exception as e:
         logger = logging.getLogger(__name__)
         logger.error(f"Exception: {e}")
         return {"sources": []}
