@@ -13,8 +13,6 @@ from services.auth import get_current_user, get_current_user_optional
 from services.id_generator import generate_id_with_uniqueness_check
 import uuid
 import logging
-import logging
-import logging
 
 
 router = APIRouter(prefix="/api/collections", tags=["collections"])

@@ -25,7 +25,7 @@ def _looks_like_uuid(value: str) -> bool:
         return True
     except Exception as e:
         logger = logging.getLogger(__name__)
-        logger.error(f"uuid error: {type(Exception).__name__}: UUID parse failed")
+        logger.error(f"uuid error: {type(e).__name__}: {str(e)}")
         return False
 
 
