@@ -163,9 +163,6 @@ async def create_collection_from_search(
             if collection_data.search:
                 query = query.ilike("name", f"%{collection_data.search}%")
             
-            if collection_data.created_by:
-                query = query.eq("created_by", collection_data.created_by)
-            
             if collection_data.min_rating is not None:
                 # For min_rating, we'll filter in Python after fetching all matches
                 # since we need rating data
@@ -197,9 +194,6 @@ async def create_collection_from_search(
         # No tag filter, apply other filters directly
         if collection_data.search:
             query = query.ilike("name", f"%{collection_data.search}%")
-        
-        if collection_data.created_by:
-            query = query.eq("created_by", collection_data.created_by)
         
         query = query.eq("banned", False)
         query = query.order("created_at", desc=True)
@@ -241,11 +235,21 @@ async def create_collection_from_search(
             {"collection_id": collection_id, "product_id": pid, "position": idx}
             for idx, pid in enumerate(product_ids)
         ]
-        db.table("collection_products").insert(junction_records).execute()
-    
-    created_collection = response.data[0]
-    created_collection["product_ids"] = product_ids
-    return created_collection
+        try:
+            db.table("collection_products").insert(junction_records).execute()
+        except Exception as exc:
+            # Best effort cleanup to avoid orphaned collection rows
+            try:
+                db.table("collections").delete().eq("id", collection_id).execute()
+            except Exception as cleanup_exc:
+                logging.exception(
+                    "Failed to rollback collection creation for collection_id=%s",
+                    collection_id,
+                )
+            raise HTTPException(status_code=500, detail=f"Failed to populate collection from search: {str(exc)}")
+
+    # Return canonical response assembled from junction table data
+    return _get_collection_with_products(db, collection_id)
 
 
 def _get_product_ids_for_tags(db, tag_names: list[str], mode: str = "or") -> set[str]:
@@ -420,7 +424,7 @@ async def get_public_collections(
     # Fetch public collections
     response = db.table("collections").select("*").eq("is_public", True).execute()
     
-    collections = response.data or []
+    collections = _attach_product_ids_to_collections(db, response.data or [])
     
     # Populate product_ids and product_slugs for each collection
     for collection in collections:
@@ -542,6 +546,12 @@ async def delete_collection(
     # Check ownership
     if collection.get("user_id") != current_user.get("id"):
         raise HTTPException(status_code=403, detail="Only the owner can delete this collection")
+
+    # Delete join table links first when available
+    try:
+        db.table("collection_products").delete().eq("collection_id", collection_id).execute()
+    except Exception:
+        pass
     
     # Delete from database
     db.table("collections").delete().eq("id", collection.get("id")).execute()

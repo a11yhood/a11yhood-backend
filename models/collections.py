@@ -33,7 +33,6 @@ class CollectionFromSearchCreate(CollectionBase):
     tags_mode: str = Field(default="or", pattern=r"^(?i)(or|and)$", description="Tag filter mode: or or and")
     search: Optional[str] = Field(None, description="Text search on product name")
     min_rating: Optional[float] = Field(None, ge=0, le=5, description="Minimum rating filter")
-    created_by: Optional[str] = Field(None, description="Filter by creator user ID")
 
 
 class CollectionResponse(CollectionBase):
