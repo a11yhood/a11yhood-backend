@@ -58,7 +58,6 @@ Adds supported product sources to the `supported_sources` table.
 - ravelry.com
 - github.com
 - thingiverse.com
-- abledata.com
 - example.com (for testing)
 
 ---

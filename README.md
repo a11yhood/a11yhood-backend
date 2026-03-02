@@ -52,7 +52,6 @@ a11yhood-backend/
 │   └── sanitizer.py      # HTML/text sanitization
 │
 ├── scrapers/              # Platform-specific scrapers
-│   ├── abledata.py
 │   ├── base_scraper.py
 │   ├── github.py
 │   ├── goat.py
