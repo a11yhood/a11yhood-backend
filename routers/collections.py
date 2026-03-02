@@ -14,8 +14,9 @@ from services.id_generator import generate_id_with_uniqueness_check
 import uuid
 import logging
 
-router = APIRouter(prefix="/api/collections", tags=["collections"])
 
+router = APIRouter(prefix="/api/collections", tags=["collections"])
+logger = logging.getLogger(__name__)
 
 def _looks_like_uuid(value: str) -> bool:
     """Check if a string looks like a UUID."""
@@ -23,6 +24,7 @@ def _looks_like_uuid(value: str) -> bool:
         uuid.UUID(str(value))
         return True
     except Exception:
+        logger.error(f"uuid error: {type(e).__name__}: {str(e)}")
         return False
 
 
@@ -132,6 +134,7 @@ async def create_collection_from_search(
                     seen.add(c)
                     source_values.append(c)
         except Exception:
+            logger.error(f"error: {type(e).__name__}: {str(e)}")
             source_values = list(source_values)
         
         query = query.in_("source", source_values)
