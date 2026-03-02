@@ -12,9 +12,11 @@ from services.database import get_db
 from services.auth import get_current_user, get_current_user_optional
 from services.id_generator import generate_id_with_uniqueness_check
 import uuid
+import logging
+
 
 router = APIRouter(prefix="/api/collections", tags=["collections"])
-
+logger = logging.getLogger(__name__)
 
 def _looks_like_uuid(value: str) -> bool:
     """Check if a string looks like a UUID."""
@@ -22,6 +24,7 @@ def _looks_like_uuid(value: str) -> bool:
         uuid.UUID(str(value))
         return True
     except Exception:
+        logger.error(f"uuid error: {type(e).__name__}: {str(e)}")
         return False
 
 
@@ -131,6 +134,7 @@ async def create_collection_from_search(
                     seen.add(c)
                     source_values.append(c)
         except Exception:
+            logger.error(f"error: {type(e).__name__}: {str(e)}")
             source_values = list(source_values)
         
         query = query.in_("source", source_values)
@@ -237,8 +241,11 @@ async def create_collection_from_search(
             # Best effort cleanup to avoid orphaned collection rows
             try:
                 db.table("collections").delete().eq("id", collection_id).execute()
-            except Exception:
-                pass
+            except Exception as cleanup_exc:
+                logging.exception(
+                    "Failed to rollback collection creation for collection_id=%s",
+                    collection_id,
+                )
             raise HTTPException(status_code=500, detail=f"Failed to populate collection from search: {str(exc)}")
 
     # Return canonical response assembled from junction table data
@@ -417,7 +424,7 @@ async def get_public_collections(
     # Fetch public collections
     response = db.table("collections").select("*").eq("is_public", True).execute()
     
-    collections = response.data or []
+    collections = _attach_product_ids_to_collections(db, response.data or [])
     
     # Populate product_ids and product_slugs for each collection
     for collection in collections:
