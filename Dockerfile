@@ -3,16 +3,21 @@
 # NOTE: Currently CANNOT be deployed to slicomex.cs.washington.edu due to
 # fuse-overlayfs storage driver incompatibility. See documentation/DEPLOYMENT_CURRENT.md
 
-# Use Python 3.14-slim to match project requirements (requires-python = ">=3.14")
-FROM python:3.14-slim
+# Use Python 3.13-slim (pyroaring has no Python 3.14 wheel and cannot compile from source on 3.14)
+FROM python:3.13-slim
 
-RUN echo "=== BUILD DEBUG: Starting build from python:3.14-slim ==="
+RUN echo "=== BUILD DEBUG: Starting build from python:3.13-slim ==="
 RUN echo "=== Python version:" && python --version
 RUN echo "=== OS info:" && cat /etc/os-release | head -5
 
 # Set working directory
 WORKDIR /app
 RUN echo "=== Working directory set to /app ==="
+
+# Install build dependencies needed for C extensions (e.g. pyroaring)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc python3-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for layer caching
 COPY requirements.txt .
