@@ -294,7 +294,7 @@ async def update_user_role(
     target_user = _get_user_by_identifier(db, username)
     old_role = target_user.get("role", "user")
     user_id = target_user["id"]
-    
+
     # Call database function to update role with admin privileges
     # This function verifies admin status and updates the role
     try:

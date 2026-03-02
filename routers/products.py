@@ -6,6 +6,7 @@ Security: Mutations require authentication; updates/deletes enforce ownership or
 """
 import os
 import uuid
+import logging
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from typing import Optional, Iterable, Callable
@@ -45,6 +46,8 @@ def _looks_like_uuid(value: str) -> bool:
         uuid.UUID(str(value))
         return True
     except Exception:
+        logger = logging.getLogger(__name__)
+        logger.error(f"uuid error: {type(e).__name__}: {str(e)}")
         return False
 
 
@@ -72,6 +75,8 @@ def _canonicalize_sources(db, values: list[str]) -> list[str]:
                 unique.append(c)
         return unique
     except Exception:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Exception: {type(e).__name__}: {str(e)}")
         return values
 
 def _get_supported_source_name_map(db) -> dict[str, str]:
@@ -80,6 +85,8 @@ def _get_supported_source_name_map(db) -> dict[str, str]:
         rows = db.table("supported_sources").select("name").execute()
         return {str(r.get("name")).strip().lower(): str(r.get("name")).strip() for r in (rows.data or []) if r.get("name")}
     except Exception:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Supported Source Exception: {type(e).__name__}: {str(e)}")
         return {}
 
 def _canonicalize_source_value_db(db, value: Optional[str]) -> Optional[str]:
@@ -117,6 +124,8 @@ async def _enrich_manual_product_metadata(db, source_name: str, source_url: str,
             resp = db.table("oauth_configs").select("access_token").eq("platform", platform).limit(1).execute()
             token = (resp.data or [{}])[0].get("access_token")
         except Exception:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Get Token Exception: {type(e).__name__}: {str(e)}")
             token = None
         if not token:
             for key in env_keys:
@@ -194,12 +203,15 @@ async def _enrich_manual_product_metadata(db, source_name: str, source_url: str,
         if scraped_data.get("source_rating_count"):
             db_data["source_rating_count"] = scraped_data["source_rating_count"]
     except Exception as e:
-        print(f"Warning: Failed to fetch metadata for source '{source_name}': {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to fetch metadata for source '{source_name}': {e}")
     finally:
         try:
             if scraper and hasattr(scraper, "close"):
                 await scraper.close()
         except Exception:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Exception: {e}")
             pass
 
 
@@ -225,7 +237,7 @@ async def get_product_sources(
         sources_resp = db.table("supported_sources").select("name").execute()
         canonical_list = [
             row["name"].strip()
-            for row in (response.data or [])
+            for row in (sources_resp.data or [])
             if row.get("name") and row.get("name").strip()
         ]
         canonical_set = set(canonical_list)
@@ -245,7 +257,8 @@ async def get_product_sources(
                     source_counts[canonical_source] = source_counts.get(canonical_source, 0) + count
         except Exception as e:
             # Fallback to manual aggregation if RPC not available
-            print(f"RPC not available, using fallback: {e}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"RPC not available, using fallback: {e}")
             page_size = 1000
             offset = 0
             while True:
@@ -282,7 +295,9 @@ async def get_product_sources(
         # Sort by name
         result.sort(key=lambda x: x["name"])
         return {"sources": result}
-    except Exception:
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Exception: {e}")
         return {"sources": []}
 
 
@@ -466,6 +481,8 @@ async def get_product_types(
         payload = sorted(combined)
         return {"types": payload}
     except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Exception: {e}")
         return {"types": []}
 
 
@@ -514,7 +531,8 @@ async def get_tags(
             names = [row.get("tag_name") for row in (rpc_resp.data or []) if row.get("tag_name")]
             return {"tags": names}
         except Exception as e:
-            print(f"RPC not available, using fallback: {e}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"RPC not available, using fallback: {e}")
             # Fallback to original implementation
             pass
 
@@ -585,7 +603,8 @@ async def get_tags(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error fetching tags: {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Tag Fetch] Failed: {e}")
         return {"tags": []}
 
 
@@ -1328,6 +1347,8 @@ async def patch_product(
         # Update the product (permissions already checked above)
         response = db.table("products").update(db_data).eq("id", product_id).execute()
     except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Update] Failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update product: {str(e)}")
     
     if not response.data:
@@ -1398,7 +1419,8 @@ async def delete_product(
         db.table("products").delete().eq("id", product_id).execute()
         print(f"[Delete] Success")
     except Exception as e:
-        print(f"[Delete] Failed: {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Delete] Failed: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete product: {str(e)}"
@@ -1527,7 +1549,8 @@ async def bulk_delete_products(
             "source": canonical_source if canonical_source else None
         }
     except Exception as e:
-        print(f"[Bulk Delete] Failed: {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Bulk Delete] Failed: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete products: {str(e)}"
