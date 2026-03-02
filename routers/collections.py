@@ -249,11 +249,8 @@ async def create_collection_from_search(
                 )
             try:
                 db.table("collections").delete().eq("id", collection_id).execute()
-            except Exception as cleanup_exc:
-                logging.exception(
-                    "Failed to rollback collection creation for collection_id=%s",
-                    collection_id,
-                )
+            except Exception:
+                pass
             raise HTTPException(status_code=500, detail=f"Failed to populate collection from search: {str(exc)}")
 
     # Return canonical response assembled from junction table data
