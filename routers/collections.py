@@ -23,7 +23,7 @@ def _looks_like_uuid(value: str) -> bool:
     try:
         uuid.UUID(str(value))
         return True
-    except Exception:
+    except Exception as e:
         logger.error(f"uuid error: {type(e).__name__}: {str(e)}")
         return False
 
@@ -133,7 +133,7 @@ async def create_collection_from_search(
                 if c not in seen:
                     seen.add(c)
                     source_values.append(c)
-        except Exception:
+        except Exception as e:
             logger.error(f"error: {type(e).__name__}: {str(e)}")
             source_values = list(source_values)
         
@@ -554,7 +554,7 @@ async def delete_collection(
 
     # Delete join table links first when available
     try:
-        db.table("collection_products").delete().eq("collection_id", collection_id).execute()
+        db.table("collection_products").delete().eq("collection_id", collection.get("id")).execute()
     except Exception:
         pass
     
