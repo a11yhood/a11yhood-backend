@@ -14,6 +14,7 @@ from services.id_generator import generate_id_with_uniqueness_check
 import uuid
 import logging
 import logging
+import logging
 
 
 router = APIRouter(prefix="/api/collections", tags=["collections"])
@@ -237,8 +238,12 @@ async def create_collection_from_search(
             for idx, pid in enumerate(product_ids)
         ]
         try:
-            db.table("collection_products").insert(junction_records).execute()
             except Exception as cleanup_exc:
+                logging.getLogger(__name__).warning(
+                    "Best-effort cleanup of collection %s failed: %s",
+                    collection_id,
+                    cleanup_exc,
+                )
                 logging.getLogger(__name__).warning(
                     "Best-effort cleanup of collection %s failed: %s",
                     collection_id,
