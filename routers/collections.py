@@ -429,7 +429,7 @@ async def get_public_collections(
     # Fetch public collections
     response = db.table("collections").select("*").eq("is_public", True).execute()
     
-    collections = _attach_product_ids_to_collections(db, response.data or [])
+    collections = response.data or []
     
     # Populate product_ids and product_slugs for each collection
     for collection in collections:

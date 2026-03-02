@@ -268,7 +268,7 @@ async def get_product_sources(
                         source_counts[canonical_source] = source_counts.get(canonical_source, 0) + 1
                 if len(rows) < page_size:
                     break
-            offset += page_size
+                offset += page_size
 
         # Build result list with all canonical sources (even if count is 0)
         result = []
