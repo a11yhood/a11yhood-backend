@@ -236,24 +236,13 @@ async def create_collection_from_search(
             for idx, pid in enumerate(product_ids)
         ]
         try:
-            except Exception as cleanup_exc:
-                logging.getLogger(__name__).warning(
-                    "Best-effort cleanup of collection %s failed: %s",
-                    collection_id,
-                    cleanup_exc,
-                )
-                logging.getLogger(__name__).warning(
-                    "Best-effort cleanup of collection %s failed: %s",
-                    collection_id,
-                    cleanup_exc,
-                )
+            db.table("collection_products").insert(junction_records).execute()
+        except Exception as exc:
+            # Best effort cleanup to avoid orphaned collection rows
             try:
                 db.table("collections").delete().eq("id", collection_id).execute()
-            except Exception as cleanup_exc:
-                logging.exception(
-                    "Failed to rollback collection creation for collection_id=%s",
-                    collection_id,
-                )
+            except Exception:
+                pass
             raise HTTPException(status_code=500, detail=f"Failed to populate collection from search: {str(exc)}")
 
     # Return canonical response assembled from junction table data
