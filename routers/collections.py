@@ -12,6 +12,7 @@ from services.database import get_db
 from services.auth import get_current_user, get_current_user_optional
 from services.id_generator import generate_id_with_uniqueness_check
 import uuid
+import logging
 
 router = APIRouter(prefix="/api/collections", tags=["collections"])
 
@@ -237,8 +238,11 @@ async def create_collection_from_search(
             # Best effort cleanup to avoid orphaned collection rows
             try:
                 db.table("collections").delete().eq("id", collection_id).execute()
-            except Exception:
-                pass
+            except Exception as cleanup_exc:
+                logging.exception(
+                    "Failed to rollback collection creation for collection_id=%s",
+                    collection_id,
+                )
             raise HTTPException(status_code=500, detail=f"Failed to populate collection from search: {str(exc)}")
 
     # Return canonical response assembled from junction table data
