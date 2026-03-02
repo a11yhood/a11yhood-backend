@@ -5,7 +5,6 @@ Logs full errors server-side for debugging while showing generic messages to cli
 """
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from starlette.middleware.cors import CORSMiddleware
 import logging
 from config import settings
 
