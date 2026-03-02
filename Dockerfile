@@ -6,7 +6,7 @@
 # Use Python 3.9-slim-buster for better compatibility with fuse-overlayfs deployment
 FROM python:3.9-slim-buster
 
-RUN echo "=== BUILD DEBUG: Starting build from python:3.10-slim ==="
+RUN echo "=== BUILD DEBUG: Starting build from python:3.9-slim-buster ==="
 RUN echo "=== Python version:" && python --version
 RUN echo "=== OS info:" && cat /etc/os-release | head -5
 
@@ -23,31 +23,6 @@ RUN echo "=== Installing Python dependencies ===" && \
     pip install --no-cache-dir -r requirements.txt && \
     echo "=== Dependency installation complete ===" && \
     pip list | head -20
-
-# Copy application code
-COPY . .
-RUN echo "=== Application code copied ===" && \
-    echo "=== File count:" && ls -la | wc -l && \
-    echo "=== Main files:" && ls -la *.py 2>/dev/null || echo "No .py files in root"
-
-# Create non-root user
-RUN echo "=== Creating appuser ===" && \
-    useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app && \
-    echo "=== User created, checking:" && \
-    id appuser
-
-# Switch to non-root user
-USER appuser
-RUN echo "=== Switched to appuser, current user:" && whoami
-
-# Expose port
-EXPOSE 8000
-
-RUN echo "=== BUILD COMPLETE - ready to start uvicorn ==="
-
-# Default command
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
 
 # Copy application code
 COPY . .
