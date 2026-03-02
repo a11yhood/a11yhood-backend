@@ -10,7 +10,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config import settings, load_settings_from_env
-from routers import activities, blog_posts, collections, discussions, product_urls, products, ratings, requests, scrapers, sources, users
+from routers import activities, blog_posts, collections, discussions, product_urls, products, ratings, requests, scrapers, sources, tags, users
 from services.database import get_db
 from services.scheduled_scrapers import get_scheduled_scraper_service
 
@@ -368,6 +368,7 @@ app.include_router(product_urls.router)
 app.include_router(collections.router)
 app.include_router(blog_posts.router)
 app.include_router(sources.router)
+app.include_router(tags.router)
 
 
 if __name__ == "__main__":

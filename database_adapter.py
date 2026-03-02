@@ -189,6 +189,7 @@ class Tag(Base):
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, unique=True, nullable=False)
+    featured = Column(Boolean, default=False)
     created_at = Column(DateTime, default=utcnow_naive)
 
 

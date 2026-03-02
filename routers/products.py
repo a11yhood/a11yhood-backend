@@ -486,6 +486,26 @@ async def get_product_types(
         return {"types": []}
 
 
+@router.get("/tags/featured")
+async def get_featured_tags(
+    db=Depends(get_db),
+):
+    """Get tag names that are marked as featured.
+
+    Featured tags represent high-quality sets of products and are suitable
+    for highlighting on the home page or similar curated surfaces.
+    Returns tag names sorted alphabetically.
+    """
+    try:
+        response = db.table("tags").select("name").eq("featured", True).order("name").execute()
+        names = [row["name"] for row in (response.data or []) if row.get("name")]
+        return {"tags": names}
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"[get_featured_tags] Failed: {e}")
+        return {"tags": []}
+
+
 @router.get("/tags")
 async def get_tags(
     response: Response,
