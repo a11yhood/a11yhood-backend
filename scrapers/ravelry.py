@@ -16,7 +16,7 @@ class RavelryScraper(BaseScraper):
     knitting and crochet patterns designed for accessibility needs
     """
     
-    # Personal-attribute slugs for accessibility-related patterns. Include known variants to avoid missing results
+    # Pattern-attribute slugs for accessibility-related patterns. Include known variants to avoid missing results
     # if the API expects the full slug (e.g., "mobility-aid-accessory").
     PA_CATEGORIES = [
         'medical-device-access',
@@ -179,7 +179,7 @@ class RavelryScraper(BaseScraper):
         Returns a tuple of (patterns, has_more).
         """
         url = f"{self.API_BASE_URL}/patterns/search.json"
-        # Use both 'pa' (UI-style) and 'personal_attributes' (API-style) to be safe
+        # 'pa' is the Ravelry search parameter for pattern attributes
         params = {
             'pa': pa_category,
             'page_size': self.RESULTS_PER_PAGE,
@@ -328,9 +328,9 @@ class RavelryScraper(BaseScraper):
                 if cat_name:
                     tags.append(cat_name)
         
-        # Add personal_attributes (accessibility tags)
-        if pattern.get('personal_attributes'):
-            for pa in pattern['personal_attributes']:
+        # Add pattern_attributes (accessibility and other pattern attributes)
+        if pattern.get('pattern_attributes'):
+            for pa in pattern['pattern_attributes']:
                 if isinstance(pa, dict):
                     pa_name = pa.get('name') or pa.get('permalink', '').replace('-', ' ').title()
                     if pa_name:
@@ -405,7 +405,7 @@ class RavelryScraper(BaseScraper):
                 'pattern_type': pattern.get('pattern_type', {}).get('name') if isinstance(pattern.get('pattern_type'), dict) else pattern.get('pattern_type'),
                 'free': pattern.get('free'),
                 'designer': pattern.get('designer', {}).get('name') if isinstance(pattern.get('designer'), dict) else pattern.get('designer'),
-                'personal_attributes': pattern.get('personal_attributes', []),
+                'pattern_attributes': pattern.get('pattern_attributes', []),
             }
         }
     
