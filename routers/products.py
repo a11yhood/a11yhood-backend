@@ -45,7 +45,7 @@ def _looks_like_uuid(value: str) -> bool:
     try:
         uuid.UUID(str(value))
         return True
-    except Exception:
+    except Exception as e:
         logger = logging.getLogger(__name__)
         logger.error(f"uuid error: {type(e).__name__}: {str(e)}")
         return False
@@ -1133,12 +1133,23 @@ async def create_product(
             
             # Update tag relationships if provided
             if product.tags is not None:
-                set_product_tags(db, result["id"], product.tags)
-            # Attach tags for response
-            pt_rows = get_product_tag_rows(db, [result["id"]])
-            tag_ids = [row["tag_id"] for row in pt_rows] if pt_rows else []
-            tags_map = get_tags_map(db, tag_ids) if tag_ids else {}
-            result["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
+                try:
+                    set_product_tags(db, result["id"], product.tags)
+                except Exception as e:
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"[Tags] Failed to set tags for duplicate product {result['id']}: {e}")
+                    result["tags"] = []
+            else:
+                # Attach tags for response
+                try:
+                    pt_rows = get_product_tag_rows(db, [result["id"]])
+                    tag_ids = [row["tag_id"] for row in pt_rows] if pt_rows else []
+                    tags_map = get_tags_map(db, tag_ids) if tag_ids else {}
+                    result["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
+                except Exception as e:
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"[Tags] Failed to fetch tags for duplicate product {result['id']}: {e}")
+                    result["tags"] = []
             return result
 
     # Generate human-readable slug for URLs (unique per product)
@@ -1173,12 +1184,24 @@ async def create_product(
     
     # Create tag relationships if provided
     if product.tags:
-        set_product_tags(db, result["id"], product.tags)
+        try:
+            set_product_tags(db, result["id"], product.tags)
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"[Tags] Failed to create tags for product {result['id']}: {e}")
+            result["tags"] = []
+            return result
+    
     # Attach tags for response
-    pt_rows = get_product_tag_rows(db, [result["id"]])
-    tag_ids = [row["tag_id"] for row in pt_rows] if pt_rows else []
-    tags_map = get_tags_map(db, tag_ids) if tag_ids else {}
-    result["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
+    try:
+        pt_rows = get_product_tag_rows(db, [result["id"]])
+        tag_ids = [row["tag_id"] for row in pt_rows] if pt_rows else []
+        tags_map = get_tags_map(db, tag_ids) if tag_ids else {}
+        result["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Tags] Failed to fetch tags for product {result['id']}: {e}")
+        result["tags"] = []
 
     return result
 
@@ -1249,27 +1272,50 @@ async def update_product(
         db_data["external_id"] = product_data["external_id"]
     # Apply basic field updates
     
-    response = db.table("products").update(db_data).eq("id", product_id).execute()
-    if not response.data:
-        # Likely blocked by RLS or no rows updated
-        raise HTTPException(status_code=403, detail="Not authorized to update this product")
+    if db_data:
+        response = db.table("products").update(db_data).eq("id", product_id).execute()
+        if not response.data:
+            # Likely blocked by RLS or no rows updated
+            raise HTTPException(status_code=403, detail="Not authorized to update this product")
+    else:
+        # No product fields to update, just fetch the current product
+        response = db.table("products").select("*").eq("id", product_id).limit(1).execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Product not found")
     
     # Update tag relationships if requested
     if "tags" in product_data:
-        set_product_tags(db, product_id, product_data["tags"] or [])
+        try:
+            set_product_tags(db, product_id, product_data["tags"] or [])
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"[Tags] Failed to update tags for product {product_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to update product tags: {str(e)}")
 
     # Map database response back to API format
     result = response.data[0]
     result["image_url"] = result.get("image")
     result["external_id"] = result.get("external_id")
+    
     # Attach editor_ids
-    owners_response = db.table("product_editors").select("user_id").eq("product_id", product_id).execute()
-    result["editor_ids"] = [owner["user_id"] for owner in owners_response.data] if owners_response.data else []
+    try:
+        owners_response = db.table("product_editors").select("user_id").eq("product_id", product_id).execute()
+        result["editor_ids"] = [owner["user_id"] for owner in owners_response.data] if owners_response.data else []
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Editors] Failed to fetch editors for product {product_id}: {e}")
+        result["editor_ids"] = []
+    
     # Attach tags
-    pt_rows = get_product_tag_rows(db, [product_id])
-    tag_ids = [row["tag_id"] for row in pt_rows] if pt_rows else []
-    tags_map = get_tags_map(db, tag_ids) if tag_ids else {}
-    result["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
+    try:
+        pt_rows = get_product_tag_rows(db, [product_id])
+        tag_ids = [row["tag_id"] for row in pt_rows] if pt_rows else []
+        tags_map = get_tags_map(db, tag_ids) if tag_ids else {}
+        result["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Tags] Failed to fetch tags for product {product_id}: {e}")
+        result["tags"] = []
     
     return result
 
@@ -1338,33 +1384,58 @@ async def patch_product(
         db_data["source_last_updated"] = product.source_last_updated
     
     try:
-        # Update the product (permissions already checked above)
-        response = db.table("products").update(db_data).eq("id", product_id).execute()
+        # Update the product if there are fields to update (permissions already checked above)
+        if db_data:
+            response = db.table("products").update(db_data).eq("id", product_id).execute()
+            if not response.data:
+                # Should not happen since we verified permissions above
+                raise HTTPException(status_code=500, detail="Update failed unexpectedly")
+            result = response.data[0]
+        else:
+            # No product fields to update, just fetch the current product
+            response = db.table("products").select("*").eq("id", product_id).limit(1).execute()
+            if not response.data:
+                raise HTTPException(status_code=404, detail="Product not found")
+            result = response.data[0]
+    except HTTPException:
+        raise
     except Exception as e:
         logger = logging.getLogger(__name__)
         logger.error(f"[Update] Failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update product: {str(e)}")
     
-    if not response.data:
-        # Should not happen since we verified permissions above
-        raise HTTPException(status_code=500, detail="Update failed unexpectedly")
-    
     # Update tag relationships if requested
     if "tags" in product_data:
-        set_product_tags(db, product_id, product_data["tags"] or [])
+        try:
+            set_product_tags(db, product_id, product_data["tags"] or [])
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"[Tags] Failed to update tags for product {product_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to update product tags: {str(e)}")
 
     # Map database response back to API format
-    result = response.data[0]
     result["image_url"] = result.get("image")
     result["external_id"] = result.get("external_id")
+    
     # Attach editor_ids
-    editors_response = db.table("product_editors").select("user_id").eq("product_id", product_id).execute()
-    result["editor_ids"] = [editor["user_id"] for editor in editors_response.data] if editors_response.data else []
+    try:
+        editors_response = db.table("product_editors").select("user_id").eq("product_id", product_id).execute()
+        result["editor_ids"] = [editor["user_id"] for editor in editors_response.data] if editors_response.data else []
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Editors] Failed to fetch editors for product {product_id}: {e}")
+        result["editor_ids"] = []
+    
     # Attach tags
-    pt_rows = get_product_tag_rows(db, [product_id])
-    tag_ids = [row["tag_id"] for row in pt_rows] if pt_rows else []
-    tags_map = get_tags_map(db, tag_ids) if tag_ids else {}
-    result["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
+    try:
+        pt_rows = get_product_tag_rows(db, [product_id])
+        tag_ids = [row["tag_id"] for row in pt_rows] if pt_rows else []
+        tags_map = get_tags_map(db, tag_ids) if tag_ids else {}
+        result["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Tags] Failed to fetch tags for product {product_id}: {e}")
+        result["tags"] = []
     
     return result
 
@@ -1675,9 +1746,18 @@ def get_or_create_tag_ids(db, tag_names: list[str]) -> dict[str, str]:
     # Create missing
     missing = [name for name in tag_names if name not in by_name]
     if missing:
-        created = db.table("tags").insert([{ "name": name } for name in missing]).execute().data
-        for row in created:
-            by_name[row["name"]] = row["id"]
+        try:
+            created = db.table("tags").insert([{ "name": name } for name in missing]).execute().data
+            for row in created:
+                by_name[row["name"]] = row["id"]
+        except Exception as e:
+            # Handle race condition: tags may have been inserted by concurrent request
+            # Fetch them again to complete the mapping
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Tag insert error (likely race condition): {e}, retrying fetch")
+            retry = db.table("tags").select("*").in_("name", missing).execute().data
+            for row in retry:
+                by_name[row["name"]] = row["id"]
     return by_name
 
 
