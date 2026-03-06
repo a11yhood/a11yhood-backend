@@ -1,5 +1,4 @@
 """Tests for Ravelry scraper"""
-import pytest
 from scrapers.ravelry import RavelryScraper
 
 
