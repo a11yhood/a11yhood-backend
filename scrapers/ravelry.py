@@ -382,6 +382,7 @@ class RavelryScraper(BaseScraper):
                 'free': pattern.get('free'),
                 'designer': pattern.get('designer', {}).get('name') if isinstance(pattern.get('designer'), dict) else pattern.get('designer'),
                 'pattern_attributes': pattern.get('pattern_attributes', []),
+                'pattern_categories': pattern.get('pattern_categories', []),
             }
         }
     
