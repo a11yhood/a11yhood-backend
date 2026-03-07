@@ -1762,8 +1762,7 @@ def get_or_create_tag_ids(db, tag_names: list[str]) -> dict[str, str]:
 
 
 def set_product_tags(db, product_id: str, tag_names: list[str]):
-    """Replace product's tag relationships with given names."""
-    # Clear existing relationships
+    """Delete product's tag relationships and replace with given names (overwrite)."""
     db.table("product_tags").delete().eq("product_id", product_id).execute()
     if not tag_names:
         return
@@ -1772,3 +1771,4 @@ def set_product_tags(db, product_id: str, tag_names: list[str]):
     # Create relationships
     payload = [{"product_id": product_id, "tag_id": tid} for tid in name_to_id.values()]
     db.table("product_tags").insert(payload).execute()
+

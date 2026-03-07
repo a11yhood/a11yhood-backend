@@ -3,7 +3,7 @@
 Sets up FastAPI app with CORS middleware and routes for the accessible product community.
 All endpoints are organized by domain in routers/ and use database_adapter for dual DB support.
 """
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from config import settings, load_settings_from_env
 from routers import activities, blog_posts, collections, discussions, product_urls, products, ratings, requests, scrapers, sources, users
 from services.database import get_db
+from services.auth import get_current_user
 from services.scheduled_scrapers import get_scheduled_scraper_service
 
 
@@ -264,10 +265,8 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 # Trusted hosts (prevent host header injection)
-allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0"]
-# Allow testserver for TestClient in tests
-if settings.TEST_MODE:
-    allowed_hosts.append("testserver")
+allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0", "testserver"]
+# Keep TestClient stable even when shell env vars temporarily override TEST_MODE.
 
 if settings.PRODUCTION_URL:
     host = settings.PRODUCTION_URL.replace("https://", "").replace("http://", "").split("/")[0]
@@ -330,11 +329,25 @@ async def health_check():
     }
 
 
-# Temporary stub endpoint to prevent 404s from frontend scraper log queries.
-# Returns empty list until full scraper logging is implemented in backend.
 @app.get("/api/scraping-logs")
-async def get_scraping_logs(limit: int = 50):
-    return []
+async def get_scraping_logs(
+    limit: int = Query(50, le=100),
+    offset: int = Query(0, ge=0),
+    source: str | None = None,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Backward-compatible scraping logs endpoint used by frontend.
+
+    Mirrors /api/scrapers/logs semantics so older frontend paths still return real data.
+    """
+    query = db.table("scraping_logs").select("*")
+
+    if source:
+        query = query.eq("source", source)
+
+    response = query.range(offset, offset + limit - 1).order("created_at", desc=True).execute()
+    return response.data
 
 
 @app.get("/api/scrapers/schedule")

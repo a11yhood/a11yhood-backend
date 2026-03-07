@@ -78,11 +78,14 @@ fi
 
 # Check if container is already running and stop it
 echo -e "${YELLOW}🔧 Checking for existing containers...${NC} (t=$(ts))"
-if docker ps -a --filter "name=a11yhood-backend-dev" --format "{{.Names}}" | grep -q "a11yhood-backend-dev"; then
+if docker ps -a --format "{{.Names}}" | grep -qx "a11yhood-backend-dev"; then
   echo "  Stopping existing container..."
   docker stop a11yhood-backend-dev >/dev/null 2>&1
   docker rm a11yhood-backend-dev >/dev/null 2>&1
   sleep 1
+fi
+if docker ps --format "{{.Names}}" | grep -qx "a11yhood-backend-prod"; then
+  echo "  Production container detected and left running (a11yhood-backend-prod)."
 fi
 echo -e "${GREEN}✓ Ready to start${NC}"
 echo ""
@@ -107,6 +110,7 @@ docker run \
   -d \
   --name a11yhood-backend-dev \
   --env-file .env.test \
+  -e ENV_FILE=.env.test \
   -p 8000:8000 \
   -v "$(pwd):/app" \
   --restart unless-stopped \

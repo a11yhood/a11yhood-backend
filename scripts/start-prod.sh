@@ -199,11 +199,14 @@ fi
 
 # Check if container is already running and stop it
 echo -e "${YELLOW}🔧 Checking for existing containers...${NC} (t=$(ts))"
-if docker ps -a --filter "name=a11yhood-backend-prod" --format "{{.Names}}" | grep -q "a11yhood-backend-prod"; then
+if docker ps -a --format "{{.Names}}" | grep -qx "a11yhood-backend-prod"; then
   echo "  Stopping existing container..."
   docker stop a11yhood-backend-prod >/dev/null 2>&1
   docker rm a11yhood-backend-prod >/dev/null 2>&1
   sleep 1
+fi
+if docker ps --format "{{.Names}}" | grep -qx "a11yhood-backend-dev"; then
+  echo "  Development container detected and left running (a11yhood-backend-dev)."
 fi
 echo -e "${GREEN}✓ Ready to start${NC}"
 echo ""

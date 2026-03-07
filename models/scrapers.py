@@ -40,6 +40,8 @@ class OAuthConfigUpdate(BaseModel):
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
     redirect_uri: Optional[str] = None
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
 
 
 class OAuthConfigResponse(BaseModel):

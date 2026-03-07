@@ -64,6 +64,10 @@ class BaseScraper(ABC):
         self._test_mode_enabled: bool = False
         self._test_mode_limit: int = 0
         self._test_mode_yielded: int = 0
+        # OAuth auth failure tracking (used by scrapers with OAuth)
+        self._had_auth_failure: bool = False
+        self._last_auth_error: Optional[str] = None
+        self._refresh_in_progress: bool = False
         
     async def close(self):
         """Clean up resources"""
@@ -152,6 +156,78 @@ class BaseScraper(ABC):
             await asyncio.sleep(sleep_time)
         
         self.last_request_time = time.time()
+    
+    async def _refresh_oauth_token(self) -> bool:
+        """Refresh OAuth token for this scraper's platform.
+        
+        This is a base implementation that returns False. Scrapers that use OAuth
+        should override this method to implement platform-specific token refresh logic.
+        
+        The implementation should:
+        1. Fetch refresh_token and credentials from oauth_configs table
+        2. Call the platform's token refresh endpoint
+        3. Update oauth_configs table with new tokens
+        4. Update self.client.headers["Authorization"] with new access token
+        5. Return True if successful, False otherwise
+        
+        Returns:
+            True if token was successfully refreshed, False otherwise
+        """
+        return False
+    
+    async def _get_with_refresh(
+        self,
+        url: str,
+        params: Optional[Dict[str, Any]] = None,
+        max_attempts: int = 2
+    ) -> Dict[str, Any]:
+        """GET request with automatic OAuth token refresh on 401/403.
+        
+        This method handles the common pattern of retrying a request after refreshing
+        an expired OAuth token. It will:
+        1. Make the initial GET request
+        2. If 401/403 received, call _refresh_oauth_token() (which scrapers can override)
+        3. Retry the request once if refresh succeeded
+        4. Track auth failures in _had_auth_failure/_last_auth_error
+        
+        Args:
+            url: URL to GET
+            params: Optional query parameters
+            max_attempts: Maximum attempts (default 2: initial + 1 retry after refresh)
+            
+        Returns:
+            Parsed JSON response
+            
+        Raises:
+            httpx.HTTPStatusError: If request fails after all attempts
+        """
+        for attempt in range(1, max_attempts + 1):
+            await self._throttle_request()
+            response = await self.client.get(url, params=params)
+            
+            source_name = self.get_source_name()
+            print(f"[{source_name}] HTTP attempt={attempt} status={response.status_code} url={url}")
+            
+            try:
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                
+                # Try token refresh on first auth failure
+                if attempt < max_attempts and status in (401, 403):
+                    print(f"[{source_name}] Auth status={status}; attempting token refresh...")
+                    refreshed = await self._refresh_oauth_token()
+                    if refreshed:
+                        print(f"[{source_name}] Token refreshed; retrying...")
+                        continue
+                
+                # Final failure on auth error
+                if status in (401, 403):
+                    self._had_auth_failure = True
+                    self._last_auth_error = f"{source_name} auth failed with status {status}; token refresh did not recover"
+                
+                raise
 
     async def _paginate(
         self,
@@ -214,6 +290,58 @@ class BaseScraper(ABC):
         self._test_mode_enabled = bool(test_mode)
         self._test_mode_limit = int(test_limit or 0)
         self._test_mode_yielded = 0
+    
+    def _reset_auth_failure_state(self):
+        """Reset OAuth auth failure tracking at the start of a scrape session.
+        
+        Scrapers using OAuth should call this at the beginning of scrape().
+        """
+        self._had_auth_failure = False
+        self._last_auth_error = None
+    
+    def _build_scrape_result(
+        self,
+        start_time: datetime,
+        products_found: int,
+        products_added: int,
+        products_updated: int,
+        error: Optional[Exception] = None
+    ) -> Dict[str, Any]:
+        """Build a standardized scrape result dictionary.
+        
+        Automatically includes auth failure information if applicable.
+        
+        Args:
+            start_time: UTC datetime when scrape started
+            products_found: Number of products discovered
+            products_added: Number of new products created
+            products_updated: Number of existing products updated
+            error: Optional exception if scrape failed
+            
+        Returns:
+            Standardized scrape result dict
+        """
+        duration = (datetime.now(UTC) - start_time).total_seconds()
+        
+        result = {
+            'source': self.get_source_name(),
+            'products_found': products_found,
+            'products_added': products_added,
+            'products_updated': products_updated,
+            'duration_seconds': duration,
+        }
+        
+        # Check for auth failure first (higher priority than generic errors)
+        if self._had_auth_failure:
+            result['status'] = 'error'
+            result['error_message'] = self._last_auth_error or f"{self.get_source_name()} authentication failed during scrape"
+        elif error:
+            result['status'] = 'error'
+            result['error_message'] = str(error)
+        else:
+            result['status'] = 'success'
+        
+        return result
     
     async def _product_exists(self, url: str) -> Optional[Dict[str, Any]]:
         """

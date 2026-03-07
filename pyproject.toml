@@ -31,4 +31,6 @@ packages = ["models", "routers", "scrapers", "services", "migrations"]
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.24.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.8.0",
 ]
