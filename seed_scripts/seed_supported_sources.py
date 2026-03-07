@@ -35,7 +35,6 @@ def seed_supported_sources():
     print("Seeding supported_sources table...")
 
     added = 0
-    updated = 0
     for source in SUPPORTED_SOURCES:
         try:
             result = db.table("supported_sources").upsert(
