@@ -1,10 +1,15 @@
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+
 os.environ.setdefault("ENV_FILE", ".env.test")
 try:
     from dotenv import load_dotenv
     load_dotenv(os.environ["ENV_FILE"])
-except Exception:
-    pass
+except Exception as exc:
+    # Optional .env loading for tests; ignore if unavailable but log for diagnostics.
+    logger.debug("Failed to load test ENV_FILE %r: %s", os.environ.get("ENV_FILE"), exc)
 
 import pytest
 from fastapi.testclient import TestClient
@@ -216,15 +221,17 @@ def _seed_test_data(db):
     for source in supported_sources:
         try:
             db.table("supported_sources").insert(source).execute()
-        except Exception:
-            pass
+        except Exception as exc:
+            # Best-effort seed; ignore insert errors (data may already exist), but log them.
+            logger.debug("Ignoring error seeding supported_source %r: %s", source, exc)
 
     # Test users with fixed IDs (match DEV_USER_IDS in services/auth.py)
     for user in TEST_USERS:
         try:
             db.table("users").insert(user).execute()
-        except Exception:
-            pass
+        except Exception as exc:
+            # See _seed_test_data docstring: user seed is best-effort and idempotent.
+            logger.debug("Ignoring error seeding user %r: %s", user, exc)
 
     # Test products
     for product in TEST_PRODUCTS:
@@ -240,8 +247,9 @@ def _seed_test_data(db):
             if not p.get("description"):
                 p["description"] = p.get("name", "Test product")
             db.table("products").insert(p).execute()
-        except Exception:
-            pass
+        except Exception as exc:
+            # Product seed is also best-effort; log and continue if insert fails.
+            logger.debug("Ignoring error seeding product %r: %s", product, exc)
 
 
 @pytest.fixture
