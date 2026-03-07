@@ -1542,7 +1542,7 @@ async def bulk_delete_products(
             return {"deleted_count": 0, "message": "No products found matching criteria"}
 
         print(f"[Bulk Delete] About to delete {len(ids_to_delete)} products: {ids_to_delete[:5]}...")
-        print(f"[Bulk Delete] Backend type: {getattr(db, 'backend', 'unknown')}")
+        print(f"[Bulk Delete] Backend type: supabase")
 
         async def _delete_supabase(ids: list[str]) -> int:
             # Use REST endpoint with Prefer:return=minimal to avoid JSON serialization errors
