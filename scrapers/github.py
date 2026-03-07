@@ -247,8 +247,9 @@ class GitHubScraper(BaseScraper):
             tags.append(language)
         
         # Convert stars to a continuous 1–5 rating using a log10 scale.
-        # log10(10)=1, log10(100)=2, log10(1000)=3, log10(10000)=4, log10(100000)=5.
-        # Values are clamped to [1.0, 5.0]; repos with 0 stars receive no rating.
+        # Formula: clamp(log10(stars), 1.0, 5.0)
+        # Anchor points: 10→1.0, 100→2.0, 1000→3.0, 10000→4.0, 100000→5.0.
+        # Repos with 0 stars receive no rating.
         if stars > 0:
             star_rating = round(min(max(math.log10(stars), 1.0), 5.0), 2)
         else:
