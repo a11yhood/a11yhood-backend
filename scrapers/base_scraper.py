@@ -228,6 +228,12 @@ class BaseScraper(ABC):
                     self._last_auth_error = f"{source_name} auth failed with status {status}; token refresh did not recover"
                 
                 raise
+        
+        # This point should be unreachable because we either return a response
+        # or raise an HTTPStatusError in the loop above.
+        raise RuntimeError(
+            f"{self.get_source_name()} _get_with_refresh exited without returning or raising"
+        )
 
     async def _paginate(
         self,
