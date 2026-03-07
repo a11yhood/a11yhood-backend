@@ -15,6 +15,7 @@ from datetime import datetime, UTC
 from services.auth import get_current_user
 from services.database import get_db
 from services.sources import extract_domain
+import logging
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
 
@@ -288,7 +289,11 @@ def _grant_permission(db, request_data: dict):
         try:
             db.table("users").update({"role": request_type}).eq("id", user_id).execute()
         except Exception:
-            pass
+            # Do not fail the overall approval if role update fails, but log for investigation.
+            logging.exception(
+                "Failed to update user role during permission grant",
+                extra={"user_id": user_id, "request_type": request_type},
+            )
 
     elif request_type == 'source-domain':
         # Auto-add supported source domain if not present
