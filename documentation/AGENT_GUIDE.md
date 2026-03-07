@@ -19,7 +19,7 @@ Read this first when operating on the repo. It summarizes conventions, helper ut
 - You may run `git add` to stage files when appropriate
 - You may run `git status` or `git diff` to check changes
 - Focus on making changes and letting the user review and commit them
-- Final fixes merge into the production branch (not main); open PRs targeting production unless told otherwise.
+- Final fixes merge into the main branch; open PRs targeting main unless told otherwise.
 
 ## Code Commenting Guidelines
 Keep code readable first through clear names and small functions. Use comments to clarify intent or context that code alone cannot convey.
