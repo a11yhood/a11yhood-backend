@@ -17,7 +17,7 @@ from datetime import UTC
 
 @pytest.fixture
 def client(clean_database):
-    """Test client using SQLite. Auth is driven by Authorization headers."""
+    """Test client backed by the test Supabase instance. Auth via Authorization headers."""
     app.dependency_overrides[get_db] = lambda: clean_database
     client = TestClient(app)
     yield client
@@ -142,129 +142,112 @@ def auth_client_2(clean_database, test_user_2):
 
 
 # ============================================================================
-# Integration test fixtures (SQLite) - for test_scrapers_integration.py
+# Database fixtures (Supabase test instance)
 # ============================================================================
 
-import os
 from database_adapter import DatabaseAdapter
 from config import get_settings
+
+
+def _require_supabase(settings):
+    """Skip the test session if Supabase credentials are not configured."""
+    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+        pytest.skip(
+            "SUPABASE_URL and SUPABASE_KEY are required for tests. "
+            "Copy .env.test.example to .env.test and fill in your test Supabase credentials."
+        )
 
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_database(test_settings):
     """
-    Session-scoped fixture that ensures test database starts clean.
-    
-    This runs once at the start of all tests and clears any stale data
-    from previous test runs, ensuring frontend and backend tests use
-    the same clean slate.
+    Session-scoped fixture that resets the test database once at the start of a run.
+
+    Ensures no stale data from a previous session interferes with the current one.
+    Skipped when RUN_AGAINST_SERVER=1 (running tests against a live server).
     """
     if os.getenv("RUN_AGAINST_SERVER"):
         print("\n✓ Skipping test database reset (RUN_AGAINST_SERVER=1)")
         return
 
+    _require_supabase(test_settings)
     test_db = DatabaseAdapter(test_settings)
-    test_db.init()  # Create tables
-    test_db.cleanup()  # Drop and recreate tables to start fresh
+    test_db.cleanup()
     print("\n✓ Test database reset at session start")
 
 
 @pytest.fixture(scope="session")
 def test_settings():
-    """Load test environment settings from ENV_FILE (defaults to backend/.env.test)."""
-    return get_settings(os.environ.get("ENV_FILE", "backend/.env.test"))
+    """Load test environment settings from ENV_FILE (defaults to .env.test)."""
+    return get_settings(os.environ.get("ENV_FILE", ".env.test"))
 
 
 @pytest.fixture(scope="session")
 def test_db(test_settings):
-    """SQLite database for testing (no Supabase required)"""
+    """Supabase test database adapter (session-scoped; cleaned per-test via clean_database)."""
+    _require_supabase(test_settings)
     db = DatabaseAdapter(test_settings)
-    db.init()  # Create tables
     yield db
-    # Cleanup happens per test
 
 
 @pytest.fixture
 def clean_database(test_db):
-    """Clean database before each test"""
-    test_db.cleanup()  # Drop and recreate tables
-    # Seed test data fresh for each test
+    """Provide a freshly cleaned and re-seeded database for each test."""
+    test_db.cleanup()
     _seed_test_data(test_db)
     yield test_db
 
 
 def _seed_test_data(db):
     """
-    Seed initial test data using shared constants.
-    
-    This ensures consistency between backend tests and frontend integration tests.
-    All products use controlled types/sources from test_data.py.
+    Insert baseline test data into the Supabase test instance.
+
+    Uses fixed user IDs from TEST_USERS so dev-token auth works consistently.
+    Inserts are best-effort; errors are silently ignored (data may already exist).
     """
-    from uuid import uuid4
-    from datetime import datetime
-    
-    # Create supported sources for URL validation
+    from services.id_generator import normalize_to_snake_case
+
+    # Supported sources (needed for URL validation)
     supported_sources = [
-        {
-            "domain": "ravelry.com",
-            "name": "Ravelry",
-        },
-        {
-            "domain": "github.com",
-            "name": "Github",
-        },
-        {
-            "domain": "thingiverse.com",
-            "name": "Thingiverse",
-        },
+        {"domain": "ravelry.com", "name": "Ravelry"},
+        {"domain": "github.com", "name": "Github"},
+        {"domain": "thingiverse.com", "name": "Thingiverse"},
     ]
-    
-    try:
-        for source in supported_sources:
+    for source in supported_sources:
+        try:
             db.table("supported_sources").insert(source).execute()
-    except Exception:
-        pass  # Sources may already exist
-    
-    # Create test users with unique IDs so no conflicts
-    test_users = [
-        {
-            "id": str(uuid4()),
-            "github_id": f"test-user-{uuid4()}",
-            "username": "testuser",
-            "email": "test@example.com",
-            "display_name": "Test User",
-            "role": "user",
-            "created_at": datetime.now(UTC).isoformat(),
-        },
-        {
-            "id": str(uuid4()),
-            "github_id": f"test-admin-{uuid4()}",
-            "username": "testadmin",
-            "email": "admin@example.com",
-            "display_name": "Test Admin",
-            "role": "admin",
-            "created_at": datetime.now(UTC).isoformat(),
-        },
-    ]
-    
-    try:
-        for user in test_users:
+        except Exception:
+            pass
+
+    # Test users with fixed IDs (match DEV_USER_IDS in services/auth.py)
+    for user in TEST_USERS:
+        try:
             db.table("users").insert(user).execute()
-    except Exception:
-        pass  # Users may already exist
-    
-    # Create test products from shared constants
-    try:
-        for product in TEST_PRODUCTS:
-            db.table("products").insert(product).execute()
-    except Exception:
-        pass  # Products may already exist
+        except Exception:
+            pass
+
+    # Test products
+    for product in TEST_PRODUCTS:
+        try:
+            p = dict(product)
+            # Map source_url -> url (Supabase schema uses 'url')
+            if "source_url" in p:
+                p["url"] = p.pop("source_url")
+            # Products require a slug (NOT NULL UNIQUE in Supabase)
+            if not p.get("slug"):
+                p["slug"] = normalize_to_snake_case(p.get("name", "product"))
+            # Products require a description (NOT NULL in Supabase)
+            if not p.get("description"):
+                p["description"] = p.get("name", "Test product")
+            db.table("products").insert(p).execute()
+        except Exception:
+            pass
 
 
 @pytest.fixture
 def test_user(clean_database):
-    """Get the test user from the test database (created by _seed_test_data)"""
-    result = clean_database.table("users").select("*").eq("username", "testuser").execute()
+    """Return the seeded regular test user."""
+    result = clean_database.table("users").select("*").eq("username", "regular_user").execute()
     if not result.data:
         raise ValueError("Test user not found - _seed_test_data may have failed")
     return result.data[0]
@@ -272,8 +255,8 @@ def test_user(clean_database):
 
 @pytest.fixture
 def test_admin(clean_database):
-    """Get the test admin user from the test database (created by _seed_test_data)"""
-    result = clean_database.table("users").select("*").eq("username", "testadmin").execute()
+    """Return the seeded admin test user."""
+    result = clean_database.table("users").select("*").eq("username", "admin_user").execute()
     if not result.data:
         raise ValueError("Test admin not found - _seed_test_data may have failed")
     return result.data[0]
@@ -281,7 +264,7 @@ def test_admin(clean_database):
 
 @pytest.fixture
 def test_moderator(clean_database):
-    """Create a test moderator user in the test database"""
+    """Create a test moderator user."""
     from uuid import uuid4
     moderator_data = {
         "id": str(uuid4()),
@@ -291,14 +274,13 @@ def test_moderator(clean_database):
         "display_name": "Test Moderator",
         "role": "moderator",
     }
-
     result = clean_database.table("users").insert(moderator_data).execute()
     return result.data[0]
 
 
 @pytest.fixture
 def test_user_2(clean_database):
-    """Create a second test user in the test database"""
+    """Create a second regular test user."""
     from uuid import uuid4
     user_data = {
         "id": str(uuid4()),
@@ -308,32 +290,32 @@ def test_user_2(clean_database):
         "display_name": "Test User 2",
         "role": "user",
     }
-
     result = clean_database.table("users").insert(user_data).execute()
     return result.data[0]
 
 
 @pytest.fixture
 def test_product(clean_database, test_user):
-    """Create a test product owned by the test user"""
+    """Create a test product owned by the test user."""
     from uuid import uuid4
+    from services.id_generator import normalize_to_snake_case
 
     product_data = {
         "name": "Test Product",
         "description": "A test product for testing",
         "source": "github",
-        "category": "Software",
+        "type": "Software",
         "url": f"https://github.com/test/test-product-{uuid4()}",
+        "slug": f"test-product-{uuid4()}",
         "created_by": test_user["id"],
     }
-
     result = clean_database.table("products").insert(product_data).execute()
     return result.data[0]
 
 
 @pytest.fixture
 def sqlite_db(clean_database):
-    """Alias for clean_database fixture for clearer test code"""
+    """Alias for clean_database (backwards compatibility)."""
     return clean_database
 
 
@@ -345,19 +327,15 @@ def auth_headers():
     return _make
 
 
-# Removed duplicate auth_headers that overrode dependencies; we standardize on header-based tokens.
-
-
 @pytest.fixture
 def github_oauth_config(clean_database, test_admin):
-    """Create GitHub OAuth config (no actual credentials needed for public API)"""
+    """Create a GitHub OAuth config in the test database."""
     config_data = {
         "platform": "github",
         "client_id": "test-client-id",
         "client_secret": "test-secret",
-        "redirect_uri": "http://localhost:8000/api/scrapers/oauth/github/callback"
+        "redirect_uri": "http://localhost:8000/api/scrapers/oauth/github/callback",
     }
-    
     result = clean_database.table("oauth_configs").insert(config_data).execute()
     return result.data[0]
 
@@ -365,24 +343,21 @@ def github_oauth_config(clean_database, test_admin):
 @pytest.fixture
 def thingiverse_oauth_config(clean_database, test_admin, test_settings):
     """
-    Create Thingiverse OAuth config with access token
-    
-    Note: This fixture requires real credentials to work.
-    Set THINGIVERSE_APP_ID in .env.test or skip tests.
+    Create Thingiverse OAuth config with real access token.
+
+    Requires THINGIVERSE_APP_ID in .env.test; test is skipped if absent.
     """
     access_token = test_settings.THINGIVERSE_APP_ID
-    
     if not access_token:
         pytest.skip("THINGIVERSE_APP_ID not set in .env.test")
-    
+
     config_data = {
         "platform": "thingiverse",
-        "client_id": access_token,  # Thingiverse uses app_id as access token
+        "client_id": access_token,
         "client_secret": "test-secret",
         "redirect_uri": "http://localhost:8000/api/scrapers/oauth/thingiverse/callback",
-        "access_token": access_token
+        "access_token": access_token,
     }
-    
     result = clean_database.table("oauth_configs").insert(config_data).execute()
     return result.data[0]
 
@@ -390,24 +365,21 @@ def thingiverse_oauth_config(clean_database, test_admin, test_settings):
 @pytest.fixture
 def ravelry_oauth_config(clean_database, test_admin, test_settings):
     """
-    Create Ravelry OAuth config with access token
-    
-    Note: This fixture requires real credentials to work.
-    Set RAVELRY_APP_KEY and RAVELRY_APP_SECRET in .env.test or skip tests.
+    Create Ravelry OAuth config with real credentials.
+
+    Requires RAVELRY_APP_KEY and RAVELRY_APP_SECRET in .env.test; skipped if absent.
     """
     app_key = test_settings.RAVELRY_APP_KEY
     app_secret = test_settings.RAVELRY_APP_SECRET
-    
     if not app_key or not app_secret:
         pytest.skip("RAVELRY_APP_KEY or RAVELRY_APP_SECRET not set in .env.test")
-    
+
     config_data = {
         "platform": "ravelry",
         "client_id": app_key,
         "client_secret": app_secret,
         "redirect_uri": "http://localhost:8000/api/scrapers/oauth/ravelry/callback",
-        "access_token": app_key  # For basic auth, use app_key as token
+        "access_token": app_key,
     }
-    
     result = clean_database.table("oauth_configs").insert(config_data).execute()
     return result.data[0]

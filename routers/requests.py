@@ -284,13 +284,10 @@ def _grant_permission(db, request_data: dict):
         db.table("product_editors").insert(owner_data).execute()
     
     elif request_type in ['moderator', 'admin']:
-        # Update user role
-        # Note: In Supabase this would update user metadata
-        # For SQLite tests, we update the users table
+        # Update user role in the users table
         try:
             db.table("users").update({"role": request_type}).eq("id", user_id).execute()
-        except:
-            # User might not exist in users table yet (using Supabase Auth)
+        except Exception:
             pass
 
     elif request_type == 'source-domain':

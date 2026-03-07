@@ -9,8 +9,8 @@ Read this first when operating on the repo. It summarizes conventions, helper ut
 - Default to snake_case
 
 ## Environment Modes (read before running anything)
-- **Dev/Test (local SQLite + seeds):** `./start-dev.sh --seed` loads `.env.test`, uses SQLite at `/tmp/a11yhood-test.db`, and seeds data via `seed_scripts/seed_all.py`. Safe for local work and scrapers; no real OAuth.
-- **Production (local Supabase):** `./start-prod.sh` loads `.env`, connects to the real Supabase backend, no seeding. Use for local QA against real data.
+- **Dev/Test (Supabase test instance + seeds):** `./start-dev.sh --seed` loads `.env.test`, connects to the `a11yhood-test` Supabase project, and seeds data via `seed_scripts/seed_all.py`. Safe for local work and scrapers; no real OAuth (uses dev tokens).
+- **Production (live Supabase):** `./start-prod.sh` loads `.env`, connects to the production Supabase backend, no seeding. Use for local QA against real data.
 - **Deploy (external server):** Runs the same production settings on the external host; use Supabase service role keys and real OAuth. Do not seed here.
 
 ## Git Workflow

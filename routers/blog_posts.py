@@ -19,16 +19,10 @@ router = APIRouter(prefix="/api/blog-posts", tags=["blog"])
 
 
 def _serialize_datetime(dt: Optional[datetime]) -> Union[datetime, str, None]:
-    """Serialize datetime for database insert/update.
-    
-    Supabase requires ISO strings, SQLite requires datetime objects.
-    """
+    """Serialize datetime to ISO string for Supabase."""
     if dt is None:
         return None
-    # Check if using Supabase backend
-    if hasattr(db_adapter, 'backend') and db_adapter.backend == 'supabase':
-        return dt.isoformat()
-    return dt
+    return dt.isoformat()
 
 
 def _slugify(text: str) -> str:
@@ -238,22 +232,12 @@ async def list_blog_posts(
 
     # Push ordering to SQL: primary publish_date desc NULLS LAST, then published_at desc, then created_at desc
     # Supabase/PostgREST supports multiple order clauses by repeating `order`.
-    # Some adapters (e.g., SQLite in tests) don't support nullsfirst kwarg
-    supports_nulls = getattr(db_adapter, "backend", "") == "supabase"
-    if supports_nulls:
-        query = (
-            query
-            .order("publish_date", desc=True, nullsfirst=False)
-            .order("published_at", desc=True, nullsfirst=False)
-            .order("created_at", desc=True)
-        )
-    else:
-        query = (
-            query
-            .order("publish_date", desc=True)
-            .order("published_at", desc=True)
-            .order("created_at", desc=True)
-        )
+    query = (
+        query
+        .order("publish_date", desc=True, nullsfirst=False)
+        .order("published_at", desc=True, nullsfirst=False)
+        .order("created_at", desc=True)
+    )
     query = query.range(offset, offset + limit - 1)
 
     db_resp = query.execute()

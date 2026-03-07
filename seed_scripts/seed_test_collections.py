@@ -1,45 +1,31 @@
 """
-Seed test collections for local development
+Seed test collections into Supabase.
 
-Creates sample collections for testing and development:
-1. Public collection with products (admin user)
-2. Private collection (regular user)
-3. Empty public collection (admin user)
+Creates sample collections for testing:
+  1. Public collection with products (admin user)
+  2. Private collection (regular user)
+  3. Empty public collection (admin user)
 
-Uses junction table (collection_products) for many-to-many relationship.
-
-Run with: uv run python seed_test_collections.py
+Run with: uv run python seed_scripts/seed_test_collections.py
 """
 
 import os
 import sys
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-from database_adapter import Base
-from datetime import datetime, UTC
 
-# Load environment variables - prefer ENV_FILE if set, otherwise use .env.test
-env_file = os.getenv('ENV_FILE', '.env.test')
-if not os.path.exists(env_file):
-    print(f"Warning: {env_file} not found, using defaults")
-else:
-    load_dotenv(env_file)
+env_file = os.getenv("ENV_FILE", ".env.test")
+load_dotenv(env_file, override=True)
 
-DATABASE_URL = os.getenv('DATABASE_URL')
-if not DATABASE_URL:
-    print("Error: DATABASE_URL not set")
-    sys.exit(1)
+from config import get_settings
+from database_adapter import DatabaseAdapter
 
-# Create database engine and session
-engine = create_engine(DATABASE_URL.replace('sqlite+aiosqlite', 'sqlite'), echo=False)
-SessionLocal = sessionmaker(bind=engine)
-
-# Create tables if they don't exist
-Base.metadata.create_all(bind=engine)
-
-# Test collections data
-test_collections = [
+# Fixed collection IDs for stable test references
+TEST_COLLECTIONS = [
     {
         "id": "coll-admin-public-001",
         "slug": "accessible-software-tools",
@@ -48,8 +34,6 @@ test_collections = [
         "name": "Accessible Software Tools",
         "description": "A curated collection of software tools with excellent accessibility features",
         "is_public": True,
-        "created_at": datetime.now(UTC).replace(tzinfo=None),
-        "updated_at": datetime.now(UTC).replace(tzinfo=None),
     },
     {
         "id": "coll-regular-private-001",
@@ -59,8 +43,6 @@ test_collections = [
         "name": "My Personal Collection",
         "description": "Private collection of products I like",
         "is_public": False,
-        "created_at": datetime.now(UTC).replace(tzinfo=None),
-        "updated_at": datetime.now(UTC).replace(tzinfo=None),
     },
     {
         "id": "coll-admin-public-002",
@@ -70,107 +52,51 @@ test_collections = [
         "name": "Empty Collection",
         "description": "A public collection waiting for products",
         "is_public": True,
-        "created_at": datetime.now(UTC).replace(tzinfo=None),
-        "updated_at": datetime.now(UTC).replace(tzinfo=None),
     },
 ]
 
-# Products to add to collections via junction table
-# Format: (collection_id, product_slug, position)
-collection_products = [
-    ("coll-admin-public-001", "test-product", 0),  # Test product from seed_test_product
+# Products to add to collections: (collection_id, product_slug)
+COLLECTION_PRODUCTS = [
+    ("coll-admin-public-001", "test-product"),
 ]
 
+
 def seed_collections():
-    """Create test collections in the database"""
+    """Upsert test collections and add products to them."""
+    settings = get_settings(env_file)
+    db = DatabaseAdapter(settings)
+
     print("Creating test collections...\n")
-    
-    session = SessionLocal()
-    
-    try:
-        for coll_data in test_collections:
-            # Check if collection already exists
-            result = session.execute(
-                text("SELECT * FROM collections WHERE id = :id"),
-                {"id": coll_data["id"]}
-            ).fetchone()
-            
-            if result:
-                # Update existing collection
-                session.execute(
-                    text("""
-                        UPDATE collections 
-                        SET slug = :slug, user_id = :user_id, user_name = :user_name,
-                            name = :name, description = :description, is_public = :is_public,
-                            updated_at = :updated_at
-                        WHERE id = :id
-                    """),
-                    coll_data
-                )
-                print(f"  ✓ Updated collection '{coll_data['name']}' (ID: {coll_data['id']})")
+
+    for coll in TEST_COLLECTIONS:
+        try:
+            result = db.table("collections").upsert(coll, on_conflict="slug").execute()
+            if result.data:
+                print(f"  ✓ Collection '{coll['name']}' (ID: {coll['id']})")
             else:
-                # Create new collection
-                session.execute(
-                    text("""
-                        INSERT INTO collections (id, slug, user_id, user_name, name, description, 
-                                                is_public, created_at, updated_at)
-                        VALUES (:id, :slug, :user_id, :user_name, :name, :description,
-                               :is_public, :created_at, :updated_at)
-                    """),
-                    coll_data
-                )
-                print(f"  ✓ Created collection '{coll_data['name']}' (ID: {coll_data['id']})")
-        
-        session.commit()
-        
-        # Add products to collections via junction table
-        print("\nAdding products to collections...")
-        for collection_id, product_slug, position in collection_products:
-            # Get product ID from slug
-            product_result = session.execute(
-                text("SELECT id FROM products WHERE slug = :slug"),
-                {"slug": product_slug}
-            ).fetchone()
-            
-            if product_result:
-                product_id = product_result[0]
-                
-                # Check if junction entry already exists
-                existing = session.execute(
-                    text("SELECT * FROM collection_products WHERE collection_id = :cid AND product_id = :pid"),
-                    {"cid": collection_id, "pid": product_id}
-                ).fetchone()
-                
-                if not existing:
-                    # Create junction entry
-                    session.execute(
-                        text("""
-                            INSERT INTO collection_products (collection_id, product_id, position)
-                            VALUES (:collection_id, :product_id, :position)
-                        """),
-                        {
-                            "collection_id": collection_id,
-                            "product_id": product_id,
-                            "position": position
-                        }
-                    )
-                    session.commit()
-                    print(f"  ✓ Added product '{product_slug}' to collection '{collection_id}'")
-                else:
-                    print(f"  - Product '{product_slug}' already in collection '{collection_id}'")
-            else:
+                print(f"  ? Collection '{coll['name']}': no data returned")
+        except Exception as e:
+            print(f"  ✗ Collection '{coll['name']}': {e}")
+
+    print("\nAdding products to collections...")
+    for collection_id, product_slug in COLLECTION_PRODUCTS:
+        try:
+            prod_result = db.table("products").select("id").eq("slug", product_slug).execute()
+            if not prod_result.data:
                 print(f"  ! Product '{product_slug}' not found, skipping")
-        
-        print("\n✓ Test collections setup complete!")
-        
-    except Exception as e:
-        session.rollback()
-        print(f"Error seeding collections: {e}")
-        sys.exit(1)
-    finally:
-        session.close()
+                continue
+
+            product_id = prod_result.data[0]["id"]
+            db.table("collection_products").upsert(
+                {"collection_id": collection_id, "product_id": product_id},
+                on_conflict="collection_id,product_id",
+            ).execute()
+            print(f"  ✓ Added '{product_slug}' to collection '{collection_id}'")
+        except Exception as e:
+            print(f"  ✗ '{product_slug}' -> '{collection_id}': {e}")
+
+    print("\n✓ Test collections seeding complete!")
+
 
 if __name__ == "__main__":
-    seed_collections()
-
     seed_collections()

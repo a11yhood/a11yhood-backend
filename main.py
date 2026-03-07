@@ -325,7 +325,7 @@ async def health_check():
         "status": "healthy",
         "mode": "production" if is_production else "development",
         "test_mode": current_settings.TEST_MODE,
-        "database": "supabase" if current_settings.SUPABASE_URL and "dummy" not in current_settings.SUPABASE_URL else "sqlite"
+        "database": "supabase"
     }
 
 
