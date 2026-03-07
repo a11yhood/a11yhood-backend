@@ -16,12 +16,31 @@ from sqlalchemy.orm import sessionmaker
 from database_adapter import Base
 import uuid
 
+
+def _env(name: str, default: str | None = None) -> str | None:
+    """Read env var and trim accidental leading/trailing whitespace."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    value = value.strip()
+    return value if value else default
+
+
+def _first_env(names: list[str], default: str | None = None) -> str | None:
+    """Return first non-empty env var from a list of candidate names."""
+    for name in names:
+        value = _env(name)
+        if value is not None:
+            return value
+    return default
+
 # Load environment variables
 env_file = os.getenv('ENV_FILE', '.env.test')
 if not os.path.exists(env_file):
     print(f"Warning: {env_file} not found, using defaults")
 else:
-    load_dotenv(env_file)
+    # override=True ensures values from env_file win over stale shell exports
+    load_dotenv(env_file, override=True)
 
 DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
@@ -42,27 +61,46 @@ Base.metadata.create_all(bind=engine)
 OAUTH_CONFIGS = [
     {
         "platform": "ravelry",
-        "client_id": "PLACEHOLDER_CLIENT_ID",
-        "client_secret": "PLACEHOLDER_CLIENT_SECRET",
-        "redirect_uri": "http://localhost:8000/api/scrapers/oauth/ravelry/callback",
-        "access_token": None,
-        "refresh_token": None,
+        "client_id": _env("RAVELRY_APP_KEY", "PLACEHOLDER_CLIENT_ID"),
+        "client_secret": _env("RAVELRY_APP_SECRET", "PLACEHOLDER_CLIENT_SECRET"),
+        "redirect_uri": _env("RAVELRY_REDIRECT_URI", "http://localhost:8000/api/scrapers/oauth/ravelry/callback"),
+        "access_token": _first_env([
+            "RAVELRY_ACCESS_TOKEN",
+            "RAVELRY_OAUTH_ACCESS_TOKEN",
+            "RAVELRY_OAUTH_TOKEN",
+            "RAVELRY_TOKEN",
+            "RAVELRY_ACCESS",
+            "ACCESS_TOKEN_RAVELRY",
+            "RAVELRY_TOKEN_VALUE",
+            "RAVELRY_AUTH_TOKEN",
+            "ACCESS_TOKEN",
+        ]),
+        "refresh_token": _first_env([
+            "RAVELRY_REFRESH_TOKEN",
+            "RAVELRY_OAUTH_REFRESH_TOKEN",
+            "RAVELRY_TOKEN_REFRESH",
+            "RAVELRY_REFRESH",
+            "REFRESH_TOKEN_RAVELRY",
+            "RAVELRY_TOKEN_REFRESH_VALUE",
+            "RAVELRY_AUTH_REFRESH_TOKEN",
+            "REFRESH_TOKEN",
+        ]),
     },
     {
         "platform": "thingiverse",
-        "client_id": "PLACEHOLDER_CLIENT_ID",
-        "client_secret": "PLACEHOLDER_CLIENT_SECRET",
-        "redirect_uri": "http://localhost:8000/api/scrapers/oauth/thingiverse/callback",
-        "access_token": None,
-        "refresh_token": None,
+        "client_id": _env("THINGIVERSE_CLIENT_ID", "PLACEHOLDER_CLIENT_ID"),
+        "client_secret": _env("THINGIVERSE_CLIENT_SECRET", "PLACEHOLDER_CLIENT_SECRET"),
+        "redirect_uri": _env("THINGIVERSE_REDIRECT_URI", "http://localhost:8000/api/scrapers/oauth/thingiverse/callback"),
+        "access_token": _env("THINGIVERSE_ACCESS_TOKEN"),
+        "refresh_token": _env("THINGIVERSE_REFRESH_TOKEN"),
     },
     {
         "platform": "github",
-        "client_id": "PLACEHOLDER_CLIENT_ID",
-        "client_secret": "PLACEHOLDER_CLIENT_SECRET",
-        "redirect_uri": "http://localhost:8000/api/auth/callback",
-        "access_token": None,
-        "refresh_token": None,
+        "client_id": _env("GITHUB_CLIENT_ID", "PLACEHOLDER_CLIENT_ID"),
+        "client_secret": _env("GITHUB_CLIENT_SECRET", "PLACEHOLDER_CLIENT_SECRET"),
+        "redirect_uri": _env("GITHUB_REDIRECT_URI", "http://localhost:8000/api/auth/callback"),
+        "access_token": _env("GITHUB_ACCESS_TOKEN"),
+        "refresh_token": _env("GITHUB_REFRESH_TOKEN"),
     },
 ]
 

@@ -15,7 +15,11 @@ class Settings(BaseSettings):
     Validates and provides defaults for all configuration values.
     Use DATABASE_URL for SQLite (tests), or SUPABASE_URL/KEY for production.
     """
-    model_config = SettingsConfigDict(env_file=os.getenv("ENV_FILE", ".env"), case_sensitive=True)
+    model_config = SettingsConfigDict(
+        env_file=os.getenv("ENV_FILE", ".env"),
+        case_sensitive=True,
+        extra="ignore",
+    )
     
     # Database (SQLite for tests, Supabase for production)
     DATABASE_URL: Optional[str] = None  # SQLite: sqlite+aiosqlite:///./test.db

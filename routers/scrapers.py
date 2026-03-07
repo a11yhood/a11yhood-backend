@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, B
 from typing import Optional
 from supabase import Client
 import logging
+from datetime import datetime, UTC
 
 from models.scrapers import (
     ScrapingLogResponse,
@@ -543,6 +544,92 @@ async def get_oauth_config(
     return {
         **config,
         "has_access_token": has_token
+    }
+
+
+@router.get("/oauth/ravelry/debug")
+async def get_ravelry_oauth_debug(
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_db),
+):
+    """Return safe diagnostics for Ravelry OAuth state (admin only).
+
+    This endpoint intentionally excludes secrets/tokens and only reports
+    booleans/timestamps/status information to aid backend debugging.
+    """
+    if not current_user.get("role") == "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    response = db.table("oauth_configs").select(
+        "platform,client_id,client_secret,redirect_uri,access_token,refresh_token,token_expires_at,updated_at,created_at"
+    ).eq("platform", "ravelry").limit(1).execute()
+
+    if not response.data:
+        return {
+            "platform": "ravelry",
+            "configured": False,
+            "missing_fields": ["client_id", "client_secret", "redirect_uri", "access_token", "refresh_token"],
+            "ready_for_api_calls": False,
+            "ready_for_refresh": False,
+            "token_expired": None,
+            "token_expires_at": None,
+            "last_scrape_log": None,
+        }
+
+    cfg = response.data[0]
+    has_client_id = bool(cfg.get("client_id"))
+    has_client_secret = bool(cfg.get("client_secret"))
+    has_redirect_uri = bool(cfg.get("redirect_uri"))
+    has_access_token = bool(cfg.get("access_token"))
+    has_refresh_token = bool(cfg.get("refresh_token"))
+
+    missing_fields = []
+    if not has_client_id:
+        missing_fields.append("client_id")
+    if not has_client_secret:
+        missing_fields.append("client_secret")
+    if not has_redirect_uri:
+        missing_fields.append("redirect_uri")
+    if not has_access_token:
+        missing_fields.append("access_token")
+    if not has_refresh_token:
+        missing_fields.append("refresh_token")
+
+    token_expires_at = cfg.get("token_expires_at")
+    token_expired = None
+    if token_expires_at:
+        try:
+            expires_dt = datetime.fromisoformat(str(token_expires_at).replace("Z", "+00:00"))
+            token_expired = expires_dt <= datetime.now(UTC)
+        except Exception:
+            token_expired = None
+
+    last_log_response = db.table("scraping_logs").select(
+        "id,created_at,source,status,products_found,products_added,products_updated,error_message,duration_seconds"
+    ).eq("source", "Ravelry").order("created_at", desc=True).limit(1).execute()
+
+    if not last_log_response.data:
+        # Backward compatibility for lowercase legacy source values.
+        last_log_response = db.table("scraping_logs").select(
+            "id,created_at,source,status,products_found,products_added,products_updated,error_message,duration_seconds"
+        ).eq("source", "ravelry").order("created_at", desc=True).limit(1).execute()
+
+    return {
+        "platform": "ravelry",
+        "configured": True,
+        "has_client_id": has_client_id,
+        "has_client_secret": has_client_secret,
+        "has_redirect_uri": has_redirect_uri,
+        "has_access_token": has_access_token,
+        "has_refresh_token": has_refresh_token,
+        "missing_fields": missing_fields,
+        "ready_for_api_calls": has_access_token,
+        "ready_for_refresh": has_client_id and has_client_secret and has_refresh_token,
+        "token_expires_at": token_expires_at,
+        "token_expired": token_expired,
+        "oauth_config_updated_at": cfg.get("updated_at"),
+        "oauth_config_created_at": cfg.get("created_at"),
+        "last_scrape_log": (last_log_response.data or [None])[0],
     }
 
 

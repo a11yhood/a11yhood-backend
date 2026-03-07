@@ -159,6 +159,10 @@ def setup_test_database(test_settings):
     from previous test runs, ensuring frontend and backend tests use
     the same clean slate.
     """
+    if os.getenv("RUN_AGAINST_SERVER"):
+        print("\n✓ Skipping test database reset (RUN_AGAINST_SERVER=1)")
+        return
+
     test_db = DatabaseAdapter(test_settings)
     test_db.init()  # Create tables
     test_db.cleanup()  # Drop and recreate tables to start fresh

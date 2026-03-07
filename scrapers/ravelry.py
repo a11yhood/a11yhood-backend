@@ -16,7 +16,7 @@ class RavelryScraper(BaseScraper):
     knitting and crochet patterns designed for accessibility needs
     """
     
-    # Personal-attribute slugs for accessibility-related patterns. Include known variants to avoid missing results
+    # Pattern-attribute slugs for accessibility-related patterns. Include known variants to avoid missing results
     # if the API expects the full slug (e.g., "mobility-aid-accessory").
     PA_CATEGORIES = [
         'medical-device-access',
@@ -38,7 +38,6 @@ class RavelryScraper(BaseScraper):
         if access_token:
             default_headers["Authorization"] = f"Bearer {access_token}"
         self.client = httpx.AsyncClient(headers=default_headers)
-        self._refresh_in_progress = False
     
     def get_source_name(self) -> str:
         return 'ravelry'
@@ -81,8 +80,9 @@ class RavelryScraper(BaseScraper):
         return {
             Dict with scraping results (products_found, products_added, etc.)
         """
-        # Initialize test-mode session for global item capping
+        # Initialize test-mode and auth failure tracking
         self._begin_test_session(test_mode, test_limit)
+        self._reset_auth_failure_state()
 
         if not self.access_token:
             raise ValueError("Ravelry access token is required")
@@ -150,28 +150,23 @@ class RavelryScraper(BaseScraper):
                 if test_mode and products_found >= test_limit:
                     break
             
-            duration = (datetime.now(UTC) - start_time).total_seconds()
-            
-            return {
-                'source': 'Ravelry',
-                'products_found': products_found,
-                'products_added': products_added,
-                'products_updated': products_updated,
-                'duration_seconds': duration,
-                'status': 'success',
-            }
+            # Use base class helper to build result with auth failure handling
+            return self._build_scrape_result(
+                start_time=start_time,
+                products_found=products_found,
+                products_added=products_added,
+                products_updated=products_updated
+            )
             
         except Exception as e:
-            duration = (datetime.now(UTC) - start_time).total_seconds()
-            return {
-                'source': 'Ravelry',
-                'products_found': products_found,
-                'products_added': products_added,
-                'products_updated': products_updated,
-                'duration_seconds': duration,
-                'status': 'error',
-                'error_message': str(e),
-            }
+            # Use base class helper to build error result
+            return self._build_scrape_result(
+                start_time=start_time,
+                products_found=products_found,
+                products_added=products_added,
+                products_updated=products_updated,
+                error=e
+            )
     
     async def _search_patterns(self, pa_category: str, page: int) -> Tuple[List[Dict[str, Any]], bool]:
         """Search Ravelry patterns by PA slug.
@@ -179,7 +174,7 @@ class RavelryScraper(BaseScraper):
         Returns a tuple of (patterns, has_more).
         """
         url = f"{self.API_BASE_URL}/patterns/search.json"
-        # Use both 'pa' (UI-style) and 'personal_attributes' (API-style) to be safe
+        # 'pa' is the Ravelry search parameter for pattern attributes
         params = {
             'pa': pa_category,
             'page_size': self.RESULTS_PER_PAGE,
@@ -211,33 +206,14 @@ class RavelryScraper(BaseScraper):
             print(f"[Ravelry] Error fetching pattern {pattern_id}: {e}")
             return None
 
-    async def _get_with_refresh(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """GET helper that refreshes token on 401/403 once before failing"""
-        for attempt in (1, 2):
-            await self._throttle_request()
-            response = await self.client.get(url, params=params)
-            print(f"[Ravelry] HTTP attempt={attempt} status={response.status_code} url={url}")
-            try:
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPStatusError as e:
-                status = e.response.status_code
-                if attempt == 1 and status in (401, 403):
-                    print(f"[Ravelry] Auth status={status}; attempting token refresh...")
-                    refreshed = await self._refresh_access_token()
-                    if refreshed:
-                        print("[Ravelry] Token refreshed; retrying...")
-                        continue
-                raise
-
-    async def _refresh_access_token(self) -> bool:
+    async def _refresh_oauth_token(self) -> bool:
         """Refresh Ravelry OAuth token using stored refresh_token; returns True if refreshed"""
         if self._refresh_in_progress:
             # Avoid concurrent refresh storms
             return False
         self._refresh_in_progress = True
         try:
-            resp = self.supabase.table("oauth_configs").select("client_id, client_secret, refresh_token").eq("platform", "ravelry").limit(1).execute()
+            resp = self.supabase.table("oauth_configs").select("client_id, client_secret, refresh_token, redirect_uri").eq("platform", "ravelry").limit(1).execute()
             cfg = (resp.data or [{}])[0]
             client_id = cfg.get("client_id")
             client_secret = cfg.get("client_secret")
@@ -328,9 +304,9 @@ class RavelryScraper(BaseScraper):
                 if cat_name:
                     tags.append(cat_name)
         
-        # Add personal_attributes (accessibility tags)
-        if pattern.get('personal_attributes'):
-            for pa in pattern['personal_attributes']:
+        # Add pattern_attributes (accessibility and other pattern attributes)
+        if pattern.get('pattern_attributes'):
+            for pa in pattern['pattern_attributes']:
                 if isinstance(pa, dict):
                     pa_name = pa.get('name') or pa.get('permalink', '').replace('-', ' ').title()
                     if pa_name:
@@ -405,7 +381,8 @@ class RavelryScraper(BaseScraper):
                 'pattern_type': pattern.get('pattern_type', {}).get('name') if isinstance(pattern.get('pattern_type'), dict) else pattern.get('pattern_type'),
                 'free': pattern.get('free'),
                 'designer': pattern.get('designer', {}).get('name') if isinstance(pattern.get('designer'), dict) else pattern.get('designer'),
-                'personal_attributes': pattern.get('personal_attributes', []),
+                'pattern_attributes': pattern.get('pattern_attributes', []),
+                'pattern_categories': pattern.get('pattern_categories', []),
             }
         }
     
