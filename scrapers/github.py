@@ -3,6 +3,7 @@ GitHub scraper for accessibility and assistive technology projects
 Uses GitHub REST API to search for repositories focused on assistive technologies
 """
 import httpx
+import math
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from .base_scraper import BaseScraper
@@ -245,18 +246,11 @@ class GitHubScraper(BaseScraper):
         if language and language not in seen:
             tags.append(language)
         
-        # Convert stars to a 5-star rating based on GitHub star distribution
-        # 100,000+ stars = 5, 10,000+ = 4, 1,000+ = 3, 100+ = 2, 10+ = 1
-        if stars > 100000:
-            star_rating = 5.0
-        elif stars > 10000:
-            star_rating = 4.0
-        elif stars > 1000:
-            star_rating = 3.0
-        elif stars > 100:
-            star_rating = 2.0
-        elif stars > 10:
-            star_rating = 1.0
+        # Convert stars to a continuous 1–5 rating using a log10 scale.
+        # log10(10)=1, log10(100)=2, log10(1000)=3, log10(10000)=4, log10(100000)=5.
+        # Values are clamped to [1.0, 5.0]; repos with 0 stars receive no rating.
+        if stars > 0:
+            star_rating = round(min(max(math.log10(stars), 1.0), 5.0), 2)
         else:
             star_rating = None
         
