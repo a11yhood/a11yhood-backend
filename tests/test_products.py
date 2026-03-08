@@ -507,6 +507,48 @@ def test_products_pagination_with_filters(client, clean_database, test_user):
     assert returned_ids == [p["id"] for p in expected_slice]
 
 
+def test_sort_by_rating_uses_recency_as_secondary_sort(client, clean_database, test_user):
+    """When sort_by=rating, products with equal ratings should be ordered by created_at desc."""
+    base_time = datetime.now(UTC).replace(tzinfo=None)
+    older_id = str(uuid.uuid4())
+    newer_id = str(uuid.uuid4())
+
+    clean_database.table("products").insert([
+        {
+            "id": older_id,
+            "name": "SortRatingRecency Older",
+            "description": "SortRatingRecency",
+            "source": "Github",
+            "type": "Software",
+            "computed_rating": 4.0,
+            "url": "https://github.com/example/sort-rating-older",
+            "created_by": test_user["id"],
+            "created_at": base_time,
+        },
+        {
+            "id": newer_id,
+            "name": "SortRatingRecency Newer",
+            "description": "SortRatingRecency",
+            "source": "Github",
+            "type": "Software",
+            "computed_rating": 4.0,
+            "url": "https://github.com/example/sort-rating-newer",
+            "created_by": test_user["id"],
+            "created_at": base_time + timedelta(minutes=5),
+        },
+    ]).execute()
+
+    resp = client.get("/api/products?search=SortRatingRecency&sort_by=rating&sort_order=desc")
+    assert resp.status_code == 200
+    data = resp.json()
+    ids = [p["id"] for p in data]
+
+    assert newer_id in ids
+    assert older_id in ids
+    # Newer product should appear before older when ratings are equal
+    assert ids.index(newer_id) < ids.index(older_id)
+
+
 def test_get_product_not_found(client):
     response = client.get("/api/products/nonexistent")
     assert response.status_code == 404
