@@ -60,6 +60,7 @@ def seed_users():
     db = DatabaseAdapter(settings)
 
     print(f"Using Supabase: {settings.SUPABASE_URL}")
+
     print("Upserting test users...\n")
 
     for user in TEST_USERS:

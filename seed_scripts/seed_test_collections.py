@@ -27,7 +27,7 @@ from database_adapter import DatabaseAdapter
 # Fixed collection IDs for stable test references
 TEST_COLLECTIONS = [
     {
-        "id": "coll-admin-public-001",
+        "id": "11111111-1111-1111-1111-111111111001",
         "slug": "accessible-software-tools",
         "user_id": "49366adb-2d13-412f-9ae5-4c35dbffab10",  # admin_user
         "user_name": "admin_user",
@@ -36,7 +36,7 @@ TEST_COLLECTIONS = [
         "is_public": True,
     },
     {
-        "id": "coll-regular-private-001",
+        "id": "11111111-1111-1111-1111-111111111002",
         "slug": "my-personal-collection",
         "user_id": "2a3b7c3e-971b-4b42-9c8c-0f1843486c50",  # regular_user
         "user_name": "regular_user",
@@ -45,7 +45,7 @@ TEST_COLLECTIONS = [
         "is_public": False,
     },
     {
-        "id": "coll-admin-public-002",
+        "id": "11111111-1111-1111-1111-111111111003",
         "slug": "empty-collection",
         "user_id": "49366adb-2d13-412f-9ae5-4c35dbffab10",  # admin_user
         "user_name": "admin_user",
@@ -57,7 +57,7 @@ TEST_COLLECTIONS = [
 
 # Products to add to collections: (collection_id, product_slug)
 COLLECTION_PRODUCTS = [
-    ("coll-admin-public-001", "test-product"),
+    ("11111111-1111-1111-1111-111111111001", "test-product"),
 ]
 
 

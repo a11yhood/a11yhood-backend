@@ -70,22 +70,23 @@ def main():
 
     print("Seeding scraper_search_terms table...")
 
+    # Insert individual terms (normalized format after 20251228 migration)
+    # The table now has one row per search_term, not an array
+    count = 0
     for seed in SEEDS:
         platform = seed["platform"]
-        terms = seed["search_terms"]
-        try:
-            result = db.table("scraper_search_terms").upsert(
-                {"platform": platform, "search_terms": terms},
-                on_conflict="platform",
-            ).execute()
-            if result.data:
-                print(f"  ✓ {platform} ({len(terms)} terms)")
-            else:
-                print(f"  ? {platform}: no data returned")
-        except Exception as e:
-            print(f"  ✗ {platform}: {e}")
+        for term in seed["search_terms"]:
+            try:
+                result = db.table("scraper_search_terms").upsert(
+                    {"platform": platform, "search_term": term},
+                    on_conflict="platform,search_term",
+                ).execute()
+                if result.data:
+                    count += 1
+            except Exception as e:
+                print(f"  ✗ {platform}/{term}: {e}")
 
-    print("✓ Scraper search terms seeded.")
+    print(f"✓ Scraper search terms seeded. ({count} terms)")
 
 
 if __name__ == "__main__":

@@ -209,6 +209,14 @@ def _seed_test_data(db):
 
     Uses fixed user IDs from TEST_USERS so dev-token auth works consistently.
     Inserts are best-effort; errors are silently ignored (data may already exist).
+
+    Includes:
+    - supported_sources (minimal canonical set used by validation and filters)
+    - users/products (fixed IDs and deterministic baseline entities)
+    - scraper_search_terms (from seed_scraper_search_terms.py; enables scraper tests)
+
+    Intentionally excludes oauth_configs and collections. Tests assert behavior when those
+    tables begin empty and create rows explicitly via dedicated fixtures.
     """
     from services.id_generator import normalize_to_snake_case
 
@@ -223,7 +231,55 @@ def _seed_test_data(db):
             db.table("supported_sources").insert(source).execute()
         except Exception as exc:
             # Best-effort seed; ignore insert errors (data may already exist), but log them.
-            logger.debug("Ignoring error seeding supported_source %r: %s", source, exc)
+            logger.debug("Ignoring error seeding supported_source %r: %s", source, exc, exc_info=True)
+
+    # Scraper search terms (kept aligned with seed_scripts/seed_scraper_search_terms.py)
+    scraper_search_terms = [
+        {
+            "platform": "github",
+            "search_terms": [
+                "assistive technology",
+                "screen reader",
+                "eye tracking",
+                "speech recognition",
+                "switch access",
+                "alternative input",
+                "text-to-speech",
+                "voice control",
+                "accessibility aid",
+                "mobility aid software",
+            ],
+        },
+        {
+            "platform": "thingiverse",
+            "search_terms": [
+                "accessibility",
+                "assistive+device",
+                "arthritis+grip",
+                "adaptive+tool",
+                "mobility+aid",
+                "tremor+stabilizer",
+                "adaptive+utensil",
+            ],
+        },
+        {
+            "platform": "ravelry_pa_categories",
+            "search_terms": [
+                "medical-device-access",
+                "medical-device-accessory",
+                "mobility-aid-accessory",
+                "other-accessibility",
+                "adaptive",
+                "therapy-aid",
+            ],
+        },
+    ]
+    for row in scraper_search_terms:
+        try:
+            db.table("scraper_search_terms").upsert(row, on_conflict="platform").execute()
+        except Exception as exc:
+            # Keep seed resilient across schema variants (array vs normalized search terms).
+            logger.debug("Ignoring error seeding scraper_search_terms %r: %s", row, exc, exc_info=True)
 
     # Test users with fixed IDs (match DEV_USER_IDS in services/auth.py)
     for user in TEST_USERS:
@@ -231,7 +287,7 @@ def _seed_test_data(db):
             db.table("users").insert(user).execute()
         except Exception as exc:
             # See _seed_test_data docstring: user seed is best-effort and idempotent.
-            logger.debug("Ignoring error seeding user %r: %s", user, exc)
+            logger.debug("Ignoring error seeding user %r: %s", user, exc, exc_info=True)
 
     # Test products
     for product in TEST_PRODUCTS:
@@ -249,7 +305,7 @@ def _seed_test_data(db):
             db.table("products").insert(p).execute()
         except Exception as exc:
             # Product seed is also best-effort; log and continue if insert fails.
-            logger.debug("Ignoring error seeding product %r: %s", product, exc)
+            logger.debug("Ignoring error seeding product %r: %s", product, exc, exc_info=True)
 
 
 @pytest.fixture

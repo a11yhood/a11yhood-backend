@@ -48,6 +48,25 @@ The `.env.test` configuration uses the `a11yhood-test` Supabase database with pr
 
 The application always uses Supabase. The `.env.test` file points at the `a11yhood-test` test project.
 
+### Apply Migrations (Schema Setup)
+
+Schema is not auto-applied by app startup or pytest. Apply all SQL migrations before seeding/tests:
+
+```bash
+# Option 1: put SUPABASE_DB_URL in .env.test
+./scripts/apply-migrations.sh
+
+# Option 2: run against production/staging env file
+./scripts/apply-migrations.sh --env-file .env
+
+# Option 3: pass DB URL directly
+SUPABASE_DB_URL='postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require' \
+	./scripts/apply-migrations.sh
+```
+
+The script applies all `migrations/*.sql` files in timestamp order and tracks applied files in
+`public.schema_migrations`, so re-running is safe.
+
 ### Seed Test Data
 
 ```bash

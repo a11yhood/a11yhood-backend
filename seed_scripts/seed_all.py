@@ -43,6 +43,9 @@ def run_seed(script_name: str, module_name: str, function_name: str = "main") ->
     """Import *module_name* and call *function_name*. Returns True on success."""
     try:
         logger.info(f"Running {script_name}...")
+        # Ensure seed_scripts is on sys.path so relative imports work
+        if SEED_DIR not in sys.path:
+            sys.path.insert(0, SEED_DIR)
         module = __import__(module_name)
         if hasattr(module, function_name):
             getattr(module, function_name)()

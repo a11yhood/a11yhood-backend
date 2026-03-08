@@ -4,8 +4,11 @@ Database adapter for Supabase.
 Always uses Supabase for both production and testing.
 Configure SUPABASE_URL/SUPABASE_KEY in .env (production) or .env.test (test instance).
 """
+import logging
 from typing import Optional
 from contextvars import ContextVar
+
+logger = logging.getLogger(__name__)
 
 # Per-request Supabase JWT for RLS-aware queries
 _supabase_auth_token: ContextVar[Optional[str]] = ContextVar("supabase_auth_token", default=None)
@@ -25,7 +28,7 @@ class DatabaseAdapter:
     """
     Database adapter for Supabase.
 
-    Always uses Supabase - configured via SUPABASE_URL and SUPABASE_KEY.
+    Configured via SUPABASE_URL and SUPABASE_KEY.
     Use .env for production, .env.test for the test Supabase instance.
     """
 
@@ -86,8 +89,8 @@ class DatabaseAdapter:
             self.supabase.table("collection_products").delete().gte(
                 "collection_id", "00000000-0000-0000-0000-000000000000"
             ).execute()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to cleanup table 'collection_products': %s", exc)
 
         # All remaining tables use a UUID "id" column.
         uuid_tables = [t for t in self._TEST_TABLES_ORDER if t != "collection_products"]
@@ -96,8 +99,8 @@ class DatabaseAdapter:
                 self.supabase.table(table).delete().gte(
                     "id", "00000000-0000-0000-0000-000000000000"
                 ).execute()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to cleanup table '%s': %s", table, exc)
 
     def table(self, table_name: str):
         """Return the Supabase table query builder for *table_name*."""
