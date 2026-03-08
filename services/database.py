@@ -1,22 +1,21 @@
-"""Database access layer providing unified interface to SQLite and Supabase.
+"""Database access layer providing the Supabase-backed DatabaseAdapter.
 
-Uses database_adapter for automatic backend selection based on settings.
+Uses Supabase for all environments; configure SUPABASE_URL/KEY in .env or .env.test.
 """
 from typing import Optional
 from fastapi import HTTPException
 from config import settings
 from database_adapter import DatabaseAdapter, set_supabase_auth_token
 
-# Initialize database adapter - automatically chooses SQLite (if DATABASE_URL set) or Supabase
+# Initialize database adapter using Supabase (configured via .env / .env.test)
 db_adapter = DatabaseAdapter(settings)
 db_adapter.init()
 
 
 def get_db():
     """
-    Dependency for FastAPI endpoints to get database adapter.
-    Works with both SQLite (test) and Supabase (production).
-    
+    Dependency for FastAPI endpoints to get the Supabase database adapter.
+
     Usage:
         @app.get("/example")
         def example(db = Depends(get_db)):

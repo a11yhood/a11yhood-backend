@@ -444,15 +444,12 @@ async def get_product_types(
         except Exception:
             # Fallback to distinct query
             try:
-                if getattr(db, "backend", None) == "supabase":
-                    resp = db.table("products").select("type", distinct=True).execute()
-                    product_types = {
-                        str(row.get("type")).strip()
-                        for row in (resp.data or [])
-                        if row.get("type") and str(row.get("type")).strip()
-                    }
-                else:
-                    raise TypeError("distinct not supported for this backend")
+                resp = db.table("products").select("type", distinct=True).execute()
+                product_types = {
+                    str(row.get("type")).strip()
+                    for row in (resp.data or [])
+                    if row.get("type") and str(row.get("type")).strip()
+                }
             except TypeError:
                 # Final fallback: paginate (slow but works)
                 page_size = 1000
@@ -1235,18 +1232,9 @@ async def update_product(
     # Check if user is in product_editors if not creator/admin/moderator
     is_editor = False
     if not is_creator and not is_admin_or_moderator:
-        # Need to check product_editors table
         from services.database import db_adapter
-        # In test environment (SQLite), use the database adapter's table API
-        if db_adapter.supabase is not None:
-            # Production: use Supabase client with service key to avoid RLS issues
-            editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-            is_editor = bool(editors_check.data)
-        else:
-            # Test environment: use database adapter's table API
-            from database_adapter import ProductEditor
-            editor_check = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-            is_editor = bool(editor_check.data)
+        editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+        is_editor = bool(editors_check.data)
     
     # Require at least one authorization path
     if not (is_creator or is_admin_or_moderator or is_editor):
@@ -1345,18 +1333,9 @@ async def patch_product(
     # Check if user is in product_editors if not creator/admin/moderator
     is_editor = False
     if not is_creator and not is_admin_or_moderator:
-        # Need to check product_editors table
         from services.database import db_adapter
-        # In test environment (SQLite), use the database adapter's query methods
-        if db_adapter.supabase is not None:
-            # Production: use Supabase client with service key to avoid RLS issues
-            editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-            is_editor = bool(editors_check.data)
-        else:
-            # Test environment: use database adapter's table API
-            from database_adapter import ProductEditor
-            editor_check = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-            is_editor = bool(editor_check.data)
+        editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+        is_editor = bool(editors_check.data)
     
     # Require at least one authorization path
     if not (is_creator or is_admin_or_moderator or is_editor):
@@ -1539,24 +1518,17 @@ async def bulk_delete_products(
         # Canonicalize provided source to match supported_sources capitalization
         canonical_source = _canonicalize_source_value_db(db, source_value) if source_value else None
 
-        def _supabase_query_factory() -> Callable[[], any]:
-            if canonical_source:
-                return lambda: db.supabase.table("products").select("id").eq("source", canonical_source)
-            return lambda: db.supabase.table("products").select("id").in_("id", normalized_product_ids)
-
-        def _sqlite_query():
-            if canonical_source:
-                return db.table("products").select("id").eq("source", canonical_source)
-            return db.table("products").select("id").in_("id", normalized_product_ids)
-
-        def _fetch_ids_supabase() -> list[str]:
+        def _fetch_ids() -> list[str]:
             # Paginate to avoid 206 partial responses and limits
             ids: list[str] = []
             page_size = 500
             offset = 0
-            query_factory = _supabase_query_factory()
             while True:
-                resp = query_factory().range(offset, offset + page_size - 1).execute()
+                if canonical_source:
+                    q = db.supabase.table("products").select("id").eq("source", canonical_source)
+                else:
+                    q = db.supabase.table("products").select("id").in_("id", normalized_product_ids)
+                resp = q.range(offset, offset + page_size - 1).execute()
                 rows = resp.data or []
                 if not rows:
                     break
@@ -1566,20 +1538,13 @@ async def bulk_delete_products(
                 offset += page_size
             return ids
 
-        def _fetch_ids_sqlite() -> list[str]:
-            resp = _sqlite_query().execute()
-            return [row["id"] for row in (resp.data or []) if row.get("id")]
-
-        if getattr(db, "backend", None) == "supabase":
-            ids_to_delete = list(dict.fromkeys(_fetch_ids_supabase()))
-        else:
-            ids_to_delete = list(dict.fromkeys(_fetch_ids_sqlite()))
+        ids_to_delete = list(dict.fromkeys(_fetch_ids()))
 
         if not ids_to_delete:
             return {"deleted_count": 0, "message": "No products found matching criteria"}
 
         print(f"[Bulk Delete] About to delete {len(ids_to_delete)} products: {ids_to_delete[:5]}...")
-        print(f"[Bulk Delete] Backend type: {getattr(db, 'backend', 'unknown')}")
+        print(f"[Bulk Delete] Backend type: supabase")
 
         async def _delete_supabase(ids: list[str]) -> int:
             # Use REST endpoint with Prefer:return=minimal to avoid JSON serialization errors
@@ -1603,10 +1568,7 @@ async def bulk_delete_products(
                     deleted += len(chunk)
             return deleted
 
-        if getattr(db, "backend", None) == "supabase":
-            await _delete_supabase(ids_to_delete)
-        else:
-            db.table("products").delete().in_("id", ids_to_delete).execute()
+        await _delete_supabase(ids_to_delete)
 
         print(f"[Bulk Delete] Delete completed for {len(ids_to_delete)} IDs")
 

@@ -2,14 +2,9 @@
 -- Issue: Multiple RLS policies were re-evaluating auth.uid() and auth.role() 
 -- for each row, producing suboptimal query performance at scale.
 -- Solution: Replace auth.<function>() with (select auth.<function>()) to evaluate once per query.
--- Reference: https://supabase.com/docs/guides/auth/row-level-security
 
 -- ============================================================================
--- Users table: Consolidate multiple SELECT and UPDATE policies
 -- ============================================================================
--- Issue: Multiple permissive policies for authenticated role on SELECT and UPDATE actions
--- Solution: Consolidate into single optimized policies
-
 DROP POLICY IF EXISTS users_select_self_or_admin ON public.users;
 DROP POLICY IF EXISTS "Users are viewable by everyone" ON public.users;
 
@@ -265,6 +260,7 @@ CREATE POLICY "Users can delete own collections"
 -- each policy to be executed for every query. Combining them improves performance.
 DROP POLICY IF EXISTS "Public collections are viewable by everyone" ON public.collections;
 DROP POLICY IF EXISTS "Users can view own collections" ON public.collections;
+DROP POLICY IF EXISTS "Collections viewable by public or owner" ON public.collections;
 
 CREATE POLICY "Collections viewable by public or owner" 
   ON public.collections FOR SELECT 
@@ -344,7 +340,7 @@ CREATE POLICY "Users can update own products or admins can update all"
     EXISTS (SELECT 1 FROM users WHERE id = (select auth.uid()) AND role IN ('admin', 'moderator'))
   );
 
-- ============================================================================
+-- ============================================================================
 -- Collection Products table: Combine multiple SELECT policies into single optimized policy
 -- ============================================================================
 -- Issue: Multiple permissive SELECT policies on collection_products were causing

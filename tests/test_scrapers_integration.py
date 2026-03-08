@@ -37,7 +37,7 @@ async def test_github_scraper_real_data(clean_database, test_settings, test_admi
     This test:
     - Makes actual GitHub API requests
     - Scrapes 5 real repositories
-    - Saves them to test database (SQLite)
+    - Saves them to the Supabase test database
     - Verifies data structure and content
     """
     scraper = GitHubScraper(clean_database)

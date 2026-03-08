@@ -15,6 +15,7 @@ from datetime import datetime, UTC
 from services.auth import get_current_user
 from services.database import get_db
 from services.sources import extract_domain
+import logging
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
 
@@ -284,14 +285,15 @@ def _grant_permission(db, request_data: dict):
         db.table("product_editors").insert(owner_data).execute()
     
     elif request_type in ['moderator', 'admin']:
-        # Update user role
-        # Note: In Supabase this would update user metadata
-        # For SQLite tests, we update the users table
+        # Update user role in the users table
         try:
             db.table("users").update({"role": request_type}).eq("id", user_id).execute()
-        except:
-            # User might not exist in users table yet (using Supabase Auth)
-            pass
+        except Exception:
+            # Do not fail the overall approval if role update fails, but log for investigation.
+            logging.exception(
+                "Failed to update user role during permission grant",
+                extra={"user_id": user_id, "request_type": request_type},
+            )
 
     elif request_type == 'source-domain':
         # Auto-add supported source domain if not present

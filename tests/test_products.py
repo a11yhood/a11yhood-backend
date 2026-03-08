@@ -1,4 +1,4 @@
-"""Test product endpoints using the local SQLite database"""
+"""Test product endpoints using the Supabase test database"""
 import pytest
 import uuid
 from datetime import datetime, UTC, timedelta
@@ -318,10 +318,7 @@ def test_get_products_filters_by_min_display_rating(client, clean_database, test
         {"product_id": mixed_id, "user_id": test_user["id"], "rating": 4},
         {"product_id": user_only_id, "user_id": test_user["id"], "rating": 5},
     ]).execute()
-    
-    # Manually update computed_rating since SQLite doesn't have the trigger
-    clean_database.table("products").update({"computed_rating": 4.0}).eq("id", mixed_id).execute()
-    clean_database.table("products").update({"computed_rating": 5.0}).eq("id", user_only_id).execute()
+    # computed_rating is updated automatically by the Supabase trigger on ratings insert
 
     resp = client.get("/api/products?search=RatingCase&min_rating=3.5")
     assert resp.status_code == 200

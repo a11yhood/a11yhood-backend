@@ -6,9 +6,9 @@ This guide helps you quickly switch between test and production environments.
 
 | Command | Environment | Database | OAuth | Purpose |
 |---------|------------|----------|-------|---------|
-| `./start-dev.sh` | Test | SQLite | Mock | Development & testing |
-| `./start-prod.sh` | Production | Supabase | Real | Production validation (local) |
-| `./run-tests.sh` | Test | SQLite | Mock | Run automated tests |
+| `./start-dev.sh` | Test | Supabase (test) | Mock | Development & testing |
+| `./start-prod.sh` | Production | Supabase (production) | Real | Production validation (local) |
+| `./run-tests.sh` | Test | Supabase (test) | Mock | Run automated tests |
 
 ## Test Environment (Development)
 
@@ -20,17 +20,16 @@ This guide helps you quickly switch between test and production environments.
 **Configuration**:
 - Backend: `.env.test`
 
-**Database**: Local SQLite (`test.db`)
+**Database**: Supabase test instance (`a11yhood-test` in `make4all-test` org)
 
 **Users**: Seeded test users (admin_user, moderator_user, regular_user)
 
-**OAuth**: Mock GitHub OAuth (select test user from dropdown)
+**OAuth**: Mock GitHub OAuth (dev tokens accepted when TEST_MODE=true)
 
 **Features**:
-- Fast database reset (`./start-dev.sh --reset-db`)
 - Deterministic test data
-- No internet required (except for scraping)
-- Safe to experiment - data is ephemeral
+- Test data seeded via `seed_scripts/seed_all.py`
+- Safe to experiment - test database is separate from production
 
 ## Production Environment (Local with Production DB)
 
@@ -167,9 +166,8 @@ kill $(lsof -t -i:8000)  # Backend
 | Variable | Test Value | Production Value |
 |----------|-----------|-----------------|
 | `ENV_FILE` | `.env.test` | `.env` |
-| `DATABASE_URL` | `sqlite:///./test.db` | (not set - uses Supabase) |
-| `SUPABASE_URL` | (not set) | `https://xxx.supabase.co` |
-| `SUPABASE_KEY` | (not set) | Service role key |
+| `SUPABASE_URL` | Test Supabase URL | Production Supabase URL |
+| `SUPABASE_KEY` | Test service role key | Production service role key |
 | `TEST_MODE` | `true` | `false` |
 | `SECRET_KEY` | Dev default | **Generate new!** |
 | `GITHUB_CLIENT_ID` | (optional for test) | Required for auth |
@@ -180,7 +178,7 @@ kill $(lsof -t -i:8000)  # Backend
 ### "Backend won't start"
 
 ```bash
-# Check if .env exists (for production) or .env.test (for test)
+# Check if .env.test exists (for test) or .env (for production)
 ls -la .env*
 
 # Check if port is already in use
@@ -194,7 +192,7 @@ pkill -f uvicorn
 ### "OAuth not working"
 
 **Test Environment**:
-- OAuth is mocked - just select a user from dropdown
+- Uses dev tokens (dev-token-<user_id>) when TEST_MODE=true
 - No real GitHub OAuth needed
 
 **Production Environment**:
@@ -206,29 +204,25 @@ pkill -f uvicorn
 ### "Database connection failed"
 
 **Test Environment**:
-- Check `test.db` exists
-- If corrupted, delete it: `rm test.db`
-- Restart: `./start-dev.sh` (will recreate database)
+- Verify `SUPABASE_URL` and `SUPABASE_KEY` are set in `.env.test`
+- Check Supabase test project is active at https://supabase.com/dashboard
+- Run: `uv run python -c "from config import get_settings; from database_adapter import DatabaseAdapter; db = DatabaseAdapter(get_settings()); print(db.table('users').select('id').limit(1).execute())"`
 
 **Production Environment**:
 - Verify `SUPABASE_URL` and `SUPABASE_KEY` in `.env`
 - Check Supabase project is active at https://supabase.com/dashboard
-- Verify network connectivity: `ping db.YOUR_PROJECT.supabase.co`
-- Check Supabase logs for connection errors
 
 ### "Tests failing"
 
 ```bash
-# Make sure you're using test environment
-./stop-prod.sh
-./start-dev.sh
+# Make sure SUPABASE credentials are in .env.test
+cat .env.test | grep SUPABASE
 
-# Reset database and try again
-./start-dev.sh --reset-db
-./run-tests.sh
+# Seed test data
+uv run python seed_scripts/seed_all.py
 
-# Check test.db permissions
-ls -la test.db
+# Run specific test file
+uv run pytest tests/test_products.py -v
 ```
 
 ## Quick Commands Reference
