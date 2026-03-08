@@ -415,8 +415,7 @@ class SQLiteTable:
         self._delete = False
         self._limit_val = None
         self._offset_val = None
-        self._order_col = None
-        self._order_desc = False
+        self._order_clauses: list = []  # list of (column, desc)
         
         if not self.model:
             raise ValueError(f"Unknown table: {table_name}")
@@ -492,10 +491,18 @@ class SQLiteTable:
         self._filters.append((column, "in", values))
         return self
     
-    def order(self, column: str, desc: bool = False):
-        """Order results"""
-        self._order_col = column
-        self._order_desc = desc
+    def order(self, column: str, desc: bool = False, nullsfirst: bool = True):
+        """Order results. Multiple calls add secondary sort keys.
+
+        Args:
+            column: The column name to sort by.
+            desc: If True, sort descending; otherwise ascending.
+            nullsfirst: Accepted for Supabase API compatibility; ignored for SQLite.
+
+        Returns:
+            self (for method chaining)
+        """
+        self._order_clauses.append((column, desc))
         return self
     
     def delete(self):
@@ -594,9 +601,10 @@ class SQLiteTable:
                 query = session.query(self.model)
                 query = self._apply_filters(query)
                 
-                if self._order_col:
-                    col = getattr(self.model, self._order_col)
-                    query = query.order_by(col.desc() if self._order_desc else col)
+                if self._order_clauses:
+                    for col_name, is_desc in self._order_clauses:
+                        col = getattr(self.model, col_name)
+                        query = query.order_by(col.desc() if is_desc else col)
                 
                 if self._offset_val is not None:
                     query = query.offset(self._offset_val)

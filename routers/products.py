@@ -692,6 +692,8 @@ async def get_products(
     # For rating sort, put NULL values last regardless of sort direction
     if sort_by == "rating":
         query = query.order(sort_field, desc=is_desc, nullsfirst=False)
+        # Apply recency as a secondary sort key so ties are broken by most recent first
+        query = query.order("created_at", desc=True)
     else:
         query = query.order(sort_field, desc=is_desc)
     
