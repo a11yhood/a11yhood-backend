@@ -490,14 +490,22 @@ async def save_oauth_token(
         config_response = db.table("oauth_configs").select("*").eq("platform", platform).execute()
         logger.debug(f"Config response: {config_response.data}")
         
-        update_data = {
-            "access_token": token_data.get("access_token"),
-            "refresh_token": token_data.get("refresh_token"),
-        }
+        # Build update data with all provided fields
+        update_data = {}
+        if "client_id" in token_data:
+            update_data["client_id"] = token_data["client_id"]
+        if "client_secret" in token_data:
+            update_data["client_secret"] = token_data["client_secret"]
+        if "redirect_uri" in token_data:
+            update_data["redirect_uri"] = token_data["redirect_uri"]
+        if "access_token" in token_data:
+            update_data["access_token"] = token_data["access_token"]
+        if "refresh_token" in token_data:
+            update_data["refresh_token"] = token_data["refresh_token"]
         
         if config_response.data:
-            # Update existing config
-            logger.info(f"Updating existing config for {platform}")
+            # Update existing config with all provided fields
+            logger.info(f"Updating existing config for {platform} with fields: {list(update_data.keys())}")
             db.table("oauth_configs").update(update_data).eq("platform", platform).execute()
         else:
             # Create new config with minimal data
@@ -507,7 +515,8 @@ async def save_oauth_token(
                 "client_id": token_data.get("client_id", ""),
                 "client_secret": token_data.get("client_secret", ""),
                 "redirect_uri": token_data.get("redirect_uri", ""),
-                **update_data
+                "access_token": token_data.get("access_token"),
+                "refresh_token": token_data.get("refresh_token"),
             }
             logger.debug(f"Inserting config data: {config_data}")
             db.table("oauth_configs").insert(config_data).execute()
