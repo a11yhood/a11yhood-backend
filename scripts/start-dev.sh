@@ -164,6 +164,15 @@ fi
 # Seed database if requested
 if [ "$SEED_DB" = true ]; then
   echo ""
+  echo -e "${YELLOW}🧱 Applying SQL migrations...${NC} (t=$(ts))"
+  if ./scripts/apply-migrations.sh >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ Migrations applied${NC}"
+  else
+    echo -e "${RED}✗ Migration apply failed${NC}"
+    echo "  Ensure SUPABASE_DB_URL or DATABASE_URL is configured (for ENV_FILE=.env.test)"
+    exit 1
+  fi
+
   echo -e "${YELLOW}🌱 Seeding database inside container...${NC} (t=$(ts))"
   if docker exec -w /app a11yhood-backend-dev bash -c "export ENV_FILE=.env.test && /usr/local/bin/python3 seed_scripts/seed_all.py" >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Database seeded${NC}"
