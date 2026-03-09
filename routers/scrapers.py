@@ -716,15 +716,25 @@ async def disconnect_oauth(
     current_user: dict = Depends(get_current_user),
     db = Depends(get_db),
 ):
-    """Delete OAuth token for a platform (admin only)"""
+    """Clear OAuth tokens for a platform (admin only) - preserves config for reconnect"""
     if not current_user.get("role") == "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     
-    # Delete the entire oauth_configs entry for this platform
-    response = db.table("oauth_configs").delete().eq("platform", platform).execute()
+    # Check if config exists
+    existing = db.table("oauth_configs").select("*").eq("platform", platform).execute()
     
-    if response.count == 0:
+    if not existing.data:
         raise HTTPException(status_code=404, detail=f"No OAuth config found for {platform}")
+    
+    # Clear tokens but preserve config fields (client_id, client_secret, redirect_uri)
+    # This allows reconnecting without re-entering credentials
+    update_data = {
+        "access_token": None,
+        "refresh_token": None,
+        "token_expires_at": None,
+    }
+    
+    db.table("oauth_configs").update(update_data).eq("platform", platform).execute()
     
     return None
 
