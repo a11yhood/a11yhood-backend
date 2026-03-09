@@ -34,6 +34,17 @@ def _first_env(names: list[str], default: str | None = None) -> str | None:
             return value
     return default
 
+
+def _get_ravelry_redirect_uri() -> str:
+    """Return redirect URI used for Ravelry OAuth token refresh."""
+    # Allow explicit override first.
+    explicit_uri = _env("RAVELRY_REDIRECT_URI")
+    if explicit_uri:
+        return explicit_uri
+    # Default to frontend admin route used in production.
+    return "https://a11yhood.org/admin"
+
+
 # Load environment variables
 env_file = os.getenv('ENV_FILE', '.env.test')
 if not os.path.exists(env_file):
@@ -63,7 +74,7 @@ OAUTH_CONFIGS = [
         "platform": "ravelry",
         "client_id": _env("RAVELRY_APP_KEY", "PLACEHOLDER_CLIENT_ID"),
         "client_secret": _env("RAVELRY_APP_SECRET", "PLACEHOLDER_CLIENT_SECRET"),
-        "redirect_uri": _env("RAVELRY_REDIRECT_URI", "http://localhost:8000/api/scrapers/oauth/ravelry/callback"),
+        "redirect_uri": _get_ravelry_redirect_uri(),
         "access_token": _first_env([
             "RAVELRY_ACCESS_TOKEN",
             "RAVELRY_OAUTH_ACCESS_TOKEN",
@@ -90,7 +101,7 @@ OAUTH_CONFIGS = [
         "platform": "thingiverse",
         "client_id": _env("THINGIVERSE_CLIENT_ID", "PLACEHOLDER_CLIENT_ID"),
         "client_secret": _env("THINGIVERSE_CLIENT_SECRET", "PLACEHOLDER_CLIENT_SECRET"),
-        "redirect_uri": _env("THINGIVERSE_REDIRECT_URI", "http://localhost:8000/api/scrapers/oauth/thingiverse/callback"),
+        "redirect_uri": None,
         "access_token": _env("THINGIVERSE_ACCESS_TOKEN"),
         "refresh_token": _env("THINGIVERSE_REFRESH_TOKEN"),
     },
@@ -98,7 +109,7 @@ OAUTH_CONFIGS = [
         "platform": "github",
         "client_id": _env("GITHUB_CLIENT_ID", "PLACEHOLDER_CLIENT_ID"),
         "client_secret": _env("GITHUB_CLIENT_SECRET", "PLACEHOLDER_CLIENT_SECRET"),
-        "redirect_uri": _env("GITHUB_REDIRECT_URI", "http://localhost:8000/api/auth/callback"),
+        "redirect_uri": None,
         "access_token": _env("GITHUB_ACCESS_TOKEN"),
         "refresh_token": _env("GITHUB_REFRESH_TOKEN"),
     },
