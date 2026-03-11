@@ -509,12 +509,14 @@ async def save_oauth_token(
         config_response = db.table("oauth_configs").select("*").eq("platform", platform).execute()
         logger.debug(f"Config response: {config_response.data}")
         
-        # Build update data - redirect_uri is managed server-side only
+        # Build update data with all provided fields
         update_data = {}
         if "client_id" in token_data:
             update_data["client_id"] = token_data["client_id"]
         if "client_secret" in token_data:
             update_data["client_secret"] = token_data["client_secret"]
+        if "redirect_uri" in token_data:
+            update_data["redirect_uri"] = token_data["redirect_uri"]
         if "access_token" in token_data:
             update_data["access_token"] = token_data["access_token"]
         if "refresh_token" in token_data:
