@@ -282,6 +282,32 @@ class TestGetCollectionDetails:
         response = client.get(f"/api/collections/{uuid.uuid4()}")
         assert response.status_code == 404
 
+    def test_get_collection_details_includes_product_slugs(self, client, test_user, test_product, auth_headers):
+        """Test that get collection by slug/id returns product_slugs (not just product_ids)"""
+        # Create a collection and add a product
+        create_response = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Slug Test Collection"}
+        )
+        assert create_response.status_code == 201
+        collection_id = create_response.json()["id"]
+        collection_slug = create_response.json()["slug"]
+
+        # Add the test product
+        add_response = client.post(
+            f"/api/collections/{collection_slug}/products/{test_product['slug']}",
+            headers=auth_headers(test_user)
+        )
+        assert add_response.status_code == 200
+
+        # Fetch by slug directly (simulates direct URL load)
+        response = client.get(f"/api/collections/{collection_slug}")
+        assert response.status_code == 200
+        data = response.json()
+        assert test_product["id"] in data["product_ids"]
+        assert test_product["slug"] in data["product_slugs"]
+
 
 class TestUpdateCollection:
     """Tests for Story 6.5: Edit Collection"""
