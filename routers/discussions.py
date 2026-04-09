@@ -6,7 +6,6 @@ All discussion content should be sanitized before rendering to prevent XSS.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from typing import Optional
-from supabase import Client
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -122,6 +121,9 @@ async def update_discussion(
     
     response = db.table("discussions").update(update_data).eq("id", str(discussion_id)).execute()
     
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
     return response.data[0]
 
 
@@ -181,11 +183,11 @@ async def block_discussion(
 
     # Cascade block to all descendant replies
     to_visit = [str(discussion_id)]
-    visited = set()
+    visited = {str(discussion_id)}
     while to_visit:
         # Fetch direct children of any node in to_visit
         children_resp = db.table("discussions").select("id").in_("parent_id", to_visit).execute()
-        child_ids = [row["id"] for row in (children_resp.data or []) if row.get("id")]
+        child_ids = [row["id"] for row in (children_resp.data or []) if row.get("id") and row["id"] not in visited]
         if not child_ids:
             break
         # Update children to blocked
@@ -196,7 +198,7 @@ async def block_discussion(
             "blocked_at": now,
             "updated_at": now,
         }).in_("id", child_ids).execute()
-        # Continue BFS
+        # Continue BFS, marking visited to prevent infinite loops
         visited.update(child_ids)
         to_visit = child_ids
 

@@ -319,7 +319,7 @@ def test_update_discussion_success(auth_client, test_product):
             "content": "Original content",
         },
     )
-    assert create.status_code in (200, 201), create.text
+    assert create.status_code == 201, create.text
     discussion_id = create.json()["id"]
 
     update = auth_client.put(
@@ -341,7 +341,7 @@ def test_update_discussion_forbidden_for_non_owner(auth_client, auth_client_2, t
             "content": "Owner content",
         },
     )
-    assert create.status_code in (200, 201), create.text
+    assert create.status_code == 201, create.text
     discussion_id = create.json()["id"]
 
     update = auth_client_2.put(
@@ -369,7 +369,7 @@ def test_delete_discussion_soft_delete_success(auth_client, test_product):
             "content": "Delete me",
         },
     )
-    assert create.status_code in (200, 201), create.text
+    assert create.status_code == 201, create.text
     discussion_id = create.json()["id"]
 
     delete_resp = auth_client.delete(f"/api/discussions/{discussion_id}")
@@ -393,7 +393,7 @@ def test_delete_discussion_forbidden_for_non_owner(auth_client, auth_client_2, t
             "content": "Only owner can delete",
         },
     )
-    assert create.status_code in (200, 201), create.text
+    assert create.status_code == 201, create.text
     discussion_id = create.json()["id"]
 
     delete_resp = auth_client_2.delete(f"/api/discussions/{discussion_id}")
@@ -415,7 +415,7 @@ def test_delete_discussion_allowed_for_admin(auth_client, admin_client, test_pro
             "content": "Admin can delete this",
         },
     )
-    assert create.status_code in (200, 201), create.text
+    assert create.status_code == 201, create.text
     discussion_id = create.json()["id"]
 
     delete_resp = admin_client.delete(f"/api/discussions/{discussion_id}")
