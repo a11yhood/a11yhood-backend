@@ -674,6 +674,50 @@ def test_bulk_delete_by_product_ids_dedupes(admin_client, clean_database):
     assert remaining_ids == {ids[2]}  # Only the untouched ID should remain
 
 
+def test_bulk_delete_uses_search_filters(admin_client, clean_database):
+    source_name = "SearchSource"
+    matching_ids = [str(uuid.uuid4()) for _ in range(2)]
+    keep_id = str(uuid.uuid4())
+
+    clean_database.table("products").insert([
+        {"id": matching_ids[0], "name": "Alpha Screen Reader", "source": source_name, "type": "Software", "url": f"https://example.com/{matching_ids[0]}"},
+        {"id": matching_ids[1], "name": "Alpha Magnifier", "source": source_name, "type": "Software", "url": f"https://example.com/{matching_ids[1]}"},
+        {"id": keep_id, "name": "Beta Keyboard", "source": source_name, "type": "Hardware", "url": f"https://example.com/{keep_id}"},
+    ]).execute()
+
+    resp = admin_client.post("/api/products/bulk-delete?source=SearchSource&search=Alpha&type=Software")
+
+    assert resp.status_code == 200
+    assert resp.json()["deleted_count"] == 2
+
+    remaining = clean_database.table("products").select("id").in_("id", matching_ids + [keep_id]).execute()
+    remaining_ids = {row["id"] for row in (remaining.data or [])}
+    assert remaining_ids == {keep_id}
+
+
+def test_bulk_delete_accepts_search_filters_in_json_body(admin_client, clean_database):
+    source_name = "JsonSearchSource"
+    delete_id = str(uuid.uuid4())
+    keep_id = str(uuid.uuid4())
+
+    clean_database.table("products").insert([
+        {"id": delete_id, "name": "Body Filter Match", "source": source_name, "type": "Software", "computed_rating": 4.5, "url": f"https://example.com/{delete_id}"},
+        {"id": keep_id, "name": "Body Filter Keep", "source": source_name, "type": "Software", "computed_rating": 2.0, "url": f"https://example.com/{keep_id}"},
+    ]).execute()
+
+    resp = admin_client.post(
+        "/api/products/bulk-delete",
+        json={"source": source_name, "search": "Body Filter", "min_rating": 4.0},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["deleted_count"] == 1
+
+    remaining = clean_database.table("products").select("id").in_("id", [delete_id, keep_id]).execute()
+    remaining_ids = {row["id"] for row in (remaining.data or [])}
+    assert remaining_ids == {keep_id}
+
+
 # ============================================================================
 # TESTS FOR STORY 3.1 & 3.4: PRODUCT SUBMISSION WITH URL CHECK
 # ============================================================================
