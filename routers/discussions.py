@@ -122,6 +122,9 @@ async def update_discussion(
     
     response = db.table("discussions").update(update_data).eq("id", str(discussion_id)).execute()
     
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
     return response.data[0]
 
 
