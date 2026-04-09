@@ -480,6 +480,11 @@ def test_count_products_respects_min_rating(client, clean_database, test_user):
     # Manually update computed_rating since SQLite doesn't have the trigger
     clean_database.table("products").update({"computed_rating": 4.0}).eq("id", user_high_id).execute()
 
+    # Manually update computed_rating since SQLite doesn't have the trigger
+    clean_database.table("products").update({"computed_rating": 4.2}).eq("id", high_id).execute()
+    clean_database.table("products").update({"computed_rating": 3.0}).eq("id", low_id).execute()
+    clean_database.table("products").update({"computed_rating": 4.0}).eq("id", user_high_id).execute()
+
     resp = client.get("/api/products/count?search=RatingCount&min_rating=4")
     assert resp.status_code == 200
     assert resp.json()["count"] == 2
