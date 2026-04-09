@@ -255,9 +255,20 @@ def _prepare_product_filters(
     if tag_mode not in {"or", "and"}:
         raise HTTPException(status_code=400, detail="tags_mode must be 'or' or 'and'")
 
-    source_values = set(_normalize_list(source) + _normalize_list(sources))
+    if _normalize_list(sources):
+        raise HTTPException(
+            status_code=400,
+            detail="Use repeated 'source' parameters; 'sources' is not supported",
+        )
+    if _normalize_list(types):
+        raise HTTPException(
+            status_code=400,
+            detail="Use repeated 'type' parameters; 'types' is not supported",
+        )
+
+    source_values = set(_normalize_list(source))
     source_values = set(_canonicalize_sources(db, list(source_values)))
-    type_values = set(_normalize_list(type) + _normalize_list(types))
+    type_values = set(_normalize_list(type))
     tag_values = _normalize_list(tags)
 
     if include_banned:

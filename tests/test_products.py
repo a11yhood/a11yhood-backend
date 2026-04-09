@@ -613,6 +613,18 @@ def test_bulk_delete_requires_params(admin_client):
     assert "Must provide either" in resp.json()["detail"]
 
 
+def test_bulk_delete_rejects_sources_alias(admin_client):
+    resp = admin_client.post("/api/products/bulk-delete?sources=Thingiverse")
+    assert resp.status_code == 400
+    assert "'sources' is not supported" in resp.json()["detail"]
+
+
+def test_bulk_delete_rejects_types_alias(admin_client):
+    resp = admin_client.post("/api/products/bulk-delete?types=Hardware")
+    assert resp.status_code == 400
+    assert "'types' is not supported" in resp.json()["detail"]
+
+
 def test_bulk_delete_by_source_query_param(admin_client, clean_database):
     # Insert products under a unique source to isolate the deletion scope
     source_name = "BulkSource"
