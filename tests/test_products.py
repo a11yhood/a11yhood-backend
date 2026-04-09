@@ -477,8 +477,6 @@ def test_count_products_respects_min_rating(client, clean_database, test_user):
         {"product_id": low_id, "user_id": test_user["id"], "rating": 3},
         {"product_id": user_high_id, "user_id": test_user["id"], "rating": 4},
     ]).execute()
-    # Manually update computed_rating since SQLite doesn't have the trigger
-    clean_database.table("products").update({"computed_rating": 4.0}).eq("id", user_high_id).execute()
 
     # Manually update computed_rating since SQLite doesn't have the trigger
     clean_database.table("products").update({"computed_rating": 4.2}).eq("id", high_id).execute()
