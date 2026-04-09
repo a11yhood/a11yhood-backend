@@ -8,17 +8,17 @@ version = "0.1.0"
 [environments]
 test = {features = ["test", "default"] }
 
-[feature.test.tasks.run-tests]
+[feature.test.tasks.test]
 description = "run the test suite"
 cmd = "pytest"
 
 
-[tasks.run-dev]
-description = "run the application in development mode"
-cmd = "ENVIRONMENT=development python -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 4"
+[tasks.serve]
+description = "serve the a11yhood application from supabase"
+cmd = "ENVIRONMENT=development ENV_FILE=.env.test python -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 4"
 
-[tasks.run-dev.env]
-DATABASE_URL = "sqlite:///./test.db"
+[tasks.serve.env]
+# DATABASE_URL = "sqlite:///./test.db"
 
 [dependencies]
 python = ">=3.14.3,<3.15"
