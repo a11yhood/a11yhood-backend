@@ -1622,8 +1622,8 @@ async def bulk_delete_products(
         filters["search"],
         filters["created_by"],
         filters["updated_since"] is not None,
+        filters["max_age"] is not None,
         filters["min_rating"] is not None,
-        filters["include_banned"],
     ])
 
     if not has_search_filters and not normalized_product_ids:
