@@ -105,7 +105,7 @@ Developer → Git Push → GitHub Actions → GitHub Container Registry → Prod
 **File**: `.github/workflows/docker-build.yml`
 
 **Triggers on**:
-- Pushes to `production` branch
+- Pushes to `main` branch
 - Manual workflow dispatch
 
 **What it does**:
@@ -155,7 +155,7 @@ docker tag ghcr.io/a11yhood/a11yhood-backend:latest a11yhood-backend:latest
 
 ## Branch Strategy
 
-### Production Branch
+### Main Branch
 
 - **Protected**: Requires pull requests for all changes
 - **No direct pushes**: Even for admins
@@ -164,8 +164,8 @@ docker tag ghcr.io/a11yhood/a11yhood-backend:latest a11yhood-backend:latest
 ### Development Workflow
 
 ```bash
-# 1. Create feature branch from production
-git checkout production
+# 1. Create feature branch from main
+git checkout main
 git pull
 git checkout -b feature/your-change
 
@@ -175,7 +175,7 @@ git commit -m "Your change"
 git push -u origin feature/your-change
 
 # 3. Create Pull Request on GitHub
-# Base: production <- Compare: feature/your-change
+# Base: main <- Compare: feature/your-change
 
 # 4. Merge PR (triggers automatic build)
 
@@ -264,7 +264,7 @@ docker ps | grep a11yhood-backend-prod
 - ✅ Require approval for first-time contributors
 
 **Repository Settings** → **Branches**:
-- ✅ Branch protection on `production`
+- ✅ Branch protection on `main`
 - ✅ Require pull request before merging
 - ✅ No bypassing for admins
 
@@ -354,7 +354,7 @@ Then restart:
 ### Code Changes
 
 ```bash
-# 1. Create PR to production branch
+# 1. Create PR to main branch
 # 2. Merge PR (automatic build)
 # 3. On server:
 docker pull ghcr.io/a11yhood/a11yhood-backend:latest
@@ -374,7 +374,7 @@ nano .env
 
 ### Dependencies
 
-Dependencies are in `requirements.txt`. Changes trigger automatic rebuild when merged to production.
+Dependencies are in `requirements.txt`. Changes trigger automatic rebuild when merged to main.
 
 ## Future Improvements
 

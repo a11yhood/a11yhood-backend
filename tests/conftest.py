@@ -159,6 +159,10 @@ def setup_test_database(test_settings):
     from previous test runs, ensuring frontend and backend tests use
     the same clean slate.
     """
+    if os.getenv("RUN_AGAINST_SERVER"):
+        print("\n✓ Skipping test database reset (RUN_AGAINST_SERVER=1)")
+        return
+
     test_db = DatabaseAdapter(test_settings)
     test_db.init()  # Create tables
     test_db.cleanup()  # Drop and recreate tables to start fresh
@@ -259,35 +263,19 @@ def _seed_test_data(db):
 
 @pytest.fixture
 def test_user(clean_database):
-    """Create a test user in the test database"""
-    from uuid import uuid4
-    user_data = {
-        "id": str(uuid4()),
-        "github_id": "test-user-123",
-        "username": "testuser",
-        "email": "test@example.com",
-        "display_name": "Test User",
-        "role": "user",
-    }
-
-    result = clean_database.table("users").insert(user_data).execute()
+    """Get the test user from the test database (created by _seed_test_data)"""
+    result = clean_database.table("users").select("*").eq("username", "testuser").execute()
+    if not result.data:
+        raise ValueError("Test user not found - _seed_test_data may have failed")
     return result.data[0]
 
 
 @pytest.fixture
 def test_admin(clean_database):
-    """Create a test admin user in the test database"""
-    from uuid import uuid4
-    admin_data = {
-        "id": str(uuid4()),
-        "github_id": "test-admin-456",
-        "username": "testadmin",
-        "email": "admin@example.com",
-        "display_name": "Test Admin",
-        "role": "admin",
-    }
-
-    result = clean_database.table("users").insert(admin_data).execute()
+    """Get the test admin user from the test database (created by _seed_test_data)"""
+    result = clean_database.table("users").select("*").eq("username", "testadmin").execute()
+    if not result.data:
+        raise ValueError("Test admin not found - _seed_test_data may have failed")
     return result.data[0]
 
 

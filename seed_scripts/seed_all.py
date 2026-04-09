@@ -23,6 +23,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Ensure project root and seed_scripts are on sys.path for imports
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+SEED_DIR = os.path.abspath(os.path.dirname(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+if SEED_DIR not in sys.path:
+    sys.path.insert(0, SEED_DIR)
+
 # Load environment variables
 env_file = os.getenv('ENV_FILE', '.env.test')
 if os.path.exists(env_file):

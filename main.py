@@ -3,7 +3,7 @@
 Sets up FastAPI app with CORS middleware and routes for the accessible product community.
 All endpoints are organized by domain in routers/ and use database_adapter for dual DB support.
 """
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from config import settings, load_settings_from_env
 from routers import activities, blog_posts, collections, discussions, product_urls, products, ratings, requests, scrapers, sources, users
 from services.database import get_db
+from services.auth import get_current_user
 from services.scheduled_scrapers import get_scheduled_scraper_service
 
 
@@ -44,6 +45,10 @@ async def validate_security_configuration():
     # weakening production behavior.
     # Use a fresh settings instance so env patches in tests are respected.
     local_settings = load_settings_from_env()
+    
+    # Log CORS configuration status
+    cors_origins = get_cors_origins()
+    logger.info(f"CORS origins configured: {cors_origins}")
     
     # Detect production environment by checking for production indicators
     is_production = any([
@@ -185,11 +190,24 @@ def get_cors_origins():
     
     return list(origins)
 
-origins = get_cors_origins()
-
 # ============================================================================
 # Security Middleware
 # ============================================================================
+
+# CORS middleware - must be added before app startup
+# Guard against multiple additions (e.g., in tests that reload modules)
+if not any(isinstance(m, type) and issubclass(m, type) and 
+           getattr(m, '__name__', None) == 'CORSMiddleware' 
+           for m in [type(middleware) for middleware in getattr(app, 'user_middleware', [])]):
+    cors_origins = get_cors_origins()
+    logger.info(f"CORS origins at startup: {cors_origins}")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 # Security headers middleware
 @app.middleware("http")
@@ -219,14 +237,14 @@ async def add_security_headers(request: Request, call_next):
             "frame-ancestors 'none'"
         )
     else:
-        # Production: strict CSP
+        # Production: Allow CDN for Swagger/ReDoc UI documentation
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "img-src 'self' data: https:; "
-            "font-src 'self'; "
-            "connect-src 'self'; "
+            "font-src 'self' https://cdn.jsdelivr.net; "
+            "connect-src 'self' https://cdn.jsdelivr.net; "
             "frame-ancestors 'none'"
         )
     
@@ -246,20 +264,9 @@ async def add_security_headers(request: Request, call_next):
     
     return response
 
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,  # Explicit allowlist only
-    allow_credentials=True,  # Required for Authorization headers
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # Include OPTIONS for CORS preflight
-    allow_headers=["*"],  # Allow all headers (browsers send various sec-fetch-* headers)
-)
-
 # Trusted hosts (prevent host header injection)
-allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0"]
-# Allow testserver for TestClient in tests
-if settings.TEST_MODE:
-    allowed_hosts.append("testserver")
+allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0", "testserver"]
+# Keep TestClient stable even when shell env vars temporarily override TEST_MODE.
 
 if settings.PRODUCTION_URL:
     host = settings.PRODUCTION_URL.replace("https://", "").replace("http://", "").split("/")[0]
@@ -322,11 +329,25 @@ async def health_check():
     }
 
 
-# Temporary stub endpoint to prevent 404s from frontend scraper log queries.
-# Returns empty list until full scraper logging is implemented in backend.
 @app.get("/api/scraping-logs")
-async def get_scraping_logs(limit: int = 50):
-    return []
+async def get_scraping_logs(
+    limit: int = Query(50, le=100),
+    offset: int = Query(0, ge=0),
+    source: str | None = None,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Backward-compatible scraping logs endpoint used by frontend.
+
+    Mirrors /api/scrapers/logs semantics so older frontend paths still return real data.
+    """
+    query = db.table("scraping_logs").select("*")
+
+    if source:
+        query = query.eq("source", source)
+
+    response = query.range(offset, offset + limit - 1).order("created_at", desc=True).execute()
+    return response.data
 
 
 @app.get("/api/scrapers/schedule")

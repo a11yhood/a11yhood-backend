@@ -9,7 +9,6 @@ from datetime import datetime
 from scrapers.github import GitHubScraper
 from scrapers.thingiverse import ThingiverseScraper
 from scrapers.ravelry import RavelryScraper
-from scrapers.abledata import AbleDataScraper
 from scrapers.goat import GOATScraper
 
 class ScraperOAuth:
@@ -21,12 +20,11 @@ class ScraperOAuth:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 'https://www.ravelry.com/oauth2/token',
+                auth=(client_id, client_secret),
                 data={
                     'grant_type': 'authorization_code',
                     'code': code,
                     'redirect_uri': redirect_uri,
-                    'client_id': client_id,
-                    'client_secret': client_secret,
                 }
             )
             response.raise_for_status()
@@ -55,11 +53,10 @@ class ScraperOAuth:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 'https://www.ravelry.com/oauth2/token',
+                auth=(client_id, client_secret),
                 data={
                     'grant_type': 'refresh_token',
                     'refresh_token': refresh_token,
-                    'client_id': client_id,
-                    'client_secret': client_secret,
                 }
             )
             response.raise_for_status()
@@ -145,23 +142,6 @@ class ScraperService:
         finally:
             await scraper.close()
     
-    async def scrape_abledata(self, test_mode: bool = False, test_limit: int = 5) -> Dict[str, Any]:
-        """Scrape AbleData archived pages for assistive technology products"""
-        scraper = AbleDataScraper(self.supabase)
-        # Load persisted URLs from scraper_search_terms table
-        try:
-            response = self.supabase.table("scraper_search_terms").select("search_term").eq("platform", "abledata").execute()
-            urls = [r.get("search_term") for r in (response.data or []) if r.get("search_term")]
-            if urls:
-                scraper.DEFAULT_URLS = urls
-        except Exception:
-            pass
-        try:
-            result = await scraper.scrape(test_mode=test_mode, test_limit=test_limit)
-            return result
-        finally:
-            await scraper.close()
-
     async def scrape_goat(self, access_token: Optional[str] = None, test_mode: bool = False, test_limit: int = 5) -> Dict[str, Any]:
         """Scrape LibraryThing for books with accessibility information"""
         scraper = GOATScraper(self.supabase, access_token=access_token)

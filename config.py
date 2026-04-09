@@ -15,7 +15,11 @@ class Settings(BaseSettings):
     Validates and provides defaults for all configuration values.
     Use DATABASE_URL for SQLite (tests), or SUPABASE_URL/KEY for production.
     """
-    model_config = SettingsConfigDict(env_file=os.getenv("ENV_FILE", ".env"), case_sensitive=True)
+    model_config = SettingsConfigDict(
+        env_file=os.getenv("ENV_FILE", ".env"),
+        case_sensitive=True,
+        extra="ignore",
+    )
     
     # Database (SQLite for tests, Supabase for production)
     DATABASE_URL: Optional[str] = None  # SQLite: sqlite+aiosqlite:///./test.db
@@ -28,8 +32,9 @@ class Settings(BaseSettings):
     # CORS - strict allowlist for security
     # Dev: Uses Vite proxy (https://localhost:5173 -> http://localhost:8000)
     # Prod: Set to actual frontend domain (e.g., https://a11yhood.com)
-    FRONTEND_URL: str = "https://localhost:5173"
+    FRONTEND_URL: str = "https://localhost:4173"
     PRODUCTION_URL: str = ""
+    CORS_EXTRA_ORIGINS: str = ""  # Comma-separated additional origins
     
     # Environment mode (development, staging, production)
     ENVIRONMENT: Optional[str] = None  # 'production', 'staging', 'development'

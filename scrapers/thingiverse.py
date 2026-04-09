@@ -3,6 +3,7 @@ Thingiverse scraper for accessibility and assistive devices
 Uses Thingiverse API with OAuth authentication
 """
 import httpx
+import math
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from .base_scraper import BaseScraper
@@ -156,6 +157,9 @@ class ThingiverseScraper(BaseScraper):
                         print(f"[Thingiverse] Skip id={thing.get('id')} (no details)")
                         continue
                     
+                    # Add search term to thing details for tracking
+                    thing_details['_search_term'] = term
+                    
                     # Check if product already exists by URL
                     url = thing_details.get('public_url') or f"https://www.thingiverse.com/thing:{thing['id']}"
                     existing = await self._product_exists(url)
@@ -169,7 +173,7 @@ class ThingiverseScraper(BaseScraper):
                         result = await self._update_product(existing["id"], thing_details)
                         if result:
                             products_updated += 1
-                            print(f"[Thingiverse] Updated existing product url={url}")
+                            print(f"[Thingiverse] Updated existing product url={url} (found via term='{term}')")
                         else:
                             print(f"[Thingiverse] Failed to update existing product url={url}")
                     else:
@@ -177,7 +181,7 @@ class ThingiverseScraper(BaseScraper):
                         result = await self._create_product(thing_details)
                         if result:
                             products_added += 1
-                            print(f"[Thingiverse] Added product url={url}")
+                            print(f"[Thingiverse] Added product url={url} (found via term='{term}')")
                         else:
                             print(f"[Thingiverse] Failed to add product url={url}")
             
@@ -372,18 +376,13 @@ class ThingiverseScraper(BaseScraper):
         except (TypeError, ValueError):
             makes = 0
 
-        # Map makes -> 1-5 star rating (5*: >=1000, 4*: >=100, 3*: >=50, 2*: >=10, 1*: >=1)
-        rating = None
-        if makes >= 1000:
-            rating = 5.0
-        elif makes >= 100:
-            rating = 4.0
-        elif makes >= 50:
-            rating = 3.0
-        elif makes >= 10:
-            rating = 2.0
-        elif makes >= 1:
-            rating = 1.0
+        # Convert makes to a continuous 1–5 rating using a log10 scale.
+        # Formula: clamp(1 + log10(makes), 1.0, 5.0)
+        # Anchor points: 1→1.0, 10→2.0, 100→3.0, 1000→4.0, 10000→5.0.
+        if makes > 0:
+            rating = round(min(max(1.0 + math.log10(makes), 1.0), 5.0), 2)
+        else:
+            rating = None
         rating_count = makes if makes > 0 else None
         
         # Determine type based on thing properties (default to 3D Printed)
@@ -403,6 +402,14 @@ class ThingiverseScraper(BaseScraper):
             except Exception as e:
                 print(f"[Thingiverse] Failed to parse last updated date: {e}")
         
+        # Extract search term if provided
+        search_term = thing.get('_search_term')
+        
+        # Track which search term matched
+        matched_search_terms = []
+        if search_term:
+            matched_search_terms.append(search_term)
+        
         return {
             'name': thing['name'],
             'description': thing.get('description', ''),
@@ -416,6 +423,7 @@ class ThingiverseScraper(BaseScraper):
             'source_rating': rating,
             'source_rating_count': rating_count,
             'source_last_updated': source_last_updated,
+            'matched_search_terms': matched_search_terms,
             'external_data': {
                 'rating': rating,
                 'rating_count': rating_count,

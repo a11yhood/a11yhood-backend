@@ -66,6 +66,9 @@
     UNIQUE(username)
   );
 
+  -- Ensure fast lookups by username for public routes
+  CREATE UNIQUE INDEX IF NOT EXISTS users_username_idx ON public.users (username);
+
   -- ==== Users table hardening: role constraints, RLS, and admin-only role change ====
 
   -- Ensure role is constrained and defaults to 'user'
@@ -189,6 +192,7 @@
     last_edited_at TIMESTAMPTZ,
     last_edited_by UUID REFERENCES users(id) ON DELETE SET NULL,
     editor_ids UUID[],
+    matched_search_terms JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
@@ -278,6 +282,7 @@
   -- ============================================================================
   CREATE TABLE collections (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    slug TEXT UNIQUE NOT NULL,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     user_name TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -343,7 +348,7 @@
   CREATE TABLE user_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK (type IN ('moderator', 'admin', 'product-ownership')),
+    type TEXT NOT NULL CHECK (type IN ('moderator', 'admin', 'product-ownership', 'source-domain')),
     reason TEXT,
     message TEXT,
     product_id UUID REFERENCES products(id) ON DELETE SET NULL,

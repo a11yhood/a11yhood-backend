@@ -288,6 +288,7 @@ def test_get_products_filters_by_min_display_rating(client, clean_database, test
             "source": "Github",
             "type": "Software",
             "source_rating": 4.5,
+            "computed_rating": 4.5,  # Set computed_rating for test
             "url": "https://github.com/example/rating-high",
             "created_by": test_user["id"],
         },
@@ -298,6 +299,7 @@ def test_get_products_filters_by_min_display_rating(client, clean_database, test
             "source": "Github",
             "type": "Software",
             "source_rating": 2.0,
+            "computed_rating": 2.0,  # Will be updated after ratings inserted
             "url": "https://github.com/example/rating-mixed",
             "created_by": test_user["id"],
         },
@@ -316,14 +318,18 @@ def test_get_products_filters_by_min_display_rating(client, clean_database, test
         {"product_id": mixed_id, "user_id": test_user["id"], "rating": 4},
         {"product_id": user_only_id, "user_id": test_user["id"], "rating": 5},
     ]).execute()
+    
+    # Manually update computed_rating since SQLite doesn't have the trigger
+    clean_database.table("products").update({"computed_rating": 4.0}).eq("id", mixed_id).execute()
+    clean_database.table("products").update({"computed_rating": 5.0}).eq("id", user_only_id).execute()
 
     resp = client.get("/api/products?search=RatingCase&min_rating=3.5")
     assert resp.status_code == 200
     data = resp.json()
     ids = {item["id"] for item in data}
-    assert high_id in ids
-    assert user_only_id in ids
-    assert mixed_id not in ids
+    assert high_id in ids  # source_rating=4.5 >= 3.5
+    assert mixed_id in ids  # computed_rating=4.0 >= 3.5 (user rating overrides source_rating=2.0)
+    assert user_only_id in ids  # computed_rating=5.0 >= 3.5
     for item in data:
         assert item.get("display_rating") is not None
 
@@ -502,6 +508,48 @@ def test_products_pagination_with_filters(client, clean_database, test_user):
     expected_slice = expected_order[1:3]
     returned_ids = [p["id"] for p in data]
     assert returned_ids == [p["id"] for p in expected_slice]
+
+
+def test_sort_by_rating_uses_recency_as_secondary_sort(client, clean_database, test_user):
+    """When sort_by=rating, products with equal ratings should be ordered by created_at desc."""
+    base_time = datetime.now(UTC).replace(tzinfo=None)
+    older_id = str(uuid.uuid4())
+    newer_id = str(uuid.uuid4())
+
+    clean_database.table("products").insert([
+        {
+            "id": older_id,
+            "name": "SortRatingRecency Older",
+            "description": "SortRatingRecency",
+            "source": "Github",
+            "type": "Software",
+            "computed_rating": 4.0,
+            "url": "https://github.com/example/sort-rating-older",
+            "created_by": test_user["id"],
+            "created_at": base_time,
+        },
+        {
+            "id": newer_id,
+            "name": "SortRatingRecency Newer",
+            "description": "SortRatingRecency",
+            "source": "Github",
+            "type": "Software",
+            "computed_rating": 4.0,
+            "url": "https://github.com/example/sort-rating-newer",
+            "created_by": test_user["id"],
+            "created_at": base_time + timedelta(minutes=5),
+        },
+    ]).execute()
+
+    resp = client.get("/api/products?search=SortRatingRecency&sort_by=rating&sort_order=desc")
+    assert resp.status_code == 200
+    data = resp.json()
+    ids = [p["id"] for p in data]
+
+    assert newer_id in ids
+    assert older_id in ids
+    # Newer product should appear before older when ratings are equal
+    assert ids.index(newer_id) < ids.index(older_id)
 
 
 def test_get_product_not_found(client):

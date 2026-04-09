@@ -2,7 +2,7 @@
 name = "a11yhood-backend"
 version = "0.1.0"
 description = "a11yhood Backend API"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
     "annotated-doc>=0.0.4",
@@ -31,4 +31,6 @@ packages = ["models", "routers", "scrapers", "services", "migrations"]
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.24.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.8.0",
 ]

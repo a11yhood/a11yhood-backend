@@ -5,7 +5,6 @@ from .github import GitHubScraper
 from .thingiverse import ThingiverseScraper
 from .ravelry import RavelryScraper
 from .goat import GOATScraper
-from .abledata import AbleDataScraper
 
 __all__ = [
     'BaseScraper',
@@ -14,5 +13,4 @@ __all__ = [
     'ThingiverseScraper',
     'RavelryScraper',
     'GOATScraper'
-    'AbleDataScraper'
 ]
