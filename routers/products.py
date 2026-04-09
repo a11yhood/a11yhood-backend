@@ -1608,7 +1608,11 @@ async def bulk_delete_products(
         max_age=payload.max_age if payload and payload.max_age is not None else max_age,
         search=payload.search if payload and payload.search is not None else search,
         created_by=payload.created_by if payload and payload.created_by is not None else created_by,
-        include_banned=payload.include_banned if payload and payload.include_banned is not None else include_banned,
+        include_banned=(
+            payload.include_banned
+            if payload and "include_banned" in payload.model_fields_set
+            else include_banned
+        ),
     )
 
     has_search_filters = any([
