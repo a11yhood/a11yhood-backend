@@ -8,11 +8,12 @@ from unittest.mock import patch
 
 
 def test_test_mode_rejected_in_production_with_supabase():
-    """TEST_MODE should be rejected when production Supabase URL is detected"""
+    """TEST_MODE should be rejected when Supabase config is explicitly marked production."""
     with patch.dict(os.environ, {
         "TEST_MODE": "true",
         "SUPABASE_URL": "https://myproject.supabase.co",
         "SUPABASE_KEY": "real-key",
+        "ENVIRONMENT": "production",
     }, clear=False):
         # Reload config to pick up env changes
         from importlib import reload
@@ -66,6 +67,7 @@ def test_default_secret_key_rejected_in_production():
         "SECRET_KEY": "dev-secret-key-change-in-production",
         "SUPABASE_URL": "https://myproject.supabase.co",
         "TEST_MODE": "false",
+        "ENVIRONMENT": "production",
     }, clear=False):
         from importlib import reload
         import config
@@ -83,6 +85,7 @@ def test_short_secret_key_rejected_in_production():
         "SECRET_KEY": "short",
         "SUPABASE_URL": "https://myproject.supabase.co",
         "TEST_MODE": "false",
+        "ENVIRONMENT": "production",
     }, clear=False):
         from importlib import reload
         import config

@@ -1,4 +1,4 @@
-"""Tests for scraper endpoints and services using SQLite"""
+"""Tests for scraper endpoints and services using the Supabase test database"""
 import pytest
 from routers import scrapers as scrapers_router
 
@@ -187,16 +187,15 @@ def test_update_oauth_config(admin_client, clean_database):
 
 
 def test_update_oauth_config_not_found(admin_client):
-    # Endpoint now uses upsert behavior - creates config if it doesn't exist
+    # Endpoint creates a config when a supported platform does not already exist.
     response = admin_client.put(
-        "/api/scrapers/oauth-configs/nonexistent",
+        "/api/scrapers/oauth-configs/github",
         json={"client_id": "updated_client_id"},
     )
 
-    # Should return 200 (success) and create the config
     assert response.status_code == 200
     data = response.json()
-    assert data["platform"] == "nonexistent"
+    assert data["platform"] == "github"
     assert data["client_id"] == "updated_client_id"
 
 
@@ -210,18 +209,13 @@ def test_oauth_callback_platform_not_configured(admin_client):
     assert "OAuth config not found" in response.json()["detail"]
 
 
-def test_oauth_callback_unsupported_platform(admin_client, clean_database):
-    clean_database.table("oauth_configs").insert({
-        "platform": "unsupported",
-        "client_id": "test_id",
-        "client_secret": "test_secret",
-        "redirect_uri": "https://example.com/callback",
-    }).execute()
-
+def test_oauth_callback_unsupported_platform(admin_client):
     response = admin_client.post("/api/scrapers/oauth/unsupported/callback?code=test_code")
 
-    assert response.status_code == 400
-    assert "Unsupported platform" in response.json()["detail"]
+    # Unsupported platforms cannot have persisted configs because oauth_configs
+    # is constrained to known platform values in the real Supabase schema.
+    assert response.status_code == 404
+    assert "OAuth config not found" in response.json()["detail"]
 
 
 def test_oauth_callback_requires_admin(auth_client):

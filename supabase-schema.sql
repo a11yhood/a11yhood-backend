@@ -62,8 +62,6 @@
     last_active TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
-    
-    UNIQUE(username)
   );
 
   -- Ensure fast lookups by username for public routes

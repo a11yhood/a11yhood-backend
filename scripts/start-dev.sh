@@ -1,10 +1,11 @@
 #!/bin/bash
 # Start backend development server for a11yhood using Docker
 # This script starts the backend API server on port 8000 in a Docker container
-# 
+# backed by the Supabase test project configured in .env.test.
+#
 # Usage:
 #   ./start-dev.sh              # Normal start
-#   ./start-dev.sh --reset-db   # Reset database before starting
+#   ./start-dev.sh --reset-db   # Reset Supabase test data before optional seeding
 #   ./start-dev.sh --help       # Show help
 
 # Color codes for output
@@ -51,7 +52,7 @@ if [ "$HELP" = true ]; then
   echo "Usage: ./start-dev.sh [OPTIONS]"
   echo ""
   echo "Options:"
-  echo "  --reset-db   Reset test.db before starting"
+  echo "  --reset-db   Reset Supabase test data before optional seeding"
   echo "  --seed       Seed the database (runs seed_scripts/seed_all.py in the container)"
   echo "  --help       Show this help message"
   exit 0
@@ -67,14 +68,6 @@ fi
 
 echo -e "${BLUE}🚀 Starting a11yhood backend development server (Docker)...${NC} (t=0s)"
 echo ""
-
-# Reset database if requested
-if [ "$RESET_DB" = true ]; then
-  echo -e "${YELLOW}🗑️  Resetting test database...${NC}"
-  rm -f test.db
-  echo -e "${GREEN}✓ Database reset${NC}"
-  echo ""
-fi
 
 # Check if container is already running and stop it
 echo -e "${YELLOW}🔧 Checking for existing containers...${NC} (t=$(ts))"
@@ -159,6 +152,26 @@ if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
   echo "  Check logs with: docker logs a11yhood-backend-dev"
   docker logs --tail=50 a11yhood-backend-dev
   exit 1
+fi
+
+# Reset test data if requested
+if [ "$RESET_DB" = true ]; then
+  echo ""
+  echo -e "${YELLOW}🗑️  Resetting Supabase test data...${NC} (t=$(ts))"
+  if docker exec -w /app a11yhood-backend-dev bash -c "export ENV_FILE=.env.test && /usr/local/bin/python3 - <<'PY'
+from config import get_settings
+from database_adapter import DatabaseAdapter
+
+db = DatabaseAdapter(get_settings('.env.test'))
+db.cleanup()
+print('Supabase test data reset complete.')
+PY" >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ Supabase test data reset${NC}"
+  else
+    echo -e "${RED}✗ Reset failed${NC}"
+    echo "  Check logs with: docker logs a11yhood-backend-dev"
+    exit 1
+  fi
 fi
 
 # Seed database if requested

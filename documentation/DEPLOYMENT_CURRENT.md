@@ -220,8 +220,7 @@ GITHUB_CLIENT_SECRET=your-client-secret
 1. **Build time**: No secrets in Dockerfile or image
 2. **Runtime**: Secrets passed via:
    - `docker run --env-file .env` OR
-   - `docker-compose.yml` with `env_file: .env` OR
-   - Environment variables exported in start script
+   - Environment variables exported in start scripts (`./scripts/start-prod.sh`)
 
 ## Start Scripts
 

@@ -1,7 +1,7 @@
 """Configuration management for a11yhood backend.
 
-Loads settings from .env file with Pydantic validation. Supports dual-database mode
-(SQLite for tests, Supabase for production) and optional OAuth credentials.
+Loads settings from .env file with Pydantic validation.
+Always uses Supabase - point .env at the production project, .env.test at the test project.
 """
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables.
     
     Validates and provides defaults for all configuration values.
-    Use DATABASE_URL for SQLite (tests), or SUPABASE_URL/KEY for production.
+    SUPABASE_URL/KEY are required; point them at the appropriate Supabase project.
     """
     model_config = SettingsConfigDict(
         env_file=os.getenv("ENV_FILE", ".env"),
@@ -21,10 +21,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
     
-    # Database (SQLite for tests, Supabase for production)
-    DATABASE_URL: Optional[str] = None  # SQLite: sqlite+aiosqlite:///./test.db
-    
-    # Supabase (optional if using SQLite for tests)
+    # Supabase (required for both production and test environments)
     SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""  # service_role key for backend
     SUPABASE_ANON_KEY: str = ""  # anon/public key

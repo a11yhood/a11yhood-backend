@@ -70,6 +70,11 @@ CREATE POLICY "System can create user activities"
 -- ============================================================================
 -- Issue: Table public.product_urls has RLS enabled, but no policies exist
 -- Solution: Add appropriate policies for SELECT, INSERT, UPDATE, and DELETE
+DROP POLICY IF EXISTS "Product URLs are viewable by everyone" ON public.product_urls;
+DROP POLICY IF EXISTS "Authenticated users can create product URLs" ON public.product_urls;
+DROP POLICY IF EXISTS "Creators can update their product URLs" ON public.product_urls;
+DROP POLICY IF EXISTS "Creators can delete their product URLs" ON public.product_urls;
+
 CREATE POLICY "Product URLs are viewable by everyone"
   ON public.product_urls FOR SELECT
   USING (true);
@@ -112,6 +117,8 @@ CREATE POLICY supported_sources_admin_write
 -- ============================================================================
 -- Issue: Table public.tags has RLS enabled, but no policies exist
 -- Solution: Add policies for SELECT (public read), and admin-only management
+DROP POLICY IF EXISTS tags_select_all ON public.tags;
+DROP POLICY IF EXISTS tags_admin_write ON public.tags;
 
 CREATE POLICY tags_select_all
   ON public.tags FOR SELECT
@@ -128,6 +135,8 @@ CREATE POLICY tags_admin_write
 
 DROP POLICY IF EXISTS "Authenticated users can create product tags" ON public.product_tags;
 DROP POLICY IF EXISTS "Admins can delete product tags" ON public.product_tags;
+DROP POLICY IF EXISTS product_tags_insert_owner_or_mod ON public.product_tags;
+DROP POLICY IF EXISTS product_tags_delete_owner_mod_or_admin ON public.product_tags;
 
 CREATE POLICY product_tags_insert_owner_or_mod
   ON public.product_tags FOR INSERT

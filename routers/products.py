@@ -247,6 +247,7 @@ def _prepare_product_filters(
     search: Optional[str] = None,
     created_by: Optional[str] = None,
     include_banned: bool = False,
+    allow_aliases: bool = True,
 ) -> dict[str, Any]:
     if max_age is not None:
         updated_since = (datetime.now(UTC) - timedelta(days=max_age)).isoformat()
@@ -255,20 +256,24 @@ def _prepare_product_filters(
     if tag_mode not in {"or", "and"}:
         raise HTTPException(status_code=400, detail="tags_mode must be 'or' or 'and'")
 
-    if _normalize_list(sources):
-        raise HTTPException(
-            status_code=400,
-            detail="Use repeated 'source' parameters; 'sources' is not supported",
-        )
-    if _normalize_list(types):
-        raise HTTPException(
-            status_code=400,
-            detail="Use repeated 'type' parameters; 'types' is not supported",
-        )
+    if allow_aliases:
+        source_values = set(_normalize_list(source) + _normalize_list(sources))
+        type_values = set(_normalize_list(type) + _normalize_list(types))
+    else:
+        if _normalize_list(sources):
+            raise HTTPException(
+                status_code=400,
+                detail="Use repeated 'source' parameters; 'sources' is not supported",
+            )
+        if _normalize_list(types):
+            raise HTTPException(
+                status_code=400,
+                detail="Use repeated 'type' parameters; 'types' is not supported",
+            )
+        source_values = set(_normalize_list(source))
+        type_values = set(_normalize_list(type))
 
-    source_values = set(_normalize_list(source))
     source_values = set(_canonicalize_sources(db, list(source_values)))
-    type_values = set(_normalize_list(type))
     tag_values = _normalize_list(tags)
 
     if include_banned:
@@ -318,7 +323,9 @@ def _apply_product_filters(query, db, filters: dict[str, Any]):
         query = query.gte("source_last_updated", filters["updated_since"])
 
     if filters["min_rating"] is not None:
-        query = query.gte("computed_rating", filters["min_rating"])
+        min_rating = filters["min_rating"]
+        # Include products where either computed rating or source rating meets threshold.
+        query = query.or_(f"computed_rating.gte.{min_rating},source_rating.gte.{min_rating}")
 
     return query
 
@@ -531,8 +538,10 @@ def rating_meets_threshold(product: dict, ratings_map: dict[str, dict], min_rati
 
 def attach_rating_fields(db, product: dict, ratings_map: Optional[dict[str, dict]] = None) -> dict:
     """Attach average, count, and display rating to a single product record."""
-    # Use computed_rating from database for display_rating
-    product["display_rating"] = product.get("computed_rating")
+    # Prefer computed rating, but fall back to source rating when computed is unavailable.
+    computed = _safe_float(product.get("computed_rating"))
+    source = _safe_float(product.get("source_rating"))
+    product["display_rating"] = computed if computed is not None else source
     
     # Only fetch detailed breakdown if needed
     if ratings_map is None and product.get("computed_rating") is not None:
@@ -583,15 +592,12 @@ async def get_product_types(
         except Exception:
             # Fallback to distinct query
             try:
-                if getattr(db, "backend", None) == "supabase":
-                    resp = db.table("products").select("type", distinct=True).execute()
-                    product_types = {
-                        str(row.get("type")).strip()
-                        for row in (resp.data or [])
-                        if row.get("type") and str(row.get("type")).strip()
-                    }
-                else:
-                    raise TypeError("distinct not supported for this backend")
+                resp = db.table("products").select("type", distinct=True).execute()
+                product_types = {
+                    str(row.get("type")).strip()
+                    for row in (resp.data or [])
+                    if row.get("type") and str(row.get("type")).strip()
+                }
             except TypeError:
                 # Final fallback: paginate (slow but works)
                 page_size = 1000
@@ -784,6 +790,7 @@ async def get_products(
         search=search,
         created_by=created_by,
         include_banned=include_banned,
+        allow_aliases=True,
     )
 
     query = _apply_product_filters(db.table("products").select("*"), db, filters)
@@ -854,8 +861,10 @@ async def get_products(
         # Add top-level stars derived from source_rating_count
         item["stars"] = item.get("source_rating_count") or 0
         
-        # Use computed_rating for display_rating (already in database)
-        item["display_rating"] = item.get("computed_rating")
+        # Prefer computed rating, but fall back to source rating.
+        computed = _safe_float(item.get("computed_rating"))
+        source = _safe_float(item.get("source_rating"))
+        item["display_rating"] = computed if computed is not None else source
         
         # Only fetch detailed rating breakdown if explicitly requested
         if ratings_map:
@@ -920,6 +929,7 @@ async def count_products(
         search=search,
         created_by=created_by,
         include_banned=include_banned,
+        allow_aliases=True,
     )
 
     total = None
@@ -978,12 +988,12 @@ async def get_product(
     db = Depends(get_db),
 ):
     """Get a single product by ID"""
-    response = db.table("products").select("*").eq("id", product_id).execute()
-    
-    if not response.data:
+    result = _get_product_by_identifier(db, product_id)
+
+    if not result:
         raise HTTPException(status_code=404, detail="Product not found")
-    
-    result = response.data[0]
+
+    product_id = result["id"]
     # Attach editor_ids
     owners_response = db.table("product_editors").select("user_id").eq("product_id", product_id).execute()
     result["editor_ids"] = [row["user_id"] for row in owners_response.data] if owners_response.data else []
@@ -1291,18 +1301,9 @@ async def update_product(
     # Check if user is in product_editors if not creator/admin/moderator
     is_editor = False
     if not is_creator and not is_admin_or_moderator:
-        # Need to check product_editors table
         from services.database import db_adapter
-        # In test environment (SQLite), use the database adapter's table API
-        if db_adapter.supabase is not None:
-            # Production: use Supabase client with service key to avoid RLS issues
-            editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-            is_editor = bool(editors_check.data)
-        else:
-            # Test environment: use database adapter's table API
-            from database_adapter import ProductEditor
-            editor_check = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-            is_editor = bool(editor_check.data)
+        editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+        is_editor = bool(editors_check.data)
     
     # Require at least one authorization path
     if not (is_creator or is_admin_or_moderator or is_editor):
@@ -1401,18 +1402,9 @@ async def patch_product(
     # Check if user is in product_editors if not creator/admin/moderator
     is_editor = False
     if not is_creator and not is_admin_or_moderator:
-        # Need to check product_editors table
         from services.database import db_adapter
-        # In test environment (SQLite), use the database adapter's query methods
-        if db_adapter.supabase is not None:
-            # Production: use Supabase client with service key to avoid RLS issues
-            editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-            is_editor = bool(editors_check.data)
-        else:
-            # Test environment: use database adapter's table API
-            from database_adapter import ProductEditor
-            editor_check = db.table("product_editors").select("*").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
-            is_editor = bool(editor_check.data)
+        editors_check = db_adapter.supabase.table("product_editors").select("user_id").eq("product_id", product_id).eq("user_id", current_user["id"]).execute()
+        is_editor = bool(editors_check.data)
     
     # Require at least one authorization path
     if not (is_creator or is_admin_or_moderator or is_editor):
@@ -1613,6 +1605,7 @@ async def bulk_delete_products(
             if payload and "include_banned" in payload.model_fields_set
             else include_banned
         ),
+        allow_aliases=False,
     )
 
     has_search_filters = any([
@@ -1643,7 +1636,7 @@ async def bulk_delete_products(
             return {"deleted_count": 0, "message": "No products found matching criteria"}
 
         print(f"[Bulk Delete] About to delete {len(ids_to_delete)} products: {ids_to_delete[:5]}...")
-        print(f"[Bulk Delete] Backend type: {getattr(db, 'backend', 'unknown')}")
+        print(f"[Bulk Delete] Backend type: supabase")
 
         async def _delete_supabase(ids: list[str]) -> int:
             # Use REST endpoint with Prefer:return=minimal to avoid JSON serialization errors
@@ -1667,10 +1660,7 @@ async def bulk_delete_products(
                     deleted += len(chunk)
             return deleted
 
-        if getattr(db, "backend", None) == "supabase":
-            await _delete_supabase(ids_to_delete)
-        else:
-            db.table("products").delete().in_("id", ids_to_delete).execute()
+        await _delete_supabase(ids_to_delete)
 
         print(f"[Bulk Delete] Delete completed for {len(ids_to_delete)} IDs")
 
