@@ -33,6 +33,32 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 logger = logging.getLogger(__name__)
 
 
+def has_production_indicators(current_settings) -> bool:
+    """Return True only when configuration clearly points at a production deployment.
+
+    A Supabase-hosted URL alone is not enough to imply production because the repo also
+    uses a dedicated Supabase test project. Production should be identified by explicit
+    environment settings, a non-local production URL, or the default production env file.
+    """
+    env_name = (
+        current_settings.ENVIRONMENT
+        or os.getenv("ENVIRONMENT")
+        or ""
+    ).strip().lower()
+    if env_name == "production":
+        return True
+
+    production_url = (current_settings.PRODUCTION_URL or "").strip().lower()
+    if production_url and "localhost" not in production_url and "127.0.0.1" not in production_url:
+        return True
+
+    env_file = os.getenv("ENV_FILE", ".env").strip()
+    supabase_configured = bool(
+        current_settings.SUPABASE_URL and "dummy" not in current_settings.SUPABASE_URL
+    )
+    return env_file == ".env" and supabase_configured
+
+
 @app.on_event("startup")
 async def validate_security_configuration():
     """Validate critical security settings on startup.
@@ -50,22 +76,7 @@ async def validate_security_configuration():
     cors_origins = get_cors_origins()
     logger.info(f"CORS origins configured: {cors_origins}")
     
-    # Detect production environment by checking for production indicators
-    is_production = any([
-        # Production Supabase URL (not localhost/dummy)
-        local_settings.SUPABASE_URL and 
-        "supabase.co" in local_settings.SUPABASE_URL and
-        "dummy" not in local_settings.SUPABASE_URL,
-        
-        # Production domain in CORS
-        local_settings.PRODUCTION_URL and 
-        "localhost" not in local_settings.PRODUCTION_URL and
-        local_settings.PRODUCTION_URL.strip(),
-        
-        # Explicit production environment variable
-        os.getenv("ENVIRONMENT") == "production",
-        os.getenv("ENV") == "production",
-    ])
+    is_production = has_production_indicators(local_settings)
     
     # CRITICAL: Prevent TEST_MODE in production
     if local_settings.TEST_MODE and is_production:
@@ -307,19 +318,7 @@ async def health_check():
     # Load fresh settings to report current mode
     current_settings = load_settings_from_env()
     
-    # Detect production environment
-    is_production = any([
-        current_settings.SUPABASE_URL and 
-        "supabase.co" in current_settings.SUPABASE_URL and
-        "dummy" not in current_settings.SUPABASE_URL,
-        
-        current_settings.PRODUCTION_URL and 
-        "localhost" not in current_settings.PRODUCTION_URL and
-        current_settings.PRODUCTION_URL.strip(),
-        
-        os.getenv("ENVIRONMENT") == "production",
-        os.getenv("ENV") == "production",
-    ])
+    is_production = has_production_indicators(current_settings)
     
     return {
         "status": "healthy",

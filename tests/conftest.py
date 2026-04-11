@@ -275,11 +275,21 @@ def _seed_test_data(db):
         },
     ]
     for row in scraper_search_terms:
-        try:
-            db.table("scraper_search_terms").upsert(row, on_conflict="platform").execute()
-        except Exception as exc:
-            # Keep seed resilient across schema variants (array vs normalized search terms).
-            logger.debug("Ignoring error seeding scraper_search_terms %r: %s", row, exc, exc_info=True)
+        platform = row["platform"]
+        for term in row["search_terms"]:
+            try:
+                db.table("scraper_search_terms").upsert(
+                    {"platform": platform, "search_term": term},
+                    on_conflict="platform,search_term",
+                ).execute()
+            except Exception as exc:
+                logger.debug(
+                    "Ignoring error seeding scraper_search_terms %r/%r: %s",
+                    platform,
+                    term,
+                    exc,
+                    exc_info=True,
+                )
 
     # Test users with fixed IDs (match DEV_USER_IDS in services/auth.py)
     for user in TEST_USERS:

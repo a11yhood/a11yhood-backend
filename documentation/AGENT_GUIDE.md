@@ -75,8 +75,8 @@ naive_timestamp = datetime.now(UTC).replace(tzinfo=None)
 - Add negative-path tests when changing contracts (invalid token, wrong role, bad payload) to keep security behavior stable.
 
 ## Helper Functions & Patterns
-- **Server start scripts**: use `./start-dev.sh --seed` (local SQLite + seeds) or `./start-prod.sh` (Supabase). On the external host, use the deploy flow with production env vars. Prefer these over manual uvicorn/npm commands unless debugging.
-- **Database access**: backend code should go through `database_adapter.py` / services (not direct Supabase client) so SQLite and Supabase both work.
+- **Server start scripts**: use `./start-dev.sh --seed` (Supabase test project + seeds) or `./start-prod.sh` (production Supabase). On the external host, use the deploy flow with production env vars. Prefer these over manual uvicorn/npm commands unless debugging.
+- **Database access**: backend code should go through `database_adapter.py` / services (not direct SDK calls) so test and production Supabase flows stay consistent.
 - **Scrapers**: backend handles scraper services/routes; 
 
 ### Supabase Database Migrations
@@ -102,7 +102,6 @@ naive_timestamp = datetime.now(UTC).replace(tzinfo=None)
 - [LOCAL_TESTING.md](LOCAL_TESTING.md) & [QUICK_START.md](QUICK_START.md) — environment and startup.
 - [API_REFERENCE.md](API_REFERENCE.md) — contracts; keep in sync with frontend types and APIService.
 - [CODE_STANDARDS.md](CODE_STANDARDS.md) — style guidance.
-- [SQLITE_MIGRATION_SUMMARY.md](SQLITE_MIGRATION_SUMMARY.md) — dual DB considerations.
 
 ## Quick Commands
 - Full stack start: `./start-dev.sh`

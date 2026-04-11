@@ -1,10 +1,10 @@
 # a11yhood Environment Modes Guide
 
-We operate three environments, separated by env files and database backends:
+We operate three environments, separated by env files and behavior flags:
 
-- Dev/Test (local, SQLite, seeded): `.env.test`, SQLite at `/tmp/a11yhood-test.db`, seeded fixtures, mock users, safe to reset.
-- Production (local, Supabase): `.env`, connects to Supabase, real OAuth, no seeding.
-- Deploy (external host, Supabase): same as Production but running on the external server; `.env` holds the production Supabase and OAuth secrets, no seeding.
+- Dev/Test (Supabase test project, seeded): `.env.test`, uses dedicated test Supabase data, seeded fixtures, dev-token auth, safe to reset.
+- Production (local, Supabase): `.env`, connects to production Supabase, real OAuth, no seeding.
+- Deploy (external host, Supabase): same as Production but running on the external server; `.env` holds production Supabase and OAuth secrets, no seeding.
 
 `ENV_FILE` selects the mode used by [config.py](config.py):
 
@@ -13,7 +13,7 @@ ENV_FILE=.env.test  # Dev/Test
 ENV_FILE=.env       # Production/Deploy
 ```
 
-## Dev/Test (Local SQLite + Seeds)
+## Dev/Test (Supabase Test Project + Seeds)
 
 Setup
 ```bash
@@ -27,15 +27,15 @@ Start Dev/Test
 
 What happens
 - Exports `ENV_FILE=.env.test`
-- Uses SQLite at `/tmp/a11yhood-test.db`
+- Connects to the dedicated Supabase test project
 - Runs `seed_scripts/seed_all.py` (test users/products/collections, search terms)
-- Disables real OAuth (uses mock/test users)
+- Uses `TEST_MODE=true` behavior (dev tokens, no scheduled scrapers)
 
 Running tests
 ```bash
 ./run-tests.sh
 ```
-Tests always set `ENV_FILE=.env.test` and use the same SQLite DB.
+Tests always set `ENV_FILE=.env.test` and run against the Supabase test project.
 
 Stop
 ```bash
@@ -90,7 +90,7 @@ Production → Dev/Test
 ## Safety Checks
 
 - Confirm the active env: `echo $ENV_FILE` (`.env.test` for Dev/Test, `.env` for Production/Deploy).
-- Dev/Test leaves a local file at `/tmp/a11yhood-test.db`; Production/Deploy do not.
+- Confirm test mode intent: `.env.test` should use `TEST_MODE=true`.
 - If seeding fails in Dev/Test, rerun `./start-dev.sh --seed` after ensuring `.env.test` exists.
 
 ## Related Documentation

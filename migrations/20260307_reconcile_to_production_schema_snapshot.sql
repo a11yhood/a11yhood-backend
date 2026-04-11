@@ -27,6 +27,9 @@ CREATE INDEX IF NOT EXISTS products_url_idx1 ON public.products USING btree (url
 CREATE INDEX IF NOT EXISTS products_matched_search_terms_idx ON public.products USING gin (matched_search_terms);
 CREATE INDEX IF NOT EXISTS idx_collections_slug_lookup ON public.collections USING btree (slug);
 
+-- Preserve slug uniqueness before removing legacy-named constraint.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_slug ON public.collections USING btree (slug);
+
 ALTER TABLE public.collections DROP CONSTRAINT IF EXISTS collections_slug_key;
 DROP INDEX IF EXISTS idx_product_urls_creator;
 DROP INDEX IF EXISTS idx_product_urls_product;

@@ -105,7 +105,7 @@ Three environment modes are now supported:
 1. **Development** (`ENVIRONMENT=development`)
    - TEST_MODE allowed
    - Default SECRET_KEY accepted
-   - SQLite database
+   - Supabase test project
    - Dev tokens work
 
 2. **Staging** (`ENVIRONMENT=staging`)
@@ -148,10 +148,10 @@ pytest tests/test_startup_security.py -v
 
 ### Setting Up Local Development
 
-1. Copy `.env.test` for SQLite-based development:
+1. Use `.env.test` for Supabase test-project development:
    ```bash
-   # .env.test is already configured for local dev
-   # Just ensure TEST_MODE=true
+   # Ensure .env.test has test-project SUPABASE_URL/SUPABASE_KEY
+   # and TEST_MODE=true
    ```
 
 2. (Optional) Add your own OAuth credentials to `.env.test`:
@@ -212,9 +212,9 @@ See the full audit for implementation details and code examples.
 ### `.env.test` - Development/Testing
 ```dotenv
 TEST_MODE=true
-DATABASE_URL=sqlite+aiosqlite:////tmp/a11yhood-test.db
 SECRET_KEY=test-secret-key-change-in-production
-SUPABASE_URL=https://dummy.supabase.co  # Not used
+SUPABASE_URL=https://your-test-project.supabase.co
+SUPABASE_KEY=<test-service-role-key>
 ```
 
 ### `.env` - Production
@@ -252,7 +252,7 @@ To verify security configuration:
 
 ```bash
 # Start backend
-./start-prod.sh  # or docker-compose up
+./start-prod.sh
 
 # Check logs for validation output
 # Should see:

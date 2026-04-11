@@ -13,7 +13,7 @@ All markdown documentation (except repository READMEs) lives here. Below is an i
 - [ARCHITECTURE.md](ARCHITECTURE.md) — System design and component boundaries
 - [API_REFERENCE.md](API_REFERENCE.md) — Backend endpoints
 - [DATABASE.md](DATABASE.md) & [DATA_PERSISTENCE.md](DATA_PERSISTENCE.md) — Schema and storage approach
-- [SQLITE_MIGRATION_SUMMARY.md](SQLITE_MIGRATION_SUMMARY.md) & [TEST_DATABASE_SQLITE.md](TEST_DATABASE_SQLITE.md) — Test DB migration and setup
+- [SQLITE_MIGRATION_SUMMARY.md](SQLITE_MIGRATION_SUMMARY.md) & [TEST_DATABASE_SQLITE.md](TEST_DATABASE_SQLITE.md) — Archived historical notes (not part of current Supabase runtime path)
 - [SOURCE_RATINGS.md](SOURCE_RATINGS.md) — Source rating logic
 
 ## Collections

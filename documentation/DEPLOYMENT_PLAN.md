@@ -9,7 +9,7 @@ This document outlines the phased approach to deploying a11yhood from a test env
 
 ## Current State
 
-- **Test Environment**: SQLite database (`backend/test.db`) for rapid development
+- **Test Environment**: Dedicated Supabase test project (`.env.test`) for development/testing
 - **Test Scripts**: `./start-dev.sh` with `.env.test` configuration
 - **Test Data**: Seeded users, products, and sources for consistent testing
 - **All tests passing**: 198/198
@@ -270,12 +270,12 @@ lsof -i :8000
 
 ### Switching Between Test and Production
 
-The application supports running in both test (SQLite) and production (Supabase) modes:
+The application supports running in both test (Supabase test project) and production (Supabase production project) modes:
 
 **Test Environment** (development, CI/CD):
 ```bash
-./start-dev.sh   # Uses .env.test, SQLite, seeded data
-./run-tests.sh   # Runs all tests against SQLite
+./start-dev.sh   # Uses .env.test, Supabase test project, seeded data
+./run-tests.sh   # Runs all tests against Supabase test project
 ```
 
 **Production Environment** (local with production DB):
@@ -288,7 +288,7 @@ The application supports running in both test (SQLite) and production (Supabase)
 | Aspect | Test Environment | Production Environment |
 |--------|-----------------|----------------------|
 | Backend Config | `.env.test` | `.env` |
-| Database | SQLite (`test.db`) | Supabase PostgreSQL |
+| Database | Supabase test project | Supabase PostgreSQL |
 | Users | Seeded test users | Real GitHub OAuth |
 | OAuth | Mock/bypass | Real GitHub/Ravelry/etc |
 | Data | Ephemeral (can reset) | Persistent (production) |

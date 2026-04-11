@@ -55,6 +55,13 @@ class DatabaseAdapter:
         "scraper_search_terms",
     ]
 
+    _TEST_TABLE_FILTERS = {
+        # Composite PK; no standalone id column.
+        "collection_products": ("collection_id", "00000000-0000-0000-0000-000000000000"),
+        # Normalized search-term rows keep a bigint id in the live schema.
+        "scraper_search_terms": ("id", 0),
+    }
+
     def __init__(self, settings=None):
         from config import get_settings
         self.settings = settings or get_settings()
@@ -83,22 +90,13 @@ class DatabaseAdapter:
         Uses the service-role key, which bypasses RLS.
         Deletes in dependency order so foreign-key constraints are satisfied.
         """
-        # collection_products has a composite PK (collection_id, product_id)
-        # with no single "id" column, so filter on collection_id.
-        try:
-            self.supabase.table("collection_products").delete().gte(
-                "collection_id", "00000000-0000-0000-0000-000000000000"
-            ).execute()
-        except Exception as exc:
-            logger.warning("Failed to cleanup table 'collection_products': %s", exc)
-
-        # All remaining tables use a UUID "id" column.
-        uuid_tables = [t for t in self._TEST_TABLES_ORDER if t != "collection_products"]
-        for table in uuid_tables:
+        for table in self._TEST_TABLES_ORDER:
             try:
-                self.supabase.table(table).delete().gte(
-                    "id", "00000000-0000-0000-0000-000000000000"
-                ).execute()
+                column, lower_bound = self._TEST_TABLE_FILTERS.get(
+                    table,
+                    ("id", "00000000-0000-0000-0000-000000000000"),
+                )
+                self.supabase.table(table).delete().gte(column, lower_bound).execute()
             except Exception as exc:
                 logger.warning("Failed to cleanup table '%s': %s", table, exc)
 

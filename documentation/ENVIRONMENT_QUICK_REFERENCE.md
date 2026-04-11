@@ -150,13 +150,13 @@ kill $(lsof -t -i:8000)  # Backend
 
 | Aspect | Test Environment | Production Environment |
 |--------|-----------------|----------------------|
-| **Database** | SQLite (file) | Supabase (cloud) |
+| **Database** | Supabase test project | Supabase production project |
 | **Data** | Ephemeral, can reset | Persistent, permanent |
 | **Users** | Seeded test users | Real GitHub OAuth |
 | **OAuth** | Mock (dropdown) | Real (GitHub redirect) |
 | **Secrets** | Safe defaults | Real secrets required |
-| **Internet** | Optional (except scraping) | Required (Supabase) |
-| **Speed** | Fast (local DB) | Slower (network) |
+| **Internet** | Required (Supabase test) | Required (Supabase prod) |
+| **Speed** | Network-dependent | Network-dependent |
 | **Cost** | Free | Supabase usage fees |
 
 ## Environment Variables
