@@ -1,127 +1,82 @@
 """
-Seed test product for local development
+Seed a test product into Supabase.
 
-Creates one test product for testing
+Creates one test product with tags for testing.
 
-Run with: uv run python seed_test_product.py
+Run with: uv run python seed_scripts/seed_test_product.py
 """
 
 import os
 import sys
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from database_adapter import Product, Tag, ProductTag, Base
+
+env_file = os.getenv("ENV_FILE", ".env.test")
+load_dotenv(env_file, override=True)
+
+from config import get_settings
+from database_adapter import DatabaseAdapter
 from services.id_generator import normalize_to_snake_case
-from datetime import datetime, UTC
 
-# Load environment variables
-load_dotenv('.env.test')
-
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./test.db')
-
-# Create database engine and session
-engine = create_engine(DATABASE_URL.replace('sqlite+aiosqlite', 'sqlite'), echo=False)
-SessionLocal = sessionmaker(bind=engine)
-
-# Create tables if they don't exist
-Base.metadata.create_all(bind=engine)
-
-def generate_slug(name: str, db_session) -> str:
-    """Generate a unique slug from a product name"""
-    base_slug = normalize_to_snake_case(name)
-    
-    # Check if base slug exists
-    existing = db_session.query(Product).filter(Product.slug == base_slug).first()
-    if not existing:
-        return base_slug
-    
-    # If base slug exists, try appending numbers
-    for i in range(1, 1000):
-        candidate_slug = f"{base_slug}_{i}"
-        existing = db_session.query(Product).filter(Product.slug == candidate_slug).first()
-        if not existing:
-            return candidate_slug
-    
-    # Fallback (should never reach here)
-    import uuid
-    return f"{base_slug}_{str(uuid.uuid4())[:8]}"
 
 def seed_product():
-    """Create test product in the database"""
+    """Upsert a test product (and its tags) into the database."""
+    settings = get_settings(env_file)
+    db = DatabaseAdapter(settings)
+
     print("Creating test product...\n")
-    
-    db = SessionLocal()
-    
+
+    product_name = "Test Product"
+    product_url = "https://github.com/test/product"
+    product_slug = normalize_to_snake_case(product_name)
+    tag_names = ["accessibility", "testing"]
+
+    # Upsert product (conflict on url)
+    product_data = {
+        "name": product_name,
+        "url": product_url,
+        "source_url": product_url,
+        "slug": product_slug,
+        "type": "Software",
+        "source": "github",
+        "description": "A test product for accessibility",
+    }
     try:
-        # Accessibility-focused test product aligned with frontend tests
-        # Using github.com URL (one of the supported sources)
-        product_name = "Test Product"
-        product_url = "https://github.com/test/product"
-        tags = ["accessibility", "testing"]
-
-        # Check if product already exists by URL
-        existing_product = db.query(Product).filter(Product.url == product_url).first()
-        
-        if existing_product:
-            # Update existing product
-            existing_product.name = product_name
-            existing_product.type = "Software"
-            existing_product.source = "Github"
-            existing_product.description = "A test product for accessibility"
-            existing_product.updated_at = datetime.now(UTC).replace(tzinfo=None)
-            existing_product.source_last_updated = datetime.now(UTC).replace(tzinfo=None)
-            db.commit()
-            product = existing_product
-            print(f"  ✓ Updated existing product: {product_name} (ID: {product.id}, Slug: {product.slug})")
+        result = db.table("products").upsert(product_data, on_conflict="source_url").execute()
+        if result.data:
+            product = result.data[0]
+            print(f"  ✓ Product: {product_name} (ID: {product['id']}, Slug: {product['slug']})")
         else:
-            # Create new product
-            slug = generate_slug(product_name, db)
-            product = Product(
-                name=product_name,
-                url=product_url,
-                type="Software",
-                source="Github",  # Must match supported sources: Ravelry, Github, Thingiverse
-                description="A test product for accessibility",
-                slug=slug,
-                created_at=datetime.now(UTC).replace(tzinfo=None),
-                updated_at=datetime.now(UTC).replace(tzinfo=None),
-                source_last_updated=datetime.now(UTC).replace(tzinfo=None),
-            )
-            db.add(product)
-            db.commit()
-            print(f"  ✓ Created product: {product_name} (ID: {product.id}, Slug: {slug})")
-
-        # Attach tags (mirrors Supabase schema: tags + product_tags)
-        for tag_name in tags:
-            tag = db.query(Tag).filter(Tag.name == tag_name).first()
-            if not tag:
-                tag = Tag(name=tag_name)
-                db.add(tag)
-                db.commit()
-                print(f"  ✓ Created tag: {tag_name}")
-            
-            # Check if tag already linked
-            existing_link = db.query(ProductTag).filter(
-                ProductTag.product_id == product.id,
-                ProductTag.tag_id == tag.id
-            ).first()
-            
-            if not existing_link:
-                link = ProductTag(product_id=product.id, tag_id=tag.id)
-                db.add(link)
-                db.commit()
-                
-        print(f"  ✓ Tags ensured: {', '.join(tags)}")
-
-        print("\n✓ Test product setup complete!")
-        
+            print("  ? Product upsert returned no data")
+            return
     except Exception as e:
-        print(f"\n✗ Error: {str(e)}")
-        db.rollback()
+        print(f"  ✗ Product: {e}")
         sys.exit(1)
-    finally:
-        db.close()
+
+    product_id = product["id"]
+
+    # Ensure tags exist and are linked
+    for tag_name in tag_names:
+        try:
+            tag_result = db.table("tags").upsert({"name": tag_name}, on_conflict="name").execute()
+            if not tag_result.data:
+                tag_result = db.table("tags").select("*").eq("name", tag_name).execute()
+            tag = tag_result.data[0]
+
+            db.table("product_tags").upsert(
+                {"product_id": product_id, "tag_id": tag["id"]},
+                on_conflict="product_id,tag_id",
+            ).execute()
+            print(f"  ✓ Tag: {tag_name}")
+        except Exception as e:
+            print(f"  ✗ Tag '{tag_name}': {e}")
+
+    print("\n✓ Test product seeding complete!")
+
 
 if __name__ == "__main__":
     seed_product()

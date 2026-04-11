@@ -1,4 +1,4 @@
-"""Test rating endpoints against SQLite"""
+"""Test rating endpoints against the Supabase test database"""
 import pytest
 
 

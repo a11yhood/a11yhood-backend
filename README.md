@@ -10,7 +10,7 @@ Additional documentation files can be found in the documentation directory.
 a11yhood-backend/
 ├── main.py                 # FastAPI application entry point
 ├── config.py              # Configuration and environment settings
-├── database_adapter.py     # Dual database support (Supabase + SQLite)
+├── database_adapter.py     # Supabase database adapter (prod + test)
 ├── requirements.txt       # Python dependencies
 ├── pyproject.toml        # Project metadata and dependencies
 │
@@ -71,9 +71,9 @@ a11yhood-backend/
 
 ### Prerequisites
 
-- Docker & Docker Compose (recommended) OR
+- Docker (recommended) OR
 - Python 3.14+ with pip/venv
-- PostgreSQL/Supabase (production) or SQLite (development)
+- Supabase projects/credentials for production and test environments
 
 ### Installation
 
@@ -170,8 +170,10 @@ HOST=localhost
 PORT=8001
 
 # Database
-DATABASE_URL=postgresql://...
-TEST_DATABASE_URL=sqlite:///./test.db
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-service-role-key
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_DB_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
 
 # OAuth
 GITHUB_CLIENT_ID=...
@@ -245,12 +247,12 @@ See [documentation/SECURITY_BEST_PRACTICES.md](documentation/SECURITY_BEST_PRACT
 
 ## Database
 
-a11yhood supports two database backends:
+a11yhood uses Supabase for both production and test environments.
 
-1. **Supabase (PostgreSQL)** - Production database
-2. **SQLite** - Development and testing
+1. **Production Supabase project** - `.env`
+2. **Test Supabase project** - `.env.test`
 
-The database adapter automatically handles both, allowing seamless switching between environments.
+`TEST_MODE` controls runtime behavior (dev tokens, scheduler behavior), not database engine.
 
 Database schema and migrations:
 - Schema: [supabase-schema.sql](supabase-schema.sql)
@@ -300,7 +302,7 @@ The development server automatically reloads on code changes:
 python seed_scripts/seed_all.py
 
 # Apply migrations
-sqlite3 test.db < migrations/20251226_add_scraper_search_terms.sql
+./scripts/apply-migrations.sh --env-file .env.test
 ```
 
 ### Making Changes
@@ -330,14 +332,14 @@ sqlite3 test.db < migrations/20251226_add_scraper_search_terms.sql
 ### Database Changes
 
 1. Create migration file in `migrations/` with timestamp prefix
-2. Apply migration to both Supabase and SQLite test DB
+2. Apply migration to both Supabase environments (test and production)
 3. Update schema documentation
 4. Update models if schema changes
 
 ## Troubleshooting
 
 - **Port 8001 already in use**: Kill the process or use different port: `PORT=8002 python main.py`
-- **Database connection error**: Check `DATABASE_URL` in `.env` and ensure database is running
+- **Database connection error**: Check `SUPABASE_URL`/`SUPABASE_KEY` in `.env` (or `.env.test`) and verify project connectivity
 - **CORS errors**: Verify `ALLOWED_ORIGINS` in `.env` includes your frontend URL
 - **Scraper failures**: Check scraper logs and network connectivity
 

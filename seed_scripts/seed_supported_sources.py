@@ -1,92 +1,52 @@
-#!/usr/bin/env python3
 """
 Seed the supported_sources table with initial data.
-This script can be run independently to populate the supported sources.
 
-Run with: uv run python seed_supported_sources.py
+Run with: uv run python seed_scripts/seed_supported_sources.py
 """
-
-import os
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from database_adapter import SupportedSource, Base
-import uuid
 
 import os
 import sys
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from database_adapter import SupportedSource, Base
-import uuid
 
-# Load environment variables - prefer ENV_FILE if set, otherwise use .env.test
-env_file = os.getenv('ENV_FILE', '.env.test')
-if not os.path.exists(env_file):
-    print(f"Warning: {env_file} not found, using defaults")
-else:
-    load_dotenv(env_file)
+env_file = os.getenv("ENV_FILE", ".env.test")
+load_dotenv(env_file, override=True)
 
-DATABASE_URL = os.getenv('DATABASE_URL')
-if not DATABASE_URL:
-    print("Error: DATABASE_URL not set")
-    sys.exit(1)
-
-# Create database engine and session
-engine = create_engine(DATABASE_URL.replace('sqlite+aiosqlite', 'sqlite'), echo=False)
-SessionLocal = sessionmaker(bind=engine)
-
-# Create tables if they don't exist
-Base.metadata.create_all(bind=engine)
+from config import get_settings
+from database_adapter import DatabaseAdapter
 
 SUPPORTED_SOURCES = [
-    {"domain": "ravelry.com", "name": "ravelry"},
-    {"domain": "github.com", "name": "github"},
-    {"domain": "thingiverse.com", "name": "thingiverse"},
-    {"domain": "example.com", "name": "example"},
+    {"domain": "ravelry.com", "name": "Ravelry"},
+    {"domain": "github.com", "name": "Github"},
+    {"domain": "thingiverse.com", "name": "Thingiverse"},
+    {"domain": "example.com", "name": "Example"},
 ]
 
 
 def seed_supported_sources():
-    """Seed the supported_sources table with initial data."""
-    db = SessionLocal()
-    try:
-        print("Seeding supported_sources table...")
+    """Upsert supported sources into the database."""
+    settings = get_settings(env_file)
+    db = DatabaseAdapter(settings)
 
-        existing = {src.domain.lower(): src for src in db.query(SupportedSource).all()}
-        added = 0
-        updated = 0
+    print("Seeding supported_sources table...")
 
-        for source_data in SUPPORTED_SOURCES:
-            domain = source_data["domain"].lower()
-            name = source_data["name"]
-            existing_source = existing.get(domain)
-
-            if existing_source:
-                if existing_source.name != name:
-                    existing_source.name = name
-                    updated += 1
-            else:
-                source = SupportedSource(
-                    id=str(uuid.uuid4()),
-                    domain=domain,
-                    name=name,
-                )
-                db.add(source)
+    added = 0
+    for source in SUPPORTED_SOURCES:
+        try:
+            result = db.table("supported_sources").upsert(
+                source, on_conflict="domain"
+            ).execute()
+            if result.data:
                 added += 1
-                print(f"  Added: {domain} ({name})")
+                print(f"  ✓ {source['domain']} ({source['name']})")
+        except Exception as e:
+            print(f"  ✗ {source['domain']}: {e}")
 
-        db.commit()
-
-        total = len(existing) + added
-        print(f"✓ Supported sources present: {total} (added {added}, updated {updated})")
-    except Exception as e:
-        db.rollback()
-        print(f"✗ Error seeding supported_sources: {e}")
-        raise
-    finally:
-        db.close()
+    print(f"✓ Supported sources seeded: {added} upserted")
 
 
 if __name__ == "__main__":

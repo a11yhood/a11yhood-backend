@@ -110,7 +110,7 @@ Common issues and solutions documented in [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.m
 | Aspect | Test | Production |
 |--------|------|-----------|
 | Command | `./start-dev.sh` | `./start-prod.sh` |
-| Database | SQLite (local) | Supabase (cloud) |
+| Database | Supabase test project | Supabase production project |
 | Data | Can reset | Permanent |
 | OAuth | Mock | Real GitHub |
 | Use for | Development | Pre-cloud validation |

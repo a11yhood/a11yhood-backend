@@ -1,6 +1,6 @@
 """
 Integration coverage for supported source validation and source-domain request lifecycle.
-These tests use the real database adapter (SQLite) without mocks.
+These tests use the real database adapter (Supabase test instance) without mocks.
 """
 
 
