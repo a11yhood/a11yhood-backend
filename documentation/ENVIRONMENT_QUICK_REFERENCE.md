@@ -239,10 +239,10 @@ uv run pytest tests/test_products.py -v
 ./start-prod.sh
 
 # Stop any environment
-./stop-dev.sh   # or ./stop-prod.sh
+pixi run dev-stop   # or pixi run prod-stop
 
 # Run all backend tests
-./run-tests.sh backend
+pixi run test
 
 # Run specific test file
 cd backend && uv run pytest tests/test_products.py
@@ -285,7 +285,7 @@ ps aux | grep -E "uvicorn|vite"
 
 1. **If you're developing**: Use test environment (`./start-dev.sh`)
 2. **If you're ready to deploy**: Follow [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md)
-3. **If you're testing**: Run `./run-tests.sh  `
+3. **If you're testing**: Run `pixi run test`
 4. **If something breaks**: Check logs (`tail -f *.log`) and try `./start-dev.sh --reset-db`
 
 ## Related Documentation
