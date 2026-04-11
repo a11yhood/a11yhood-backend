@@ -8,7 +8,7 @@ Run commands from the repo root unless noted otherwise.
 - **Node.js 18+**: Frontend development
 - **Python 3.9+**: Backend development
 - **uv**: Python package manager (`pip install uv`)
-- **Pixi**: Environment and task runner for backend (`pixi run run-dev`)
+- **Pixi**: Environment and task runner for backend (`pixi run dev`)
 - **npm**: Node package manager
 - **Supabase test project**: Credentials for the `a11yhood-test` database in the `make4all-test` org
 
@@ -39,11 +39,11 @@ pixi --version
 ### Start Backend with Pixi (recommended)
 
 ```bash
-# Run backend in development mode (uses tasks.run-dev)
-pixi run run-dev
+# Run backend in Docker with test Supabase credentials (.env.test)
+pixi run dev
 ```
 
-The `run-dev` task sets `ENVIRONMENT=development`, uses SQLite (`DATABASE_URL=sqlite:///./test.db`), and starts Uvicorn on port `8000`.
+The `dev` task starts the Docker development server via `scripts/start-dev.sh`, loads `.env.test`, connects to the test Supabase project, and exposes the API on port `8002` by default.
 
 Stop the server with `Ctrl+C`.
 

@@ -6,6 +6,7 @@
 # Usage:
 #   ./start-dev.sh              # Normal start
 #   ./start-dev.sh --reset-db   # Reset Supabase test data before optional seeding
+#   ./start-dev.sh --port 8002  # Expose dev service on a custom host port
 #   ./start-dev.sh --help       # Show help
 
 # Color codes for output
@@ -25,6 +26,7 @@ ts() {
 RESET_DB=false
 SEED_DB=false
 HELP=false
+HOST_PORT=8002
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -35,6 +37,14 @@ while [[ $# -gt 0 ]]; do
     --seed)
       SEED_DB=true
       shift
+      ;;
+    --port)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --port requires a value"
+        exit 1
+      fi
+      HOST_PORT="$2"
+      shift 2
       ;;
     --help)
       HELP=true
@@ -54,6 +64,7 @@ if [ "$HELP" = true ]; then
   echo "Options:"
   echo "  --reset-db   Reset Supabase test data before optional seeding"
   echo "  --seed       Seed the database (runs seed_scripts/seed_all.py in the container)"
+  echo "  --port       Host port for the Docker container (default: 8002)"
   echo "  --help       Show this help message"
   exit 0
 fi
@@ -94,8 +105,8 @@ echo ""
 
 # Start container with volume mount for hot reload
 echo -e "${GREEN}🚀 Starting backend container...${NC} (t=$(ts))"
-echo "   Server will be available at: http://localhost:8000"
-echo "   API documentation at: http://localhost:8000/docs"
+echo "   Server will be available at: http://localhost:${HOST_PORT}"
+echo "   API documentation at: http://localhost:${HOST_PORT}/docs"
 echo "   Code changes will auto-reload"
 echo ""
 
@@ -104,10 +115,10 @@ docker run \
   --name a11yhood-backend-dev \
   --env-file .env.test \
   -e ENV_FILE=.env.test \
-  -p 8000:8000 \
+  -p ${HOST_PORT}:8000 \
   -v "$(pwd):/app" \
   --restart unless-stopped \
-  --health-cmd="curl -f http://localhost:8000/health || exit 1" \
+  --health-cmd="python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\", timeout=2)'" \
   --health-interval=30s \
   --health-timeout=3s \
   --health-retries=3 \
@@ -122,8 +133,9 @@ fi
 
 # Wait for server to be ready
 echo -e "${YELLOW}⏳ Waiting for server to start...${NC}"
+PROBE_URL="http://localhost:${HOST_PORT}/health"
 for i in {1..30}; do
-  if curl -s http://localhost:8000/health >/dev/null 2>&1; then
+  if curl -s "$PROBE_URL" >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Backend is ready!${NC} (t=$(ts))"
     break
   fi
@@ -147,7 +159,7 @@ for i in {1..30}; do
 done
 
 # Final check
-if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
+if ! curl -s "$PROBE_URL" >/dev/null 2>&1; then
   echo -e "${RED}✗ Server failed to start within 30 seconds${NC}"
   echo "  Check logs with: docker logs a11yhood-backend-dev"
   docker logs --tail=50 a11yhood-backend-dev
@@ -191,10 +203,10 @@ echo ""
 echo -e "${GREEN}✅ Development environment is running!${NC} (t=$(ts))"
 echo ""
 echo -e "${BLUE}📡 Backend API:${NC}"
-echo "   http://localhost:8000"
+echo "   http://localhost:${HOST_PORT}"
 echo ""
 echo -e "${BLUE}📚 API Documentation:${NC}"
-echo "   http://localhost:8000/docs"
+echo "   http://localhost:${HOST_PORT}/docs"
 echo ""
 echo -e "${BLUE}💡 To monitor logs:${NC}"
 echo "   docker logs -f a11yhood-backend-dev"

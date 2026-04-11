@@ -16,6 +16,30 @@ cmd = "pytest"
 [feature.test.tasks.test.env]
 ENV_FILE = ".env.test"
 
+[tasks.dev]
+description = "Start dev backend in Docker using Supabase test env on port 8002"
+cmd = "./scripts/start-dev.sh --port 8002"
+
+[tasks.dev-seed]
+description = "Start dev backend in Docker and seed Supabase test data"
+cmd = "./scripts/start-dev.sh --seed --port 8002"
+
+[tasks.dev-reset]
+description = "Start dev backend in Docker and reset Supabase test data"
+cmd = "./scripts/start-dev.sh --reset-db --port 8002"
+
+[tasks.dev-stop]
+description = "Stop dev backend Docker container"
+cmd = "./scripts/stop-dev.sh"
+
+[tasks.prod]
+description = "Start prod backend in Docker using .env on port 8001"
+cmd = "./scripts/start-prod.sh"
+
+[tasks.prod-stop]
+description = "Stop prod backend Docker container"
+cmd = "./scripts/stop-prod.sh"
+
 [tasks.serve]
 description = "serve the a11yhood application from supabase"
 cmd = "python -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 4"

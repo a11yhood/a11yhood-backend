@@ -216,14 +216,14 @@ echo -e "${GREEN}🚀 Starting production container...${NC} (t=$(ts))"
 HOST_PORT=8001
 PROTO=http
 CURL_FLAGS="-s"
-HEALTH_CMD="curl -f http://localhost:8000/health || exit 1"
+HEALTH_CMD="python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\", timeout=2)'"
 MOUNT_CERTS=()
 
 if [ "$HTTPS_ENABLED" = true ]; then
   HOST_PORT=$HTTPS_PORT
   PROTO=https
   CURL_FLAGS="-ks"
-  HEALTH_CMD="curl -kf https://localhost:8000/health || exit 1"
+  HEALTH_CMD="python -c 'import ssl, urllib.request; ctx=ssl._create_unverified_context(); urllib.request.urlopen(\"https://localhost:8000/health\", context=ctx, timeout=2)'"
   MOUNT_CERTS=(
     -v "$(cd "$(dirname "$HTTPS_CERTFILE")" && pwd)/$(basename "$HTTPS_CERTFILE")":/certs/server.crt:ro
     -v "$(cd "$(dirname "$HTTPS_KEYFILE")" && pwd)/$(basename "$HTTPS_KEYFILE")":/certs/server.key:ro
