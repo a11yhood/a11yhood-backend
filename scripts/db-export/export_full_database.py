@@ -77,23 +77,91 @@ PUBLIC_PRODUCT_COLUMNS = [
     "updated_at",
 ]
 
-PAGE_SIZE = 1000
+PUBLIC_PRODUCT_URL_COLUMNS = [
+    "id",
+    "product_id",
+    "url",
+    "description",
+    "created_at",
+    "updated_at",
+]
+
+# Supabase REST currently returns at most 1000 rows per request.
+API_PAGE_SIZE = 1000
+# Optional cap for sampling; None means export full tables.
+MAX_ROWS_PER_TABLE: int | None = None
+
+ORDER_COLUMNS: dict[str, list[str]] = {
+    "valid_categories": ["category"],
+    "supported_sources": ["id"],
+    "scraper_search_terms": ["id"],
+    "users": ["id"],
+    "products": ["id"],
+    "product_editors": ["id"],
+    "product_urls": ["id"],
+    "ratings": ["id"],
+    "discussions": ["id"],
+    "blog_posts": ["id"],
+    "collections": ["id"],
+    "user_activities": ["id"],
+    "tags": ["id"],
+    "product_tags": ["id"],
+    "scraping_logs": ["id"],
+    "user_requests": ["id"],
+    "oauth_configs": ["id"],
+}
+
+PRIVATE_COMPLEX_COLUMN_TYPES: dict[str, dict[str, str]] = {
+    "products": {
+        "external_data": "jsonb",
+        "editor_ids": "uuid[]",
+        "matched_search_terms": "jsonb",
+    },
+    "blog_posts": {
+        "author_ids": "uuid[]",
+        "author_names": "text[]",
+        "tags": "text[]",
+    },
+    "user_activities": {
+        "activity_metadata": "jsonb",
+    },
+}
 
 
-def _escape_sql_value(value: Any) -> str:
-    """Escape Python values to SQL format."""
+def _escape_array_element(value: Any) -> str:
     if value is None:
         return "NULL"
-    elif isinstance(value, bool):
+    if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
-    elif isinstance(value, (int, float)):
+    if isinstance(value, (int, float)):
         return str(value)
-    elif isinstance(value, str):
+    escaped = str(value).replace("'", "''")
+    return f"'{escaped}'"
+
+
+def _escape_sql_value(value: Any, table_name: str | None = None, column_name: str | None = None) -> str:
+    """Escape Python values to SQL format."""
+    complex_type = PRIVATE_COMPLEX_COLUMN_TYPES.get(table_name or "", {}).get(column_name or "")
+
+    if value is None:
+        return "NULL"
+    if complex_type == "jsonb":
+        escaped = json.dumps(value, sort_keys=True).replace("'", "''")
+        return f"'{escaped}'::jsonb"
+    if complex_type and complex_type.endswith("[]"):
+        if not value:
+            return f"ARRAY[]::{complex_type}"
+        return f"ARRAY[{', '.join(_escape_array_element(item) for item in value)}]::{complex_type}"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
         escaped = value.replace("'", "''")
         return f"'{escaped}'"
-    else:
-        escaped = str(value).replace("'", "''")
-        return f"'{escaped}'"
+
+    escaped = str(value).replace("'", "''")
+    return f"'{escaped}'"
 
 
 def _escape_public_sql_value(value: Any) -> str:
@@ -110,26 +178,32 @@ def _escape_public_sql_value(value: Any) -> str:
 
 
 def _fetch_all_rows(db, table_name: str, columns: str = "*") -> list[dict[str, Any]]:
-    """Fetch all rows from a Supabase table, paging past the default API limit."""
+    """Fetch rows from a Supabase table, paging until exhausted or optional cap."""
     rows: list[dict[str, Any]] = []
     offset = 0
 
     while True:
-        response = (
-            db.table(table_name)
-            .select(columns)
-            .range(offset, offset + PAGE_SIZE - 1)
-            .execute()
-        )
+        if MAX_ROWS_PER_TABLE is None:
+            page_limit = API_PAGE_SIZE
+        else:
+            if offset >= MAX_ROWS_PER_TABLE:
+                break
+            remaining = MAX_ROWS_PER_TABLE - offset
+            page_limit = min(API_PAGE_SIZE, remaining)
+
+        query = db.table(table_name).select(columns)
+        for order_column in ORDER_COLUMNS.get(table_name, []):
+            query = query.order(order_column)
+        response = query.range(offset, offset + page_limit - 1).execute()
         batch = response.data or []
         if not batch:
             break
 
         rows.extend(batch)
-        if len(batch) < PAGE_SIZE:
+        if len(batch) < page_limit:
             break
 
-        offset += PAGE_SIZE
+        offset += page_limit
 
     return rows
 
@@ -150,7 +224,10 @@ def _export_table_data(db, table_name: str) -> list[str]:
         lines.append(f"TRUNCATE TABLE {table_name} CASCADE;")
 
         for row in data:
-            values = [_escape_sql_value(row.get(col)) for col in columns]
+            values = [
+                _escape_sql_value(row.get(col), table_name=table_name, column_name=col)
+                for col in columns
+            ]
             cols_str = ", ".join(columns)
             vals_str = ", ".join(values)
             lines.append(f"INSERT INTO {table_name} ({cols_str}) VALUES ({vals_str});")
@@ -213,6 +290,32 @@ def _export_products_public(db) -> list[str]:
     except Exception as e:
         logger.warning(f"Failed to export products: {e}")
         return [f"-- Failed to export products: {e}"]
+
+
+def _export_product_urls_public(db) -> list[str]:
+    lines = []
+
+    try:
+        data = _fetch_all_rows(db, "product_urls", ",".join(PUBLIC_PRODUCT_URL_COLUMNS))
+
+        lines.append(f"-- product_urls ({len(data)} rows, public columns only)")
+        if not data:
+            return lines
+
+        lines.append("TRUNCATE TABLE product_urls CASCADE;")
+
+        for row in data:
+            values = [_escape_public_sql_value(row.get(col)) for col in PUBLIC_PRODUCT_URL_COLUMNS]
+            lines.append(
+                f"INSERT INTO product_urls ({', '.join(PUBLIC_PRODUCT_URL_COLUMNS)}) VALUES ({', '.join(values)});"
+            )
+
+        lines.append("")
+        return lines
+
+    except Exception as e:
+        logger.warning(f"Failed to export product_urls: {e}")
+        return [f"-- Failed to export product_urls: {e}"]
 
 
 def _export_ratings_aggregated(db) -> list[str]:
@@ -279,7 +382,7 @@ def _export_public_mode(db) -> tuple[list[str], list[str]]:
     exported_tables.append("products")
 
     logger.info("  - product_urls")
-    sql_lines.extend(_export_table_data_public(db, "product_urls"))
+    sql_lines.extend(_export_product_urls_public(db))
     exported_tables.append("product_urls")
 
     logger.info("  - product_tags")
@@ -357,6 +460,8 @@ def _header_for_mode(mode: str) -> list[str]:
 
 
 def main():
+    global MAX_ROWS_PER_TABLE
+
     parser = argparse.ArgumentParser(
         description="Export database dump for public, test, or private mode"
     )
@@ -382,7 +487,15 @@ def main():
         action="store_true",
         help="Backward-compatible no-op flag used by older test export calls",
     )
+    parser.add_argument(
+        "--max-rows-per-table",
+        type=int,
+        default=None,
+        help="Optional row cap per table for sample exports; default exports full tables",
+    )
     args = parser.parse_args()
+
+    MAX_ROWS_PER_TABLE = args.max_rows_per_table
 
     default_env, default_output = _mode_defaults(args.mode)
     env_file = args.env_file or default_env

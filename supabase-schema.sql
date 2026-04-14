@@ -232,6 +232,7 @@
     product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    owned BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     
@@ -293,6 +294,18 @@
     updated_at TIMESTAMPTZ DEFAULT NOW()
   );
 
+  CREATE TABLE collection_products (
+    collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    added_at TIMESTAMPTZ DEFAULT NOW(),
+    position INTEGER DEFAULT 0,
+    PRIMARY KEY (collection_id, product_id)
+  );
+
+  CREATE INDEX idx_collection_products_collection_id ON collection_products(collection_id);
+  CREATE INDEX idx_collection_products_product_id ON collection_products(product_id);
+  CREATE INDEX idx_collection_products_position ON collection_products(collection_id, position);
+
   -- ============================================================================
   -- USER ACTIVITIES TABLE
   -- ============================================================================
@@ -301,7 +314,7 @@
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     type TEXT NOT NULL CHECK (type IN ('product_submit', 'rating', 'discussion', 'tag')),
     product_id UUID REFERENCES products(id) ON DELETE SET NULL,
-    timestamp BIGINT NOT NULL,
+      timestamp TIMESTAMPTZ NOT NULL,
     activity_metadata JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
@@ -332,7 +345,7 @@
   CREATE TABLE scraping_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    source TEXT NOT NULL CHECK (source IN ('thingiverse', 'ravelry', 'github')),
+    source TEXT NOT NULL,
     products_found INTEGER DEFAULT 0,
     products_added INTEGER DEFAULT 0,
     products_updated INTEGER DEFAULT 0,
