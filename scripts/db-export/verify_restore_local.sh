@@ -41,7 +41,7 @@ cleanup
 docker run --name "$DB_CONTAINER" \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=postgres \
-  -d postgres:16 >/dev/null
+  -d postgres:17 >/dev/null
 
 for _ in {1..30}; do
   if docker exec "$DB_CONTAINER" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
