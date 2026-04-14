@@ -207,6 +207,8 @@ def fetch_exact_count(client, table_name: str) -> int:
         if getattr(response, "count", None) is not None:
             return int(response.count)
     except TypeError:
+        # Some client/response combinations do not provide a count-compatible shape.
+        # Fall back to fetching rows and counting them to preserve existing behavior.
         pass
 
     return len(fetch_all_rows(client, table_name, "*"))
