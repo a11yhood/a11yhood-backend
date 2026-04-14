@@ -12,8 +12,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from dotenv import dotenv_values
-from supabase import create_client
 
+from supabase import create_client
 
 EXPECTED_PUBLIC_TABLES = {
     "valid_categories",

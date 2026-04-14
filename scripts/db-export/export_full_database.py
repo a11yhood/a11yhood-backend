@@ -7,11 +7,11 @@ Modes:
     - private: full export from private/production environment
 """
 
+import argparse
+import json
+import logging
 import os
 import sys
-import argparse
-import logging
-import json
 from datetime import datetime
 from typing import Any
 
@@ -20,7 +20,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

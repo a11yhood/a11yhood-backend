@@ -76,6 +76,22 @@ cmd = "python scripts/db-export/validate_exports_schema.py"
 description = "Verify exports can be restored into local Postgres"
 cmd = "bash scripts/db-export/verify_restore_local.sh"
 
+[tasks.lint-python]
+description = "Lint Python code with ruff"
+cmd = "ruff check scripts/db-export/ --fix"
+
+[tasks.format-python]
+description = "Format Python code with ruff"
+cmd = "ruff format scripts/db-export/"
+
+[tasks.lint-shell]
+description = "Lint shell scripts with shellcheck"
+cmd = "shellcheck scripts/db-export/verify_restore_local.sh"
+
+[tasks.lint]
+description = "Run all linters"
+cmd = "pixi run lint-python && pixi run lint-shell"
+
 [tasks.serve]
 description = "serve the a11yhood application from supabase"
 cmd = "python -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 4"
