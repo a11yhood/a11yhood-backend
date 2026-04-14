@@ -207,7 +207,9 @@ def fetch_exact_count(client, table_name: str) -> int:
         if getattr(response, "count", None) is not None:
             return int(response.count)
     except TypeError:
-        pass
+        # Some client/response variants may raise TypeError for exact count requests.
+        # Fall back to fetching rows and counting them to preserve correctness.
+        return len(fetch_all_rows(client, table_name, "*"))
 
     return len(fetch_all_rows(client, table_name, "*"))
 
