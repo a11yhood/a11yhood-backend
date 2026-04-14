@@ -160,6 +160,7 @@ docker run \
   -d \
   --name "$CONTAINER_NAME" \
   --env-file "$ENV_FILE" \
+  -e ENV_FILE="$ENV_FILE" \
   -p "${HOST_PORT}:8000" \
   --health-cmd="python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\", timeout=2)'" \
   --health-interval=10s \
@@ -171,11 +172,33 @@ docker run \
 
 BASE="http://localhost:${HOST_PORT}"
 
-# Wait for /health to respond (up to 60 s)
-if ! wait_for_health_check "$BASE/health" 60 "http"; then
-  log_error "Container did not become healthy"
-  echo "  Recent logs:"
-  docker logs --tail=40 "$CONTAINER_NAME" 2>/dev/null || true
+# Wait for /health to respond (up to 60 s), failing fast if the container exits
+log_wait "Waiting for server to start..."
+STARTED=false
+for i in $(seq 1 60); do
+  # Fast-fail: container exited unexpectedly
+  if ! docker ps --format "{{.Names}}" | grep -qx "$CONTAINER_NAME"; then
+    log_error "Container exited unexpectedly after ${i}s"
+    echo "  Container logs:"
+    docker logs --tail=60 "$CONTAINER_NAME" 2>/dev/null || true
+    exit 1
+  fi
+
+  if curl -s --connect-timeout 2 "$BASE/health" >/dev/null 2>&1; then
+    log_success "Backend is ready! (t=$(ts))"
+    STARTED=true
+    break
+  fi
+
+  sleep 1
+  [[ $i -eq 15 ]] && echo "  Still waiting..."
+  [[ $i -eq 30 ]] && echo "  Taking longer than usual..."
+done
+
+if [ "$STARTED" = false ]; then
+  log_error "Server failed to start within 60 seconds"
+  echo "  Container logs:"
+  docker logs --tail=60 "$CONTAINER_NAME" 2>/dev/null || true
   exit 1
 fi
 echo ""
