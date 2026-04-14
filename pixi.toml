@@ -40,6 +40,10 @@ cmd = "./scripts/start-prod.sh"
 description = "Stop prod backend Docker container"
 cmd = "docker stop a11yhood-backend-prod && docker rm a11yhood-backend-prod || true"
 
+[tasks.test-prod-image]
+description = "Build prod image and run HTTP smoke tests (uses .env.test, port 8099)"
+cmd = "./scripts/test-prod-image.sh"
+
 [tasks.apply-migrations]
 description = "Apply SQL migrations to Supabase/Postgres (uses .env.test by default)"
 cmd = "./scripts/apply-migrations.sh"
