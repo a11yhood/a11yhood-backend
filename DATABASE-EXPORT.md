@@ -11,14 +11,14 @@ Tools for exporting a11yhood database in different formats for different use cas
 
 ## Scripts
 
-### 1. `export_public_products.py`
+### 1. `export_full_database.py --mode public`
 Exports products + aggregated ratings + tags (no user data).
 
 **Includes:**
 - `products` → public columns only (name, description, image, source_rating, etc.)
 - `product_urls` → publicly accessible links
 - `product_tags` + `tags` → product categorization
-- `ratings` → aggregated (avg, count per product, no user IDs)
+- `ratings` → aggregated into `products.computed_rating` (avg per product, no user IDs)
 - `supported_sources` + `valid_categories` → reference data
 
 **Excludes:**
@@ -31,7 +31,7 @@ Exports products + aggregated ratings + tags (no user data).
 ```bash
 pixi run export-public
 # or
-python scripts/db-export/export_public_products.py --output supabase/public-products.sql --env-file .env
+python scripts/db-export/export_full_database.py --mode public --output supabase/public-products.sql --env-file .env
 ```
 
 **Output:** `supabase/public-products.sql` (size depends on production dataset)
@@ -40,7 +40,7 @@ python scripts/db-export/export_public_products.py --output supabase/public-prod
 
 ---
 
-### 2. `export_private_full.py`
+### 2. `export_full_database.py --mode private`
 Full database dump using Supabase CLI (includes everything).
 
 **Includes:** All tables, all columns, all data
@@ -53,7 +53,7 @@ Full database dump using Supabase CLI (includes everything).
 ```bash
 pixi run export-private
 # or
-python scripts/db-export/export_private_full.py --output supabase/full-database.sql --env-file .env
+python scripts/db-export/export_full_database.py --mode private --output supabase/full-database.sql --env-file .env
 ```
 
 **⚠️ SECURITY:**

@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS storage.objects (
 );
 SQL
 
-docker exec -i "$DB_CONTAINER" psql -U postgres -d "$DB_NAME" < "$SCHEMA_FILE" >/dev/null || true
+docker exec -i "$DB_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DB_NAME" < "$SCHEMA_FILE" >/dev/null
 
 echo "Applying public export..."
 docker exec -i "$DB_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DB_NAME" < "$PUBLIC_EXPORT" >/dev/null

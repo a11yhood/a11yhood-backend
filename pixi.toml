@@ -182,8 +182,8 @@ description = "run the database migrations"
 cmd = "npx supabase db pull --schema public"
 
 [feature.db.tasks.supabase-login]
-description = "run the database migrations"
-cmd = "npx supabase db pull --schema public"
+description = "log in to Supabase CLI"
+cmd = "npx supabase login"
 
 [feature.db.tasks.supabase-dump]
 description = "dump the database schema to a file"

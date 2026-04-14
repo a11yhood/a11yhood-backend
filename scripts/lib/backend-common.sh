@@ -281,10 +281,14 @@ run_prod_container() {
   
   local uvicorn_args="uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4"
   local mount_args=()
+  local scheme="http"
+  if [ "$use_https" = "true" ]; then
+    scheme="https"
+  fi
   
   log_action "Starting production container..."
-  echo "   Server will be available at: http://localhost:${port}"
-  echo "   API documentation at: http://localhost:${port}/docs"
+  echo "   Server will be available at: ${scheme}://localhost:${port}"
+  echo "   API documentation at: ${scheme}://localhost:${port}/docs"
   echo ""
   
   if [ "$use_https" = "true" ] && [ -n "$cert_file" ] && [ -n "$key_file" ]; then

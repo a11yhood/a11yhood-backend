@@ -233,20 +233,16 @@ def _export_ratings_aggregated(db) -> list[str]:
         lines.append(
             f"-- ratings ({len(aggregated)} aggregated rows from {len(data)} raw ratings)"
         )
+        lines.append("-- Aggregated into products.computed_rating (no user identifiers)")
+        lines.append("")
 
         if not data:
             return lines
 
-        lines.append("-- ratings (aggregated - no user identifiers)")
-        lines.append("-- Use this data for product_rating_stats queries")
-        lines.append("-- Raw ratings are not included for privacy")
-        lines.append("-- To get ratings: SELECT * FROM ratings WHERE product_id = ?")
-        lines.append("-- Product rating statistics:")
-
         for product_id, stats in aggregated.items():
-            avg_rating = stats["sum"] / stats["count"]
+            avg_rating = round(stats["sum"] / stats["count"], 2)
             lines.append(
-                f"-- Product {product_id}: {avg_rating:.2f}/5.0 ({int(stats['count'])} ratings)"
+                f"UPDATE products SET computed_rating = {avg_rating} WHERE id = '{product_id}';"
             )
 
         lines.append("")
