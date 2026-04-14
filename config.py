@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     def model_post_init(self, ctx):
         # Only derive TEST_MODE from ENVIRONMENT when it was not explicitly set
-        if "TEST_MODE" not in self.__pydantic_fields_set__:
+        if "TEST_MODE" not in self.model_fields_set:
             self.TEST_MODE = self.ENVIRONMENT == "development"
     
     
