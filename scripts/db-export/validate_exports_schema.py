@@ -331,8 +331,8 @@ def normalize_table_name(name: str) -> str:
 
 def load_connection_values(env_file: str, url_var: str, key_var: str) -> tuple[str | None, str | None]:
     env_values = dotenv_values(env_file) if Path(env_file).exists() else {}
-    url = os.getenv(url_var) or env_values.get("SUPABASE_URL")
-    key = os.getenv(key_var) or env_values.get("SUPABASE_KEY")
+    url = os.getenv(url_var) or env_values.get(url_var) or env_values.get("SUPABASE_URL")
+    key = os.getenv(key_var) or env_values.get(key_var) or env_values.get("SUPABASE_KEY")
     return url, key
 
 
@@ -381,6 +381,8 @@ def fetch_exact_count(client, table_name: str) -> int:
         if getattr(response, "count", None) is not None:
             return int(response.count)
     except TypeError:
+        # Some client/response combinations do not provide a count-compatible shape.
+        # Fall back to fetching rows and counting them to preserve existing behavior.
         pass
 
     return len(fetch_all_rows(client, table_name, "*"))

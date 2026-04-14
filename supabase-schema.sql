@@ -174,7 +174,6 @@
     name TEXT NOT NULL,
     type TEXT,
     source TEXT NOT NULL,
-    source_url TEXT,
     url TEXT,
     external_id TEXT,
     external_data JSONB,
@@ -199,8 +198,7 @@
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
     -- Ensure uniqueness for scraped products
-    UNIQUE(source, external_id),
-    UNIQUE(source_url)
+    UNIQUE(source, external_id)
   );
 
   -- PRODUCT MANAGERS TABLE (for legacy ownership tracking)
