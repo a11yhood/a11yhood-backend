@@ -108,7 +108,6 @@ headers: { "X-Dev-Role": "user" }       // Regular user features
 TEST_MODE=true
 TEST_SCRAPER_LIMIT=5                        # Cap manual scraper runs
 DEV_MODE_MAX_ROWS_PER_TABLE=20              # Row limit per table
-DEV_MODE_DISABLE_SCHEDULED_SCRAPERS=true    # Disable nightly jobs
 ```
 
 ---
