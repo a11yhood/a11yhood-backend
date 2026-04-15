@@ -68,7 +68,7 @@ def test_stats_unavailable_outside_test_mode(clean_database, test_admin, monkeyp
     app.dependency_overrides[get_db] = lambda: clean_database
     test_client = TestClient(app)
 
-    monkeypatch.setattr(dev_router, "load_settings_from_env", lambda: _TestModeOffSettings())
+    monkeypatch.setattr(dev_router, "load_settings_from_env", _TestModeOffSettings)
     response = test_client.get("/api/dev/stats", headers=_admin_headers(test_admin))
     app.dependency_overrides.clear()
     assert response.status_code == 404
