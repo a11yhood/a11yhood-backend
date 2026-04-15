@@ -13,6 +13,7 @@ build/
 venv/
 ENV/
 env/
+.pixi/
 
 # Testing
 .pytest_cache/

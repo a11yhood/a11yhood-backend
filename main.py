@@ -51,13 +51,9 @@ async def validate_security_configuration():
     logger.info(f"CORS origins configured: {cors_origins}")
     
     # Detect production environment by checking for production indicators
+    # We only consider it "production" if PRODUCTION_URL is configured.
     is_production = any([
-        # Production Supabase URL (not localhost/dummy)
-        local_settings.SUPABASE_URL and 
-        "supabase.co" in local_settings.SUPABASE_URL and
-        "dummy" not in local_settings.SUPABASE_URL,
-        
-        # Production domain in CORS
+        # Production domain in CORS 
         local_settings.PRODUCTION_URL and 
         "localhost" not in local_settings.PRODUCTION_URL and
         local_settings.PRODUCTION_URL.strip(),
