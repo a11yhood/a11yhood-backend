@@ -1,6 +1,6 @@
 #!/bin/bash
 # Start backend development server for a11yhood using Docker
-# This script starts the backend API server on port 8000 in a Docker container
+# This script starts the backend API server on port 8002 in a Docker container
 # backed by the Supabase test project configured in .env.test.
 #
 # Usage:

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     TEST_MODE: bool = False
     TEST_SCRAPER_LIMIT: int = 5
     
+    # Dev mode features
+    DEV_MODE_MAX_ROWS_PER_TABLE: int = 20  # Max rows per table in dev mode
+    
     # GitHub API token for higher rate limits (optional)
     GITHUB_TOKEN: Optional[str] = None
     

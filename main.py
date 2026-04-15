@@ -10,7 +10,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config import settings, load_settings_from_env
-from routers import activities, blog_posts, collections, discussions, product_urls, products, ratings, requests, scrapers, sources, users
+from routers import activities, blog_posts, collections, dev, discussions, product_urls, products, ratings, requests, scrapers, sources, users
 from services.database import get_db
 from services.auth import get_current_user
 from services.scheduled_scrapers import get_scheduled_scraper_service
@@ -147,7 +147,15 @@ async def validate_security_configuration():
     )
     
     # Initialize scheduled scrapers (if not in test mode)
-    if not local_settings.TEST_MODE:
+    # Dev mode: disable all scheduled scrapers; production runs nightly jobs
+    if local_settings.TEST_MODE:
+        logger.info(
+            "TEST_MODE active - scheduled scrapers disabled\n"
+            f"  - Scraper product limit: {local_settings.TEST_SCRAPER_LIMIT} per run\n"
+            f"  - Database row limit: {local_settings.DEV_MODE_MAX_ROWS_PER_TABLE} per table\n"
+            f"  - Dev endpoints: /api/dev/stats, /api/dev/reset, /api/dev/health-dev\n"
+        )
+    else:
         try:
             scheduler_service = get_scheduled_scraper_service()
             db = get_db()
@@ -157,8 +165,6 @@ async def validate_security_configuration():
         except Exception as e:
             logger.error(f"Failed to initialize scheduled scrapers: {e}")
             # Don't fail startup if scheduler fails, just log the error
-    else:
-        logger.info("Scheduled scrapers disabled in TEST_MODE")
 
 
 @app.on_event("shutdown")
@@ -380,6 +386,8 @@ app.include_router(product_urls.router)
 app.include_router(collections.router)
 app.include_router(blog_posts.router)
 app.include_router(sources.router)
+if settings.TEST_MODE:
+    app.include_router(dev.router)
 
 
 if __name__ == "__main__":
