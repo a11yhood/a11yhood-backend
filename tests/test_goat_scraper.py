@@ -3,9 +3,9 @@ Test for LibraryThing scraper
 Tests URL extraction, API interaction, and product creation
 """
 import pytest
+from scrapers.goat import GOATScraper
 
 pytestmark = pytest.mark.integration
-from scrapers.goat import GOATScraper
 
 
 def test_extract_work_id():
