@@ -23,6 +23,7 @@ pixi run prod-stop       # Stop prod backend container
 ### Database Management
 
 ```bash
+pixi run reset                 # Restore test DB from checked-in snapshot
 pixi run apply-migrations      # Apply SQL migrations to test DB (.env.test)
 pixi run apply-migrations-prod # Apply migrations to production DB (.env)
 pixi run seed                  # Run seed scripts (auto-detects Docker or local)
@@ -33,6 +34,7 @@ pixi run seed-list             # List available seed scripts
 
 ```bash
 pixi run test            # Run pytest test suite (uses .env.test)
+pixi run test-fresh      # Reset test DB, then run pytest
 ```
 
 ### Direct Server (No Docker)
@@ -94,7 +96,15 @@ pixi run serve           # Start uvicorn directly on port 8000 (requires pixi en
 - **Use when**: Done testing against production or temporarily stopping the server
 
 ### Database Management
-
+#### `pixi run reset`
+- **Purpose**: Reset test Supabase database to known-good snapshot
+- **Environment**: `.env.test`
+- **Use when**:
+-  - Tests fail due to polluted state
+-  - You need deterministic seeded baseline data
+- **Notes**:
+-  - Requires `SUPABASE_DB_URL` (or `DATABASE_URL`) in `.env.test`
+-  - Uses `supabase/seed-test.sql`
 #### `pixi run apply-migrations`
 - **Purpose**: Apply SQL migrations to test Supabase database
 - **Environment**: `.env.test`
@@ -150,7 +160,12 @@ pixi run serve           # Start uvicorn directly on port 8000 (requires pixi en
   - Runs against Supabase test project (not in-memory SQLite)
   - Requires `SUPABASE_URL` and `SUPABASE_KEY` in `.env.test`
   - CI/CD also runs this before merging
-
+#### `pixi run test-fresh`
+- **Purpose**: Reset test DB and run pytest in one command
+- **Environment**: `.env.test`
+- **Use when**:
+-  - You need a clean test baseline before a full run
+-  - Tracking flaky failures caused by leftover DB state
 ### Direct Server
 
 #### `pixi run serve`

@@ -100,10 +100,12 @@ async def parse_dev_token(
             "id": user_id,
             "github_id": dev_github_id,
             "username": dev_username,
+            "display_name": f"{role.capitalize()} User",
             "email": dev_email,
             "role": role,
         }
         try:
+            logger.debug(f"Attempting to insert dev user with data: {new_user}")
             db.table("users").insert(new_user).execute()
             logger.info(
                 f"Created dev test user: {user_id} (username: {dev_username}, role: {role})"
@@ -113,11 +115,13 @@ async def parse_dev_token(
                 "github_id": dev_github_id,
                 "email": dev_email,
                 "username": dev_username,
+                "display_name": f"{role.capitalize()} User",
                 "role": role,
                 "is_dev_user": True,
             }
         except Exception as e:
             logger.error(f"Failed to create dev test user for role {role}: {e}")
+            logger.error(f"User data that was attempted: {new_user}")
             raise HTTPException(
                 status_code=500, detail=f"Failed to create test user for role {role}"
             )
@@ -186,10 +190,12 @@ async def parse_dev_token(
         "id": user_id,
         "github_id": dev_github_id,
         "username": dev_username,
+        "display_name": f"{role.capitalize()} User",
         "email": dev_email,
         "role": role,
     }
     try:
+        logger.debug(f"Attempting to insert dev user with data: {new_user}")
         db.table("users").insert(new_user).execute()
         logger.info(f"Created dev test user: {user_id} (username: {dev_username}, role: {role})")
         return {
@@ -197,11 +203,13 @@ async def parse_dev_token(
             "github_id": dev_github_id,
             "email": dev_email,
             "username": dev_username,
+            "display_name": f"{role.capitalize()} User",
             "role": role,
             "is_dev_user": True,
         }
     except Exception as e:
         logger.error(f"Failed to create dev test user for role {role}: {e}")
+        logger.error(f"User data that was attempted: {new_user}")
         raise HTTPException(status_code=500, detail=f"Failed to create test user for role {role}")
 
 
@@ -236,12 +244,22 @@ async def get_current_user(authorization: str = Header(None), x_dev_role: str = 
         or bool(os.getenv("PYTEST_CURRENT_TEST"))
     )
 
+    # Log context for debugging
+    logger.debug(f"Auth context: TEST_MODE={settings_fresh.TEST_MODE}, ENV_FILE={env_file}, is_test_context={is_test_context}")
+
+    # Check if this is a dev token (always allow in TEST_MODE, regardless of other conditions)
+    is_dev_token = (
+        authorization
+        and authorization.replace("Bearer ", "").strip().startswith("dev-token-")
+    )
+
     # Dev/test mode: Try X-Dev-Role or dev token
-    if is_test_context and (
-        x_dev_role
-        or (authorization and authorization.replace("Bearer ", "").strip().startswith("dev-token-"))
+    # NOTE: Dev tokens should be accepted whenever TEST_MODE is true
+    if (settings_fresh.TEST_MODE or is_test_context) and (
+        x_dev_role or is_dev_token
     ):
         user_dict = await parse_dev_token(authorization, x_dev_role)
+        logger.debug(f"Successfully parsed dev token/role: user={user_dict.get('id')}, role={user_dict.get('role')}")
         return user_dict
 
     # Production: Real Supabase auth

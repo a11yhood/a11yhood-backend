@@ -13,13 +13,12 @@ build/
 venv/
 ENV/
 env/
+.pixi/
 
 # Testing
 .pytest_cache/
 .coverage
 htmlcov/
-test.db
-*.db
 
 # IDE
 .vscode/

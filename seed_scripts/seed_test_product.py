@@ -45,7 +45,7 @@ def seed_product():
         "description": "A test product for accessibility",
     }
     try:
-        result = db.table("products").upsert(product_data, on_conflict="slug").execute()
+        result = db.table("products").upsert(product_data, on_conflict="url").execute()
         if result.data:
             product = result.data[0]
             print(f"  ✓ Product: {product_name} (ID: {product['id']}, Slug: {product['slug']})")

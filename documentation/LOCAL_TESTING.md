@@ -1,16 +1,13 @@
 # Local Testing Guide
 
-This guide helps you run a fully functional local version of a11yhood for testing and development.
-Run commands from the repo root unless noted otherwise.
+This guide is pixi-first. Run commands from the repo root.
 
 ## Prerequisites
 
-- **Node.js 18+**: Frontend development
-- **Python 3.9+**: Backend development
-- **uv**: Python package manager (`pip install uv`)
-- **Pixi**: Environment and task runner for backend (`pixi run dev`)
-- **npm**: Node package manager
-- **Supabase test project**: Credentials for the `a11yhood-test` database in the `make4all-test` org
+- Docker running
+- pixi installed
+- .env.test configured with test Supabase credentials
+- SUPABASE_DB_URL in .env.test for reset tooling
 
 ### Install Pixi (macOS)
 
@@ -36,178 +33,141 @@ pixi --version
 
 ## Quick Start
 
-### Start Backend with Pixi (recommended)
-
 ```bash
-# Run backend in Docker with test Supabase credentials (.env.test)
+# Start backend in dev mode (Docker, test Supabase)
 pixi run dev
+
+# Optional script version
+./start-dev.sh
+
+
+# Stop backend
+pixi run dev-stop
+
+# Optional Script Version
+./stop-dev.sh
+
 ```
 
-The `dev` task starts the Docker development server via `scripts/start-dev.sh`, loads `.env.test`, connects to the test Supabase project, and exposes the API on port `8002` by default.
+## Core URLs
 
-The container runs in the background, so `Ctrl+C` will not stop it. Stop the server with `pixi run dev-stop` (or `docker stop a11yhood-backend-dev`).
-
-### Configure Supabase test environment
-
-Copy the example file and fill in your test Supabase credentials:
-
-```bash
-cp .env.test.example .env.test
-# Edit .env.test and set SUPABASE_URL, SUPABASE_KEY, SUPABASE_ANON_KEY
-```
-
-### Start the backend
-
-```bash
-export $(cat .env.test | grep -v '^#' | xargs)
-uv run python -m uvicorn main:app --reload --port 8000
-```
-
-## Accessing the Application
-
-| Component | URL | Purpose |
-|-----------|-----|---------|
-| Backend API | http://localhost:8000 | API endpoints |
-| API Docs | http://localhost:8000/docs | Interactive API documentation |
+| Component | URL |
+|---|---|
+| Backend API | http://localhost:8002 |
+| API Docs | http://localhost:8002/docs |
+| Health | http://localhost:8002/health |
 
 ## Test Users
 
-The `.env.test` configuration uses the `a11yhood-test` Supabase database with pre-seeded test users:
+The test environment is seeded with these users:
 
-| Username | User ID | Role | Use Case |
-|----------|---------|------|----------|
-| `admin_user` | 49366adb-... | Admin | Full system access, scraper controls |
-| `moderator_user` | 94e116f7-... | Moderator | Content moderation, user management |
-| `regular_user` | 2a3b7c3e-... | User | Regular user features, submit products |
+| Username | GitHub ID | Role |
+|---|---|---|
+| admin_user | admin-test-001 | admin |
+| moderator_user | mod-test-002 | moderator |
+| regular_user | user-test-003 | user |
 
-## Test Database (Supabase)
+## Database Reset And Seed
 
-The application always uses Supabase. The `.env.test` file points at the `a11yhood-test` test project.
-
-### Apply Migrations (Schema Setup)
-
-Schema is not auto-applied by app startup or pytest. Apply all SQL migrations before seeding/tests:
+### Reset test database (authoritative snapshot)
 
 ```bash
-# Option 1: put SUPABASE_DB_URL in .env.test
-./scripts/apply-migrations.sh
-
-# Option 2: run against production/staging env file
-./scripts/apply-migrations.sh --env-file .env
-
-# Option 3: pass DB URL directly
-SUPABASE_DB_URL='postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require' \
-	./scripts/apply-migrations.sh
+pixi run reset
 ```
 
-The script applies all `migrations/*.sql` files in timestamp order and tracks applied files in
-`public.schema_migrations`, so re-running is safe.
+What this does:
+- Restores from the checked-in snapshot at supabase/seed-test.sql
+- Resets deterministic seeded data
+- Syncs identity sequence state needed by tests
 
-### Seed Test Data
+### Start dev with reset + seed
 
 ```bash
-export $(cat .env.test | grep -v '^#' | xargs)
-uv run python seed_scripts/seed_all.py
+pixi run dev-reset
 ```
 
-Or run individual scripts:
+### Seed without reset
 
 ```bash
-uv run python seed_scripts/seed_supported_sources.py
-uv run python seed_scripts/seed_scraper_search_terms.py
-uv run python seed_scripts/seed_test_users.py
-uv run python seed_scripts/seed_test_product.py
-uv run python seed_scripts/seed_test_collections.py
+pixi run seed
 ```
 
-### Reset Test Data
-
-To wipe all test data and start fresh, connect to the `a11yhood-test` Supabase project via the
-SQL editor and truncate the tables, or use the DatabaseAdapter cleanup in a Python shell:
+### List seed options
 
 ```bash
-export $(cat .env.test | grep -v '^#' | xargs)
-uv run python - << 'EOF'
-from config import get_settings
-from database_adapter import DatabaseAdapter
-db = DatabaseAdapter(get_settings())
-db.cleanup()
-print("All test data deleted.")
-EOF
+pixi run seed-list
 ```
 
-Then re-seed with `uv run python seed_scripts/seed_all.py`.
-
-## Testing Features
-
-### Backend Tests
+## Running Tests
 
 ```bash
-# Run all tests (requires .env.test with valid Supabase credentials)
-uv run pytest tests/ -v
+# Full suite (uses .env.test)
+pixi run test
 
-# Run unit tests only (excludes integration tests)
-uv run pytest tests/ -v -m "not integration"
+# Fresh DB + tests
+pixi run test-fresh
 
-# Run specific test file
-uv run pytest tests/test_products.py -v
+# Single file
+pixi run test -- tests/test_collections.py -v
 
-# Run with coverage
-uv run pytest tests/ --cov=. --cov-report=html
+# Single test
+pixi run test -- tests/test_collections.py::TestGetCollectionDetails::test_get_collection_details_includes_product_slugs -v
 ```
 
-## Environment Variables
+## Scraper Testing (Simplified)
 
-### Backend (`.env.test`)
+Use these two paths only:
 
-```env
-# Test Supabase project (make4all-test org / a11yhood-test database)
-SUPABASE_URL=https://your-test-project.supabase.co
-SUPABASE_KEY=your-test-service-role-key
-SUPABASE_ANON_KEY=your-test-anon-key
+1. UI path
+- Start dev: pixi run dev
+- Log in as admin_user
+- Open Scraper Manager
+- Run a scraper in test mode
 
-# Test mode (enables dev tokens for authentication)
-TEST_MODE=true
-TEST_SCRAPER_LIMIT=5
+2. API path
+- Call the scraper endpoint from /docs
+- Keep TEST_MODE=true in .env.test
 
-# GitHub OAuth (optional for tests)
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
+Notes:
+- In test mode, scheduled scrapers are disabled.
+- Test mode uses limits to avoid large external pulls.
 
-# Secret key (can be any random string for tests)
-SECRET_KEY=your-random-secret-key-for-testing
+## Environment Sanity Check
+
+Prefer explicit checks over shell parsing tricks:
+
+```bash
+# Confirm required test keys exist (do not print secrets)
+rg -n '^(TEST_MODE|SUPABASE_URL|SUPABASE_DB_URL)=' .env.test
+
+# Confirm backend is running in test mode
+curl -s http://localhost:8002/health
 ```
 
 ## Troubleshooting
 
-### "SUPABASE_URL must be configured" error
+### Reset fails with no database URL
 
-Ensure `.env.test` exists with valid Supabase credentials. Copy from `.env.test.example`:
+Add SUPABASE_DB_URL to .env.test.
 
-```bash
-cp .env.test.example .env.test
-# Fill in credentials from the Supabase dashboard
-```
-
-### Tests are skipped
-
-If you see `SKIPPED ... SUPABASE_URL and SUPABASE_KEY are required`, your `.env.test`
-is missing valid Supabase credentials. See above.
-
-### Tests failing locally but passing in CI
-
-1. Make sure you've run `uv sync`
-2. Check `.env.test` exists with correct Supabase credentials
-3. Verify your test Supabase project has the latest schema applied
-
-### Port 8000 already in use
+### Tests fail from polluted data
 
 ```bash
-uv run python -m uvicorn main:app --port 8001
+pixi run reset
+pixi run test -- tests/test_collections.py -v
 ```
 
-## Need Help?
+### Port already in use
 
-- Check existing docs via the [documentation index](README.md)
-- Review test examples in `tests/`
-- Run with verbose logging: `uv run pytest tests/ -v --log-cli-level=DEBUG`
+```bash
+pixi run dev-stop
+pixi run dev
+```
+
+## Command Policy
+
+For local backend work:
+- Use pixi commands first.
+- Use scripts directly only when a pixi task does not exist.
+
+See documentation/PIXI_TASKS.md for all supported tasks.

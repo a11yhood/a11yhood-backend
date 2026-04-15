@@ -96,12 +96,20 @@ async def reset_database():
     cleared = {}
     for table in clear_order:
         try:
-            # Get count before
-            resp_before = db.table(table).select("id", count="exact").execute()
+            # Count rows and sample one row to discover an existing column for filtering.
+            resp_before = db.table(table).select("*", count="exact").limit(1).execute()
             count_before = resp_before.count or 0
 
-            # Clear table
-            db.table(table).delete().neq("id", "").execute()
+            # PostgREST requires a WHERE clause for DELETE. Use any real column from the table.
+            if count_before > 0:
+                sample_row = resp_before.data[0] if resp_before.data else None
+                if not sample_row:
+                    raise ValueError(
+                        f"Unable to sample a row from non-empty table '{table}'"
+                    )
+
+                filter_column = next(iter(sample_row.keys()))
+                db.table(table).delete().not_.is_(filter_column, "null").execute()
 
             cleared[table] = count_before
             logger.info(f"Cleared {table}: {count_before} rows deleted")

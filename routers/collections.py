@@ -509,15 +509,18 @@ async def get_collection(
         if not current_user or current_user.get("id") != collection.get("user_id"):
             raise HTTPException(status_code=403, detail="Access denied")
 
-    # Populate product_ids from junction table
+    # Populate product_ids and product_slugs from junction table
     products_resp = (
         db.table("collection_products")
-        .select("product_id")
+        .select("product_id, products(slug)")
         .eq("collection_id", collection["id"])
         .order("position")
         .execute()
     )
     collection["product_ids"] = [p["product_id"] for p in (products_resp.data or [])]
+    collection["product_slugs"] = [
+        p["products"]["slug"] if p.get("products") else None for p in (products_resp.data or [])
+    ]
 
     return collection
 

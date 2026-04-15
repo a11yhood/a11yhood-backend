@@ -6,37 +6,37 @@ This guide helps you quickly switch between test and production environments.
 
 | Command | Environment | Database | OAuth | Purpose |
 |---------|------------|----------|-------|---------|
-| `pixi run dev` | Test | Supabase (test) | Mock | Development & testing |
-| `pixi run prod` | Production | Supabase (production) | Real | Production validation (local) |
-| `pixi run test` | Test | Supabase (test) | Mock | Run automated tests |
+| `./start-dev.sh` | Test | Supabase test project | Mock | Development & testing |
+| `./start-prod.sh` | Production | Supabase | Real | Production validation (local) |
+| `./run-tests.sh` | Test | Supabase test project | Mock | Run automated tests |
 
 ## Test Environment (Development)
 
 **Use when**: Developing features, running tests, making database changes
 
-**Start**: `pixi run dev`  
-**Stop**: `pixi run dev-stop`
+**Start**: `./start-dev.sh`  
+**Stop**: `./stop-dev.sh`
 
 **Configuration**:
 - Backend: `.env.test`
 
-**Database**: Supabase test instance (`a11yhood-test` in `make4all-test` org)
+**Database**: Supabase test project from `.env.test`
 
 **Users**: Seeded test users (admin_user, moderator_user, regular_user)
 
-**OAuth**: Mock GitHub OAuth (dev tokens accepted when TEST_MODE=true)
+**OAuth**: Mock GitHub OAuth (select test user from dropdown)
 
 **Features**:
+- Fast database reset (`./start-dev.sh --reset-db`)
 - Deterministic test data
-- Test data seeded via `seed_scripts/seed_all.py`
-- Safe to experiment - test database is separate from production
+- Safe to experiment - data is ephemeral
 
 ## Production Environment (Local with Production DB)
 
 **Use when**: Testing against real Supabase, validating before cloud deployment
 
-**Start**: `pixi run prod`  
-**Stop**: `pixi run prod-stop`
+**Start**: `./start-prod.sh`  
+**Stop**: `./stop-prod.sh`
 
 **Configuration**:
 - Backend: `.env`
@@ -70,7 +70,7 @@ This guide helps you quickly switch between test and production environments.
 - [ ] Generate new SECRET_KEY for production
 - [ ] Set up GitHub OAuth app (production)
 - [ ] Apply `supabase-schema.sql` to Supabase database
-- [ ] Run `pixi run prod` to test
+- [ ] Run `./start-prod.sh` to test
 
 See [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) for detailed instructions.
 
@@ -79,24 +79,24 @@ See [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) for detailed instructions.
 ### Reset Test Database
 
 ```bash
-pixi run dev-reset
+./start-dev.sh --reset-db
 ```
 
 ### Run Tests
 
 ```bash
 # tests (don't need servers running)
-pixi run test
+./run-tests.sh 
 ```
 
 ### Switch from Test to Production
 
 ```bash
 # Stop test environment
-pixi run dev-stop
+./stop-dev.sh
 
 # Start production environment
-pixi run prod
+./start-prod.sh
 ```
 
 ### View Logs
@@ -111,12 +111,11 @@ tail -f backend.log
 
 ```bash
 # Check if backend is running
-curl http://localhost:8002/health
+curl http://localhost:8000/health
 
 
 # See what's listening on ports
-lsof -i :8002    # Dev backend
-lsof -i :8001    # Prod backend
+lsof -i :8000    # Backend
 
 ```
 
@@ -156,8 +155,8 @@ kill $(lsof -t -i:8000)  # Backend
 | **Users** | Seeded test users | Real GitHub OAuth |
 | **OAuth** | Mock (dropdown) | Real (GitHub redirect) |
 | **Secrets** | Safe defaults | Real secrets required |
-| **Internet** | Required (Supabase test) | Required (Supabase prod) |
-| **Speed** | Network-dependent | Network-dependent |
+| **Internet** | Required | Required |
+| **Speed** | Network-backed | Network-backed |
 | **Cost** | Free | Supabase usage fees |
 
 ## Environment Variables
@@ -167,8 +166,8 @@ kill $(lsof -t -i:8000)  # Backend
 | Variable | Test Value | Production Value |
 |----------|-----------|-----------------|
 | `ENV_FILE` | `.env.test` | `.env` |
-| `SUPABASE_URL` | Test Supabase URL | Production Supabase URL |
-| `SUPABASE_KEY` | Test service role key | Production service role key |
+| `SUPABASE_URL` | `https://test-project.supabase.co` | `https://prod-project.supabase.co` |
+| `SUPABASE_KEY` | Test service role key | Service role key |
 | `TEST_MODE` | `true` | `false` |
 | `SECRET_KEY` | Dev default | **Generate new!** |
 | `GITHUB_CLIENT_ID` | (optional for test) | Required for auth |
@@ -179,21 +178,21 @@ kill $(lsof -t -i:8000)  # Backend
 ### "Backend won't start"
 
 ```bash
-# Check if .env.test exists (for test) or .env (for production)
+# Check if .env exists (for production) or .env.test (for test)
 ls -la .env*
 
 # Check if port is already in use
-lsof -i :8002
+lsof -i :8000
 
 # Kill existing backend and try again
 pkill -f uvicorn
-pixi run dev  # or pixi run prod
+./start-dev.sh  # or ./start-prod.sh
 ```
 
 ### "OAuth not working"
 
 **Test Environment**:
-- Uses dev tokens (dev-token-admin, dev-token-user, dev-token-moderator) when TEST_MODE=true
+- OAuth is mocked - just select a user from dropdown
 - No real GitHub OAuth needed
 
 **Production Environment**:
@@ -205,25 +204,26 @@ pixi run dev  # or pixi run prod
 ### "Database connection failed"
 
 **Test Environment**:
-- Verify `SUPABASE_URL` and `SUPABASE_KEY` are set in `.env.test`
-- Check Supabase test project is active at https://supabase.com/dashboard
-- Run: `uv run python -c "from config import get_settings; from database_adapter import DatabaseAdapter; db = DatabaseAdapter(get_settings()); print(db.table('users').select('id').limit(1).execute())"`
+- Verify `.env.test` points to the intended test project
+- Reset from snapshot: `pixi run reset`
+- Restart: `./start-dev.sh`
 
 **Production Environment**:
 - Verify `SUPABASE_URL` and `SUPABASE_KEY` in `.env`
 - Check Supabase project is active at https://supabase.com/dashboard
+- Verify network connectivity: `ping db.YOUR_PROJECT.supabase.co`
+- Check Supabase logs for connection errors
 
 ### "Tests failing"
 
 ```bash
-# Make sure SUPABASE credentials are in .env.test
-cat .env.test | grep SUPABASE
+# Make sure you're using test environment
+./stop-prod.sh
+./start-dev.sh
 
-# Seed test data
-uv run python seed_scripts/seed_all.py
-
-# Run specific test file
-uv run pytest tests/test_products.py -v
+# Reset database and try again
+pixi run reset
+./run-tests.sh
 ```
 
 ## Quick Commands Reference
@@ -239,10 +239,10 @@ uv run pytest tests/test_products.py -v
 ./start-prod.sh
 
 # Stop any environment
-pixi run dev-stop   # or pixi run prod-stop
+./stop-dev.sh   # or ./stop-prod.sh
 
 # Run all backend tests
-pixi run test
+./run-tests.sh backend
 
 # Run specific test file
 cd backend && uv run pytest tests/test_products.py
@@ -285,7 +285,7 @@ ps aux | grep -E "uvicorn|vite"
 
 1. **If you're developing**: Use test environment (`./start-dev.sh`)
 2. **If you're ready to deploy**: Follow [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md)
-3. **If you're testing**: Run `pixi run test`
+3. **If you're testing**: Run `./run-tests.sh  `
 4. **If something breaks**: Check logs (`tail -f *.log`) and try `./start-dev.sh --reset-db`
 
 ## Related Documentation

@@ -10,7 +10,7 @@ Additional documentation files can be found in the documentation directory.
 a11yhood-backend/
 ├── main.py                 # FastAPI application entry point
 ├── config.py              # Configuration and environment settings
-├── database_adapter.py     # Supabase database adapter (prod + test)
+├── database_adapter.py     # Database access wrapper used by the API and scripts
 ├── requirements.txt       # Python dependencies
 ├── pyproject.toml        # Project metadata and dependencies
 │
@@ -71,9 +71,9 @@ a11yhood-backend/
 
 ### Prerequisites
 
-- Docker (recommended) OR
+- Docker & Docker Compose (recommended) OR
 - Python 3.14+ with pip/venv
-- Supabase projects/credentials for production and test environments
+- Supabase/PostgreSQL access for development and production workflows
 
 ### Installation
 
@@ -91,30 +91,29 @@ a11yhood-backend/
 
 ### Starting the Server
 
-#### Option 1: Using Pixi Tasks (Recommended)
+#### Option 1: Using Scripts (Recommended)
 
 ```bash
-# Start development server against test Supabase (.env.test)
-# The API will be available at http://localhost:8002/api
+# Start development server
+# The API will be available at `https://localhost:8000/api`
 
-pixi run dev
+./scripts/start-dev.sh
 
 # Start with database reset
-pixi run dev-reset
-
-# Start with seed data
-pixi run dev-seed
+./scripts/start-dev.sh --reset-db
 
 # Start production server
-# The API will be available at http://localhost:8001/api
+# The API will be available at `https://localhost:8001/api`
 
-pixi run prod
+./scripts/start-prod.sh
+
+# Start production server using the compiled docker image on github
+# The API will be available for external use
+
+./scripts/start-prod.sh --no-build
 
 # Stop the server
-pixi run dev-stop
-
-# Stop production server
-pixi run prod-stop
+./scripts/stop-dev.sh
 ```
 
 #### Option 2: Manual Python Setup
@@ -174,7 +173,6 @@ PORT=8001
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-service-role-key
 SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_DB_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
 
 # OAuth
 GITHUB_CLIENT_ID=...
@@ -212,20 +210,23 @@ For a complete index of all documentation, see [documentation/README.md](documen
 
 ## Testing
 
-Run the test suite using pixi:
+Run the test suite using the provided script:
 
 ```bash
 # Run all tests
-pixi run test
+./scripts/run-tests.sh
 
-# Run with additional pytest flags
-pixi run test -- -v
+# Run with verbose output
+./scripts/run-tests.sh -v
 
 # Run specific test
-pixi run test -- -k test_name
+./scripts/run-tests.sh -k test_name
 
 # Run with coverage report
-pixi run test -- --cov
+./scripts/run-tests.sh --cov
+
+# Show help
+./scripts/run-tests.sh --help
 ```
 
 Key test commands are documented in [documentation/QUICK_TEST_GUIDE.md](documentation/QUICK_TEST_GUIDE.md).
@@ -245,12 +246,7 @@ See [documentation/SECURITY_BEST_PRACTICES.md](documentation/SECURITY_BEST_PRACT
 
 ## Database
 
-a11yhood uses Supabase for both production and test environments.
-
-1. **Production Supabase project** - `.env`
-2. **Test Supabase project** - `.env.test`
-
-`TEST_MODE` controls runtime behavior (dev tokens, scheduler behavior), not database engine.
+a11yhood uses Supabase/PostgreSQL for both production and the shared test environment.
 
 Database schema and migrations:
 - Schema: [supabase-schema.sql](supabase-schema.sql)
@@ -270,10 +266,10 @@ Scrapers run on a schedule and can be manually triggered. See [documentation/AGE
 
 ### Setting Up Development Environment
 
-For most development tasks, pixi handles setup automatically. If you need to install dependencies manually:
+For most development tasks, the provided scripts handle setup automatically. If you need to install dependencies manually:
 
 ```bash
-# Create virtual environment (if not using pixi)
+# Create virtual environment (if not using scripts)
 python3 -m venv .venv
 source .venv/bin/activate
 
@@ -290,7 +286,7 @@ git config core.hooksPath .git/hooks
 The development server automatically reloads on code changes:
 
 ```bash
-pixi run dev
+./scripts/start-dev.sh
 ```
 
 ### Database Management
@@ -299,12 +295,8 @@ pixi run dev
 # Seed test data
 python seed_scripts/seed_all.py
 
-# Apply migrations
-./scripts/apply-migrations.sh --env-file .env.test
-
-# Optional: local Postgres for SQL migration validation 
-./scripts/start-local-postgres.sh
-SUPABASE_DB_URL=postgresql://postgres:postgres@localhost:5433/a11yhood ./scripts/apply-migrations.sh
+# Reset the test database from the checked-in snapshot
+pixi run reset
 ```
 
 ### Making Changes
@@ -334,14 +326,14 @@ SUPABASE_DB_URL=postgresql://postgres:postgres@localhost:5433/a11yhood ./scripts
 ### Database Changes
 
 1. Create migration file in `migrations/` with timestamp prefix
-2. Apply migration to both Supabase environments (test and production)
+2. Apply migration to the production and test Supabase projects
 3. Update schema documentation
 4. Update models if schema changes
 
 ## Troubleshooting
 
 - **Port 8001 already in use**: Kill the process or use different port: `PORT=8002 python main.py`
-- **Database connection error**: Check `SUPABASE_URL`/`SUPABASE_KEY` in `.env` (or `.env.test`) and verify project connectivity
+- **Database connection error**: Check your Supabase credentials in `.env` or `.env.test`, and set `SUPABASE_DB_URL` when a direct Postgres connection is required
 - **CORS errors**: Verify `ALLOWED_ORIGINS` in `.env` includes your frontend URL
 - **Scraper failures**: Check scraper logs and network connectivity
 
