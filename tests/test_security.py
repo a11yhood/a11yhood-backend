@@ -9,12 +9,10 @@ These tests focus on:
 """
 
 import pytest
-
-pytestmark = pytest.mark.integration
-
-
 import time
 import uuid
+
+pytestmark = pytest.mark.integration
 
 
 def _ensure_uuid(value: str) -> str:

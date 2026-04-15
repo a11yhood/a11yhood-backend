@@ -15,6 +15,7 @@ from datetime import datetime, UTC
 from services.auth import get_current_user
 from services.database import get_db
 from services.sources import extract_domain
+from config import get_settings
 import logging
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
@@ -248,6 +249,10 @@ def update_user_request(
         raise HTTPException(status_code=404, detail="Request not found")
     
     request_data = request_response.data[0]
+
+    # Only admins can approve requests that grant the 'admin' role.
+    if update.status == 'approved' and request_data.get('type') == 'admin' and user_role != 'admin':
+        raise HTTPException(status_code=403, detail="Only admins can approve admin-role requests")
     
     # Update the request
     now = datetime.now(UTC)
@@ -299,7 +304,14 @@ def _grant_permission(db, request_data: dict, reviewer_id: Optional[str] = None)
             else:
                 db.table("users").update({"role": request_type}).eq("id", user_id).execute()
         except Exception:
-            # Fall back to direct update for test setups that don't yet have the RPC.
+            # Fall back to direct update only in TEST_MODE (test setups may not have the RPC).
+            settings = get_settings()
+            if not settings.TEST_MODE:
+                logging.exception(
+                    "admin_update_user_role RPC failed in production; role update skipped",
+                    extra={"user_id": user_id, "request_type": request_type},
+                )
+                return
             try:
                 db.table("users").update({"role": request_type}).eq("id", user_id).execute()
             except Exception:

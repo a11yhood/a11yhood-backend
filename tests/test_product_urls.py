@@ -1,11 +1,11 @@
 import pytest
-
-pytestmark = pytest.mark.integration
 import uuid
 from fastapi.testclient import TestClient
 from main import app
 from services.database import get_db
 from services.auth import get_current_user
+
+pytestmark = pytest.mark.integration
 
 # Map human-readable placeholders to stable UUIDs for test users
 _PLACEHOLDER_USER_IDS: dict[str, str] = {}

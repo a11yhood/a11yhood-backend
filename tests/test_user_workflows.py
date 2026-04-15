@@ -8,13 +8,13 @@ These tests verify that complete user actions have the expected side effects:
 """
 
 import pytest
-
-pytestmark = pytest.mark.integration
 from datetime import datetime, UTC
 import uuid
 
 from main import app
 from services.database import get_db
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
