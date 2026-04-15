@@ -1,12 +1,9 @@
 """Tests for Ravelry scraper"""
 
 import pytest
-
-pytestmark = pytest.mark.integration
-
 from scrapers.ravelry import RavelryScraper
 
-
+pytestmark = pytest.mark.integration
 def test_create_product_dict_uses_pattern_attributes_for_tags():
     """pattern_attributes (not personal_attributes) should populate tags"""
     scraper = RavelryScraper(None, access_token="fake-token")
