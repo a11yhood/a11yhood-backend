@@ -160,14 +160,15 @@ def test_get_product_urls_empty(client_with_db, auth_header):
             "name": "Empty Product",
             "type": "Software",
             "description": "No URLs",
+            "source_url": "https://github.com/example/empty-product",
         },
         headers=auth_header("new-owner"),
     )
-    if product_response.status_code == 201:
-        product_id = product_response.json()["id"]
-        response = client_with_db.get(f"/api/products/{product_id}/urls")
-        assert response.status_code == 200
-        assert response.json() == []
+    assert product_response.status_code == 201, product_response.text
+    product_id = product_response.json()["id"]
+    response = client_with_db.get(f"/api/products/{product_id}/urls")
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_update_product_url_by_creator(test_product, test_product_url, client_with_db, auth_header):

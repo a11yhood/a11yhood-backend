@@ -276,7 +276,7 @@ def _seed_test_data(db):
     Insert baseline test data into the Supabase test instance.
 
     Uses fixed user roles so role-based dev-token auth works consistently.
-    Inserts are best-effort; errors are silently ignored (data may already exist).
+    Insert/upsert failures should fail fast so fixture corruption is visible.
 
     Includes:
     - supported_sources (minimal canonical set used by validation and filters)
@@ -294,10 +294,7 @@ def _seed_test_data(db):
         {"domain": "github.com", "name": "Github"},
         {"domain": "thingiverse.com", "name": "Thingiverse"},
     ]
-    try:
-        db.table("supported_sources").insert(supported_sources).execute()
-    except Exception as exc:
-        logger.debug("Ignoring error seeding supported_sources: %s", exc, exc_info=True)
+    db.table("supported_sources").insert(supported_sources).execute()
 
     # Scraper search terms — flatten to a list and bulk upsert in one call
     # (kept aligned with seed_scripts/seed_scraper_search_terms.py)
@@ -345,19 +342,13 @@ def _seed_test_data(db):
         ]
         for term in terms
     ]
-    try:
-        db.table("scraper_search_terms").upsert(
-            flat_terms,
-            on_conflict="platform,search_term",
-        ).execute()
-    except Exception as exc:
-        logger.debug("Ignoring error seeding scraper_search_terms: %s", exc, exc_info=True)
+    db.table("scraper_search_terms").upsert(
+        flat_terms,
+        on_conflict="platform,search_term",
+    ).execute()
 
     # Test users with fixed IDs (match DEV_USER_IDS in services/auth.py) — bulk insert
-    try:
-        db.table("users").insert(list(TEST_USERS)).execute()
-    except Exception as exc:
-        logger.debug("Ignoring error seeding users: %s", exc, exc_info=True)
+    db.table("users").insert(list(TEST_USERS)).execute()
 
     # Test products — normalise each row then bulk insert in one call
     products_to_insert = []
@@ -373,10 +364,7 @@ def _seed_test_data(db):
         if not p.get("description"):
             p["description"] = p.get("name", "Test product")
         products_to_insert.append(p)
-    try:
-        db.table("products").insert(products_to_insert).execute()
-    except Exception as exc:
-        logger.debug("Ignoring error seeding products: %s", exc, exc_info=True)
+    db.table("products").insert(products_to_insert).execute()
 
 
 @pytest.fixture
