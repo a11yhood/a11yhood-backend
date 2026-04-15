@@ -1,6 +1,6 @@
 #!/bin/bash
 # Start backend development server for a11yhood using Docker
-# This script starts the backend API server on port 8000 in a Docker container
+# This script starts the backend API server on port 8002 in a Docker container
 # backed by the Supabase test project configured in .env.test.
 #
 # Usage:
@@ -94,8 +94,8 @@ echo ""
 
 # Start container with volume mount for hot reload
 echo -e "${GREEN}🚀 Starting backend container...${NC} (t=$(ts))"
-echo "   Server will be available at: http://localhost:8000"
-echo "   API documentation at: http://localhost:8000/docs"
+echo "   Server will be available at: http://localhost:8002"
+echo "   API documentation at: http://localhost:8002/docs"
 echo "   Code changes will auto-reload"
 echo ""
 
@@ -104,7 +104,7 @@ docker run \
   --name a11yhood-backend-dev \
   --env-file .env.test \
   -e ENV_FILE=.env.test \
-  -p 8000:8000 \
+  -p 8002:8000 \
   -v "$(pwd):/app" \
   --restart unless-stopped \
   --health-cmd="curl -f http://localhost:8000/health || exit 1" \
@@ -123,7 +123,7 @@ fi
 # Wait for server to be ready
 echo -e "${YELLOW}⏳ Waiting for server to start...${NC}"
 for i in {1..30}; do
-  if curl -s http://localhost:8000/health >/dev/null 2>&1; then
+  if curl -s http://localhost:8002/health >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Backend is ready!${NC} (t=$(ts))"
     break
   fi
@@ -147,7 +147,7 @@ for i in {1..30}; do
 done
 
 # Final check
-if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
+if ! curl -s http://localhost:8002/health >/dev/null 2>&1; then
   echo -e "${RED}✗ Server failed to start within 30 seconds${NC}"
   echo "  Check logs with: docker logs a11yhood-backend-dev"
   docker logs --tail=50 a11yhood-backend-dev
@@ -191,10 +191,10 @@ echo ""
 echo -e "${GREEN}✅ Development environment is running!${NC} (t=$(ts))"
 echo ""
 echo -e "${BLUE}📡 Backend API:${NC}"
-echo "   http://localhost:8000"
+echo "   http://localhost:8002"
 echo ""
 echo -e "${BLUE}📚 API Documentation:${NC}"
-echo "   http://localhost:8000/docs"
+echo "   http://localhost:8002/docs"
 echo ""
 echo -e "${BLUE}💡 To monitor logs:${NC}"
 echo "   docker logs -f a11yhood-backend-dev"

@@ -2,14 +2,20 @@
 
 Provides token verification, user identity extraction, and role-based access control.
 In TEST_MODE, accepts dev tokens for stable test identities without real OAuth.
+Also supports X-Dev-Role header for dynamic test user creation (frontend role switching).
 Security: All authorization checks enforce server-side validation; never trust client roles.
 """
 from fastapi import Header, HTTPException, Depends
 import os
-from config import Settings, settings
+import uuid
+import logging
+from config import settings as config_settings
+from config import load_settings_from_env
 from services.database import get_db, verify_token
 from services.security_logger import log_auth_failure
 from database_adapter import DatabaseAdapter
+
+logger = logging.getLogger(__name__)
 
 # Fixed dev identities shared with frontend src/lib/dev-users.ts
 # Must match exactly between frontend and backend.
@@ -20,8 +26,162 @@ DEV_USER_IDS = {
     "2a3b7c3e-971b-4b42-9c8c-0f1843486c50": "regular_user",
 }
 
+# Valid roles that can be created via X-Dev-Role header
+VALID_DEV_ROLES = {"admin", "moderator", "manager", "user"}
 
-async def get_current_user(authorization: str = Header(None)):
+
+async def parse_dev_token(
+    authorization: str = Header(None),
+    x_dev_role: str = Header(None)
+) -> dict:
+    """
+    Parse dev mode authentication: either fixed dev token or dynamic role-based user.
+    
+    Supports two modes in dev:
+    1. Bearer dev-token-<role>: Create/fetch test user with given role (e.g., dev-token-admin)
+    2. X-Dev-Role: <role_name>: Create/fetch test user with given role (e.g., X-Dev-Role: admin)
+       - Valid roles: admin, moderator, manager, user
+       - Creates deterministic user per role (username = "dev_<role>")
+    
+    Args:
+        authorization: Authorization header (Bearer token)
+        x_dev_role: X-Dev-Role header for dynamic role switching
+    
+    Returns:
+        Dict with user_id, email, username, role, is_dev_user=True
+    
+    Raises:
+        HTTPException 400 if role invalid
+        HTTPException 404 if test user not found
+        HTTPException 401 if auth invalid
+    """
+    settings_fresh = load_settings_from_env()
+    if not settings_fresh.TEST_MODE:
+        raise HTTPException(status_code=401, detail="Dev tokens only in TEST_MODE")
+    
+    db = get_db()
+    
+    # Mode 1: X-Dev-Role header takes priority for dynamic user creation
+    if x_dev_role:
+        role = x_dev_role.strip().lower()
+        if role not in VALID_DEV_ROLES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid dev role '{role}'. Valid: {', '.join(sorted(VALID_DEV_ROLES))}"
+            )
+        
+        # Create deterministic username for this role
+        dev_username = f"dev_{role}"
+        dev_email = f"dev-{role}@a11yhood.test"
+        dev_github_id = f"dev-role-{role}"
+        
+        # Check if test user with this role exists
+        resp = db.table("users").select("*").eq("username", dev_username).execute()
+        
+        if resp.data and len(resp.data) > 0:
+            user = resp.data[0]
+            logger.debug(f"Found existing dev user: {user['id']} (role: {role})")
+            return {
+                "id": user["id"],
+                "email": user.get("email"),
+                "username": user.get("username"),
+                "role": user.get("role", "user"),
+                "is_dev_user": True,
+            }
+        
+        # Create new test user for this role
+        user_id = str(uuid.uuid4())
+        new_user = {
+            "id": user_id,
+            "github_id": dev_github_id,
+            "username": dev_username,
+            "email": dev_email,
+            "role": role,
+        }
+        try:
+            db.table("users").insert(new_user).execute()
+            logger.info(f"Created dev test user: {user_id} (username: {dev_username}, role: {role})")
+            return {
+                "id": user_id,
+                "github_id": dev_github_id,
+                "email": dev_email,
+                "username": dev_username,
+                "role": role,
+                "is_dev_user": True,
+            }
+        except Exception as e:
+            logger.error(f"Failed to create dev test user for role {role}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create test user for role {role}"
+            )
+    
+    # Mode 2: Role-based dev token (dev-token-admin, dev-token-user, etc.)
+    if not authorization:
+        raise HTTPException(status_code=401, detail="No authorization header or X-Dev-Role header")
+    
+    token = authorization.replace("Bearer ", "").strip()
+    if not token.startswith("dev-token-"):
+        raise HTTPException(status_code=401, detail="Invalid dev token format")
+    
+    role = token.replace("dev-token-", "").strip().lower()
+    if role not in VALID_DEV_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid dev token role '{role}'. Valid: {', '.join(sorted(VALID_DEV_ROLES))}"
+        )
+    
+    # Use the same role-based user lookup/creation as X-Dev-Role header
+    dev_username = f"dev_{role}"
+    dev_email = f"dev-{role}@a11yhood.test"
+    
+    # Check if test user with this role exists
+    resp = db.table("users").select("*").eq("username", dev_username).execute()
+    
+    if resp.data and len(resp.data) > 0:
+        user = resp.data[0]
+        logger.debug(f"Found existing dev user: {user['id']} (role: {role})")
+        return {
+            "id": user["id"],
+            "email": user.get("email"),
+            "username": user.get("username"),
+            "role": user.get("role", "user"),
+            "is_dev_user": True,
+        }
+    
+    # Create new test user for this role
+    user_id = str(uuid.uuid4())
+    dev_github_id = f"dev-role-{role}"
+    new_user = {
+        "id": user_id,
+        "github_id": dev_github_id,
+        "username": dev_username,
+        "email": dev_email,
+        "role": role,
+    }
+    try:
+        db.table("users").insert(new_user).execute()
+        logger.info(f"Created dev test user: {user_id} (username: {dev_username}, role: {role})")
+        return {
+            "id": user_id,
+            "github_id": dev_github_id,
+            "email": dev_email,
+            "username": dev_username,
+            "role": role,
+            "is_dev_user": True,
+        }
+    except Exception as e:
+        logger.error(f"Failed to create dev test user for role {role}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create test user for role {role}"
+        )
+
+
+async def get_current_user(
+    authorization: str = Header(None),
+    x_dev_role: str = Header(None)
+):
     """
     Get current user from Authorization header.
     
@@ -29,56 +189,36 @@ async def get_current_user(authorization: str = Header(None)):
     Raises HTTPException 401 if token is missing or invalid.
     
     In TEST_MODE (dev):
-      - Accepts: "dev-token-<user_id>" or "Bearer dev-token-<user_id>"
-      - Verifies user_id exists in database and returns user data with role
+      - Accepts: X-Dev-Role header to create/fetch test user by role
+      - Accepts: "Bearer dev-token-<role>" to create/fetch test user by role
+      - Returns user data with role
     
     In production (TEST_MODE=false):
       - Accepts: valid Supabase JWT
       - Calls verify_token() for Supabase validation
     
-    Security: Always re-derives user identity server-side; never trusts client assertions.
+    Security: Always re-derives user identity server-side; never trusts client roles.
     """
-    from config import settings, load_settings_from_env
-    # Use fresh settings so tests that patch env (e.g., startup security) don't
-    # leave a stale cached TEST_MODE value that would disable dev tokens.
-    settings = load_settings_from_env()
-    from services.database import get_db as get_database_adapter
+    settings_fresh = load_settings_from_env()
     
-    if not authorization:
+    if not authorization and not x_dev_role:
         log_auth_failure(None, "Missing authorization header")
         raise HTTPException(status_code=401, detail="No authorization header")
     
-    # Strip "Bearer " prefix if present
-    token = authorization.replace("Bearer ", "").strip()
-    
     env_file = os.getenv("ENV_FILE", "")
-    is_test_context = settings.TEST_MODE or env_file.endswith(".env.test") or bool(os.getenv("PYTEST_CURRENT_TEST"))
+    is_test_context = settings_fresh.TEST_MODE or env_file.endswith(".env.test") or bool(os.getenv("PYTEST_CURRENT_TEST"))
 
-    # Dev/test mode: Accept test tokens
-    if is_test_context and token.startswith("dev-token-"):
-        user_id = token.replace("dev-token-", "").strip()
-        
-        # Verify user exists in database
-        db = get_database_adapter()
-        response = db.table("users").select("*").eq("id", user_id).execute()
-
-        if response.data and len(response.data) > 0:
-            user = response.data[0]
-            return {
-                "id": user["id"],
-                "email": user.get("email"),
-                "username": user.get("username"),
-                "role": user.get("role", "user")
-            }
-        else:
-            log_auth_failure(user_id, "Dev token user not found in database")
-            raise HTTPException(
-                status_code=401, 
-                detail=f"Dev user {user_id} not found. Ensure database is seeded with test users."
-            )
+    # Dev/test mode: Try X-Dev-Role or dev token
+    if is_test_context and (x_dev_role or (authorization and authorization.replace("Bearer ", "").strip().startswith("dev-token-"))):
+        user_dict = await parse_dev_token(authorization, x_dev_role)
+        return user_dict
     
     # Production: Real Supabase auth
-    db_adapter = get_database_adapter()
+    if not authorization:
+        raise HTTPException(status_code=401, detail="No authorization header")
+    
+    token = authorization.replace("Bearer ", "").strip()
+    db_adapter = get_db()
     user = verify_token(token, db_adapter)
 
     # Normalize user to dict shape expected by routers
@@ -103,8 +243,6 @@ async def get_current_user(authorization: str = Header(None)):
         if not user_dict["username"] and user_dict["email"]:
             user_dict["username"] = user_dict["email"].split("@")[0]
 
-        from services.database import get_db as get_database_adapter
-        db_adapter = get_database_adapter()
         if user_dict["id"]:
             response = db_adapter.table("users").select("*").eq("id", user_dict["id"]).execute()
             if response.data and len(response.data) > 0:
@@ -118,20 +256,21 @@ async def get_current_user(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail=f"Authentication normalization failed: {str(e)}")
 
 
-async def get_current_user_optional(authorization: str = Header(None)):
+async def get_current_user_optional(authorization: str = Header(None), x_dev_role: str = Header(None)):
     """
     Variant of get_current_user that returns None when no Authorization header is provided.
     Useful for public endpoints that optionally enforce ownership/visibility checks.
     
     In TEST_MODE, also returns None if dev token references non-existent user (for user creation).
     """
-    if not authorization:
+    if not authorization and not x_dev_role:
         return None
     try:
-        return await get_current_user(authorization)
+        return await get_current_user(authorization, x_dev_role)
     except HTTPException as e:
         # In test mode, if dev user doesn't exist yet, return None (allows user creation)
-        if settings.TEST_MODE and "not found" in str(e.detail):
+        settings_fresh = load_settings_from_env()
+        if settings_fresh.TEST_MODE and "not found" in str(e.detail):
             return None
         raise
 

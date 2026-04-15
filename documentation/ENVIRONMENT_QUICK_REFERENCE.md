@@ -192,7 +192,7 @@ pkill -f uvicorn
 ### "OAuth not working"
 
 **Test Environment**:
-- Uses dev tokens (dev-token-<user_id>) when TEST_MODE=true
+- Uses dev tokens (dev-token-admin, dev-token-user, dev-token-moderator) when TEST_MODE=true
 - No real GitHub OAuth needed
 
 **Production Environment**:

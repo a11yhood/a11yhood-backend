@@ -132,7 +132,7 @@ When adding new features, ensure:
 ## Known Security Measures
 
 ✅ **Implemented**
-- JWT-based authentication (dev-token-{userId} in test mode)
+- Role-based dev tokens (dev-token-admin, dev-token-moderator, dev-token-user) in test mode
 - Role-based access control (admin, moderator, user)
 - Ownership validation on mutations
 - Pydantic input validation with strict types

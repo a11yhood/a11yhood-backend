@@ -31,7 +31,7 @@ def client(clean_database):
 
 @pytest.fixture
 def auth_client(clean_database, test_user):
-    """Test client authenticated as regular user via Authorization header."""
+    """Test client authenticated as regular user via Authorization header (dev-token-user)."""
     from main import app
     app.dependency_overrides[get_db] = lambda: clean_database
     base_client = TestClient(app)
@@ -39,7 +39,7 @@ def auth_client(clean_database, test_user):
     class _AuthClient:
         def __init__(self, base, user):
             self._base = base
-            self._headers = {"Authorization": f"dev-token-{user['id']}"}
+            self._headers = {"Authorization": "dev-token-user"}
 
         def request(self, method, url, **kwargs):
             headers = kwargs.pop("headers", {}) or {}
@@ -70,7 +70,7 @@ def auth_client(clean_database, test_user):
 
 @pytest.fixture
 def admin_client(clean_database, test_admin):
-    """Test client authenticated as admin user via Authorization header."""
+    """Test client authenticated as admin user via Authorization header (dev-token-admin)."""
     from main import app
     app.dependency_overrides[get_db] = lambda: clean_database
     base_client = TestClient(app)
@@ -78,7 +78,7 @@ def admin_client(clean_database, test_admin):
     class _AuthClient:
         def __init__(self, base, user):
             self._base = base
-            self._headers = {"Authorization": f"dev-token-{user['id']}"}
+            self._headers = {"Authorization": "dev-token-admin"}
 
         def request(self, method, url, **kwargs):
             headers = kwargs.pop("headers", {}) or {}
@@ -109,7 +109,7 @@ def admin_client(clean_database, test_admin):
 
 @pytest.fixture
 def auth_client_2(clean_database, test_user_2):
-    """Test client authenticated as second test user via Authorization header."""
+    """Test client authenticated as second test user via Authorization header (dev-token-user)."""
     from main import app
     app.dependency_overrides[get_db] = lambda: clean_database
     base_client = TestClient(app)
@@ -117,7 +117,7 @@ def auth_client_2(clean_database, test_user_2):
     class _AuthClient:
         def __init__(self, base, user):
             self._base = base
-            self._headers = {"Authorization": f"dev-token-{user['id']}"}
+            self._headers = {"Authorization": "dev-token-user"}
 
         def request(self, method, url, **kwargs):
             headers = kwargs.pop("headers", {}) or {}
@@ -207,7 +207,7 @@ def _seed_test_data(db):
     """
     Insert baseline test data into the Supabase test instance.
 
-    Uses fixed user IDs from TEST_USERS so dev-token auth works consistently.
+    Uses fixed user roles so role-based dev-token auth works consistently.
     Inserts are best-effort; errors are silently ignored (data may already exist).
 
     Includes:
@@ -395,9 +395,10 @@ def sqlite_db(clean_database):
 
 @pytest.fixture
 def auth_headers():
-    """Return a factory that builds dev-token Authorization headers for a given user dict."""
+    """Return a factory that builds dev-token Authorization headers based on user role."""
     def _make(user: dict):
-        return {"Authorization": f"dev-token-{user['id']}"}
+        role = user.get("role", "user")
+        return {"Authorization": f"dev-token-{role}"}
     return _make
 
 
