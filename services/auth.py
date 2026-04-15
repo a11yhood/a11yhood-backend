@@ -9,11 +9,9 @@ from fastapi import Header, HTTPException, Depends
 import os
 import uuid
 import logging
-from config import settings as config_settings
 from config import load_settings_from_env
 from services.database import get_db, verify_token
 from services.security_logger import log_auth_failure
-from database_adapter import DatabaseAdapter
 
 logger = logging.getLogger(__name__)
 
