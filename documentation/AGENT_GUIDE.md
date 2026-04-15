@@ -4,7 +4,8 @@ Read this first when operating on the repo. It summarizes conventions, helper ut
 
 ## Key Conventions
 - Prefer existing helpers over reimplementing logic; avoid direct DB access when a wrapper exists.
-- No mocks or fixtures in tests; use real API calls and create test data via the API.
+- Integration/system tests should not mock application internals; use real API calls and real test DB state.
+- Unit tests may use `monkeypatch`/`unittest.mock` for isolated logic.
 - When adding features, update coverage docs so tests map to behavior.
 - Default to snake_case
 

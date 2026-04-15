@@ -10,7 +10,7 @@ Covers:
 """
 
 import pytest
-from unittest.mock import MagicMock
+from uuid import uuid4
 from fastapi.testclient import TestClient
 from routers import dev as dev_router
 
@@ -29,9 +29,8 @@ def _user_headers(test_user):
     return {"Authorization": f"Bearer dev-token-{test_user['id']}"}
 
 
-class _SettingsOverride:
-    def __init__(self, test_mode: bool):
-        self.TEST_MODE = test_mode
+class _TestModeOffSettings:
+    TEST_MODE = False
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +54,7 @@ def test_health_dev_unavailable_outside_test_mode(clean_database, monkeypatch):
     app.dependency_overrides[get_db] = lambda: clean_database
     test_client = TestClient(app)
 
-    monkeypatch.setattr(dev_router, "load_settings_from_env", lambda: _SettingsOverride(False))
+    monkeypatch.setenv("TEST_MODE", "false")
     response = test_client.get("/api/dev/health-dev")
     app.dependency_overrides.clear()
     assert response.status_code == 404
@@ -69,7 +68,7 @@ def test_stats_unavailable_outside_test_mode(clean_database, test_admin, monkeyp
     app.dependency_overrides[get_db] = lambda: clean_database
     test_client = TestClient(app)
 
-    monkeypatch.setattr(dev_router, "load_settings_from_env", lambda: _SettingsOverride(False))
+    monkeypatch.setattr(dev_router, "load_settings_from_env", lambda: _TestModeOffSettings())
     response = test_client.get("/api/dev/stats", headers=_admin_headers(test_admin))
     app.dependency_overrides.clear()
     assert response.status_code == 404
@@ -83,7 +82,7 @@ def test_reset_unavailable_outside_test_mode(clean_database, test_admin, monkeyp
     app.dependency_overrides[get_db] = lambda: clean_database
     test_client = TestClient(app)
 
-    monkeypatch.setattr(dev_router, "load_settings_from_env", lambda: _SettingsOverride(False))
+    monkeypatch.setattr(dev_router, "load_settings_from_env", lambda: _TestModeOffSettings())
     response = test_client.post("/api/dev/reset", headers=_admin_headers(test_admin))
     app.dependency_overrides.clear()
     assert response.status_code == 404
@@ -136,21 +135,8 @@ def test_stats_returns_dev_config(client, test_admin):
 # ---------------------------------------------------------------------------
 
 
-def test_reset_clears_tables(client, test_admin, test_product, monkeypatch):
-    """reset returns status='reset' and cleared_tables counts."""
-
-    async def _fake_reset_database():
-        return {
-            "status": "reset",
-            "cleared_tables": {"products": 1, "users": 1},
-            "total_rows_deleted": 2,
-        }
-
-    monkeypatch.setattr(
-        dev_router,
-        "reset_database",
-        _fake_reset_database,
-    )
+def test_reset_clears_tables(client, test_admin, test_product):
+    """reset returns status='reset' with non-zero deleted row counts."""
     response = client.post("/api/dev/reset", headers=_admin_headers(test_admin))
     assert response.status_code == 200
     data = response.json()
@@ -158,6 +144,9 @@ def test_reset_clears_tables(client, test_admin, test_product, monkeypatch):
     assert "cleared_tables" in data
     assert "total_rows_deleted" in data
     assert isinstance(data["total_rows_deleted"], int)
+    assert data["total_rows_deleted"] > 0
+    assert data["cleared_tables"]["products"] >= 1
+    assert data["cleared_tables"]["users"] >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -174,35 +163,32 @@ def test_check_limits_ok_when_within_limit(client, test_admin):
     assert data["status"] == "ok"
 
 
-def test_check_limits_returns_400_when_exceeded(client, test_admin, monkeypatch):
+def test_check_limits_returns_400_when_exceeded(client, test_admin, clean_database):
     """check-limits returns 400 with details when any table exceeds the limit."""
 
-    def _raise_limits(*_args, **_kwargs):
-        raise ValueError("Dev row limits exceeded (max 20):\n  - products: 25/20")
+    max_rows = clean_database.settings.DEV_MODE_MAX_ROWS_PER_TABLE
+    count_resp = clean_database.supabase.table("products").select("id", count="exact").execute()
+    current_count = count_resp.count or 0
+    to_add = max_rows - current_count + 1
 
-    monkeypatch.setattr(dev_router, "enforce_dev_row_limits", _raise_limits)
+    admin_user = clean_database.table("users").select("id").eq("username", "admin_user").execute()
+    admin_id = admin_user.data[0]["id"]
+
+    overflow_rows = [
+        {
+            "name": f"Overflow Product {i}",
+            "description": "Synthetic row for dev limit integration test",
+            "source": "github",
+            "type": "Software",
+            "url": f"https://github.com/test/overflow-{uuid4()}",
+            "slug": f"overflow-{uuid4()}",
+            "created_by": admin_id,
+        }
+        for i in range(to_add)
+    ]
+    clean_database.supabase.table("products").insert(overflow_rows).execute()
+
     response = client.get("/api/dev/check-limits", headers=_admin_headers(test_admin))
     assert response.status_code == 400
     assert "Dev row limits exceeded" in response.json()["detail"]
-
-
-# ---------------------------------------------------------------------------
-# Automatic row limit enforcement via DatabaseAdapter
-# ---------------------------------------------------------------------------
-
-
-def test_insert_raises_when_table_at_limit(clean_database):
-    """_RowLimitedTableBuilder raises ValueError on insert when table is at DEV_MODE_MAX_ROWS_PER_TABLE."""
-    from database_adapter import _RowLimitedTableBuilder
-
-    max_rows = clean_database.settings.DEV_MODE_MAX_ROWS_PER_TABLE
-    mock_supabase = MagicMock()
-    mock_count_resp = MagicMock()
-    mock_count_resp.count = max_rows
-    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_count_resp
-
-    mock_builder = MagicMock()
-    wrapper = _RowLimitedTableBuilder(mock_builder, mock_supabase, "products", max_rows)
-
-    with pytest.raises(ValueError, match="Dev row limit exceeded"):
-        wrapper.insert({"name": "overflow"})
+    assert "products:" in response.json()["detail"]

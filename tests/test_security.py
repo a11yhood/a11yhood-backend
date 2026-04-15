@@ -21,7 +21,7 @@ def _ensure_uuid(value: str) -> str:
     try:
         uuid.UUID(value)
         return value
-    except Exception:
+    except ValueError:
         return str(uuid.uuid4())
 
 
@@ -552,10 +552,8 @@ def test_invalid_token_rejected(client):
         headers={"Authorization": "Bearer invalid.token.here"},
     )
 
-    # Should either succeed with optional auth (200) or fail gracefully (401/500)
-    # The endpoint accepts optional auth, so it may return 200, 401, or 500
-    # depending on how the token verification fails
-    assert response.status_code in [200, 401, 500]
+    # Endpoint has optional auth; invalid headers should never cause 500.
+    assert response.status_code in [200, 401]
 
 
 def test_malformed_token_header_ignored(client):
@@ -566,9 +564,8 @@ def test_malformed_token_header_ignored(client):
         headers={"Authorization": "NotABearer"},
     )
 
-    # Should handle gracefully - either 200 (ignore bad auth), 401, or 500
-    # The important thing is it shouldn't crash completely
-    assert response.status_code in [200, 401, 500]
+    # Endpoint has optional auth; malformed headers should never cause 500.
+    assert response.status_code in [200, 401]
 
 
 def test_missing_auth_on_protected_endpoint(client):
@@ -646,8 +643,9 @@ def test_sensitive_headers_not_leaked(client):
         "X-Powered-By" not in response.headers or response.headers.get("X-Powered-By") != "FastAPI"
     )
 
-    # Security headers should be present
-    assert "Content-Security-Policy" in response.headers or True  # Might be conditional
+    # If CSP is configured, it should be non-empty.
+    if "Content-Security-Policy" in response.headers:
+        assert response.headers["Content-Security-Policy"].strip() != ""
     assert "X-Content-Type-Options" in response.headers
 
 
@@ -738,6 +736,7 @@ def test_no_hardcoded_oauth_secrets_in_codebase():
     exclude_patterns = {".pyc", ".pyo"}
 
     found_secrets = []
+    read_errors = []
 
     # Walk through the codebase
     for root, dirs, files in os.walk("/Users/jmankoff/Research/a11yhood/a11yhood/a11yhood-backend"):
@@ -796,11 +795,11 @@ def test_no_hardcoded_oauth_secrets_in_codebase():
                                         else str(match)[:20],
                                     }
                                 )
-            except Exception:
-                # Skip files that can't be read
-                pass
+            except Exception as exc:
+                read_errors.append({"file": filepath, "error": str(exc)})
 
     # Report findings
+    assert not read_errors, f"Failed reading files during secret scan: {read_errors}"
     assert not found_secrets, f"Found potential secrets in codebase: {found_secrets}"
 
 
@@ -818,6 +817,7 @@ def test_no_database_passwords_in_code():
     ]
 
     found_issues = []
+    read_errors = []
 
     for root, dirs, files in os.walk("/Users/jmankoff/Research/a11yhood/a11yhood/a11yhood-backend"):
         dirs[:] = [d for d in dirs if d not in {".venv", "__pycache__", ".git"}]
@@ -842,9 +842,10 @@ def test_no_database_passwords_in_code():
                                 if re.search(pattern, line) and not line.strip().startswith("#"):
                                     found_issues.append(filepath.split("/")[-1])
                                     break
-            except Exception:
-                pass
+            except Exception as exc:
+                read_errors.append({"file": filepath, "error": str(exc)})
 
+    assert not read_errors, f"Failed reading files during DB password scan: {read_errors}"
     assert not found_issues, f"Found potential database passwords in: {found_issues}"
 
 
@@ -854,6 +855,7 @@ def test_no_api_keys_in_comments():
     import re
 
     found_issues = []
+    read_errors = []
 
     for root, dirs, files in os.walk("/Users/jmankoff/Research/a11yhood/a11yhood/a11yhood-backend"):
         dirs[:] = [d for d in dirs if d not in {".venv", "__pycache__", ".git"}]
@@ -876,7 +878,8 @@ def test_no_api_keys_in_comments():
                                 comment,
                             ):
                                 found_issues.append((filepath.split("/")[-1], line_num))
-            except Exception:
-                pass
+            except Exception as exc:
+                read_errors.append({"file": filepath, "error": str(exc)})
 
+    assert not read_errors, f"Failed reading files during API-key comment scan: {read_errors}"
     assert not found_issues, f"Found potential API keys in comments: {found_issues}"
