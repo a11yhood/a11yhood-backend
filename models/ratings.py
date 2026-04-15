@@ -6,7 +6,6 @@ from datetime import datetime
 class RatingBase(BaseModel):
     product_id: str
     rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5")
-    owned: bool = False
 
 
 class RatingCreate(RatingBase):
@@ -15,7 +14,6 @@ class RatingCreate(RatingBase):
 
 class RatingUpdate(BaseModel):
     rating: Optional[int] = Field(None, ge=1, le=5)
-    owned: Optional[bool] = None
 
 
 class RatingResponse(RatingBase):

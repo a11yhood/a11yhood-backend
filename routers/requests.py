@@ -265,12 +265,12 @@ def update_user_request(
     
     # If approved, grant the requested permission
     if update.status == 'approved':
-        _grant_permission(db, request_data)
+        _grant_permission(db, request_data, reviewer_id=current_user['id'])
     
     return response.data[0]
 
 
-def _grant_permission(db, request_data: dict):
+def _grant_permission(db, request_data: dict, reviewer_id: Optional[str] = None):
     """Grant permission based on approved request"""
     user_id = request_data['user_id']
     request_type = request_data['type']
@@ -285,13 +285,34 @@ def _grant_permission(db, request_data: dict):
         db.table("product_editors").insert(owner_data).execute()
     
     elif request_type in ['moderator', 'admin']:
-        # Update user role in the users table
+        # Prefer the admin_update_user_role RPC to satisfy DB trigger/policy checks.
         try:
-            db.table("users").update({"role": request_type}).eq("id", user_id).execute()
+            if reviewer_id:
+                db.rpc(
+                    "admin_update_user_role",
+                    {
+                        "admin_user_id": reviewer_id,
+                        "target_user_id": user_id,
+                        "new_role": request_type,
+                    },
+                ).execute()
+            else:
+                db.table("users").update({"role": request_type}).eq("id", user_id).execute()
         except Exception:
-            # Do not fail the overall approval if role update fails, but log for investigation.
+            # Fall back to direct update for test setups that don't yet have the RPC.
+            try:
+                db.table("users").update({"role": request_type}).eq("id", user_id).execute()
+            except Exception:
+                # Do not fail the overall approval if role update fails, but log for investigation.
+                logging.exception(
+                    "Failed to update user role during permission grant",
+                    extra={"user_id": user_id, "request_type": request_type},
+                )
+
+                return
+
             logging.exception(
-                "Failed to update user role during permission grant",
+                "admin_update_user_role RPC failed; fallback direct role update succeeded",
                 extra={"user_id": user_id, "request_type": request_type},
             )
 

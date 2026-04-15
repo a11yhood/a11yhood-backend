@@ -22,15 +22,13 @@ async def log_user_activity(
     activity_id = str(uuid.uuid4())
     now = datetime.now(UTC)
     
-    # Convert timestamp from milliseconds to datetime and then to ISO format
-    timestamp_dt = datetime.fromtimestamp(activity.timestamp / 1000.0, tz=UTC)
-    
     activity_data = {
         "id": activity_id,
         "user_id": activity.user_id,
         "type": activity.type,
         "product_id": activity.product_id,
-        "timestamp": timestamp_dt.isoformat(),
+        # DB column is bigint milliseconds since epoch
+        "timestamp": int(activity.timestamp),
         "activity_metadata": activity.metadata,  # Use activity_metadata column name
         "created_at": now.isoformat(),
     }
@@ -46,7 +44,7 @@ async def log_user_activity(
         result["metadata"] = result.pop("activity_metadata")
     
     # Convert timestamp back to milliseconds for response
-    if "timestamp" in result and result["timestamp"]:
+    if "timestamp" in result and isinstance(result["timestamp"], str):
         timestamp_str = result["timestamp"]
         dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
         result["timestamp"] = int(dt.timestamp() * 1000)
@@ -86,7 +84,7 @@ async def get_activities(
             activity["metadata"] = activity.pop("activity_metadata")
         
         # Convert timestamp back to milliseconds for response
-        if "timestamp" in activity and activity["timestamp"]:
+        if "timestamp" in activity and isinstance(activity["timestamp"], str):
             timestamp_str = activity["timestamp"]
             dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
             activity["timestamp"] = int(dt.timestamp() * 1000)
@@ -105,7 +103,15 @@ async def get_activity(
     if not response.data:
         raise HTTPException(status_code=404, detail="Activity not found")
     
-    return response.data[0]
+    activity = response.data[0]
+    if "activity_metadata" in activity:
+        activity["metadata"] = activity.pop("activity_metadata")
+    if "timestamp" in activity and isinstance(activity["timestamp"], str):
+        timestamp_str = activity["timestamp"]
+        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        activity["timestamp"] = int(dt.timestamp() * 1000)
+
+    return activity
 
 
 @router.post("/cleanup", response_model=dict)

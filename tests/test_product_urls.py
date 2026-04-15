@@ -45,6 +45,8 @@ def auth_header(request, clean_database, test_user):
                 "github_id": f"gh-{user_id}",
                 "username": f"user-{user_id}",
                 "display_name": user_id,
+                "email": f"{str(user_id).replace(' ', '-')[:40]}@example.com",
+                "role": "user",
             }).execute()
 
         app.dependency_overrides.clear()
@@ -66,11 +68,12 @@ def test_product(clean_database, test_user):
     product = clean_database.table("products").insert({
         "id": product_id,
         "name": "Test Product",
-        "category": "Software",
-        "source": "user-submitted",
+        "type": "Software",
+        "source": "github",
+        "slug": f"test-product-{uuid.uuid4().hex[:8]}",
+        "url": f"https://github.com/test/product-{uuid.uuid4().hex[:8]}",
         "description": "A test product",
         "created_by": test_user["id"],
-        "editor_ids": [test_user["id"]],
     }).execute()
     yield product.data[0]
     clean_database.table("product_urls").delete().eq("product_id", product_id).execute()
@@ -173,16 +176,26 @@ def test_update_product_url_by_creator(test_product, test_product_url, client_wi
 
 
 def test_update_product_url_by_owner(test_product, test_product_url, clean_database, client_with_db, auth_header):
-    clean_database.table("products").update({
-        "editor_ids": [test_product["created_by"], _ensure_uuid("test-user-2")]
-    }).eq("id", test_product["id"]).execute()
+    second_owner_id = _ensure_uuid("test-user-2")
+    clean_database.table("users").insert({
+        "id": second_owner_id,
+        "github_id": f"gh-{second_owner_id[:8]}",
+        "username": f"user-{second_owner_id[:8]}",
+        "display_name": "Second Owner",
+        "email": f"owner-{second_owner_id[:8]}@example.com",
+        "role": "user",
+    }).execute()
+    clean_database.table("product_editors").insert({
+        "product_id": test_product["id"],
+        "user_id": second_owner_id,
+    }).execute()
 
     response = client_with_db.patch(
         f"/api/products/{test_product['id']}/urls/{test_product_url['id']}",
         json={
             "description": "Updated by owner"
         },
-        headers=auth_header("test-user-2")
+        headers=auth_header(second_owner_id)
     )
     assert response.status_code == 200
 

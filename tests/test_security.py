@@ -222,9 +222,9 @@ def test_blog_post_creation_requires_admin(auth_client):
     assert response.status_code == 403
 
 
-def test_admin_can_publish_blog_post(admin_client):
+def test_admin_can_publish_blog_post(admin_client, test_admin):
     slug = f"security-blog-{int(time.time() * 1000)}"
-    payload = _sample_blog_payload(author_id="admin-1", author_name="Admin User", slug=slug, published=True)
+    payload = _sample_blog_payload(author_id=test_admin["id"], author_name="Admin User", slug=slug, published=True)
 
     create = admin_client.post("/api/blog-posts", json=payload)
     assert create.status_code == 201
@@ -245,9 +245,9 @@ def test_admin_can_publish_blog_post(admin_client):
     assert detail["content"].startswith("**secure**")
 
 
-def test_unpublished_blog_post_hidden_from_public(admin_client):
+def test_unpublished_blog_post_hidden_from_public(admin_client, test_admin):
     slug = f"security-blog-unpublished-{int(time.time() * 1000)}"
-    payload = _sample_blog_payload(author_id="admin-2", author_name="Admin User", slug=slug, published=False)
+    payload = _sample_blog_payload(author_id=test_admin["id"], author_name="Admin User", slug=slug, published=False)
 
     create = admin_client.post("/api/blog-posts", json=payload)
     assert create.status_code == 201
@@ -366,7 +366,7 @@ def test_null_byte_injection_prevented(auth_client):
             "name": "Test\x00Hidden",
             "description": "Test product",
             "source_url": "https://example.com/test",
-            "source": "manual",
+            "source": "github",
             "type": "Other",
         },
     )
@@ -420,7 +420,7 @@ def test_type_confusion_prevented(auth_client):
             "name": ["array", "instead", "of", "string"],  # Should be string
             "description": 12345,  # Should be string
             "source_url": "https://example.com/test",
-            "source": "manual",
+            "source": "github",
             "type": "Other",
         },
     )

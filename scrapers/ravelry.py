@@ -303,6 +303,10 @@ class RavelryScraper(BaseScraper):
                 cat_name = cat.get('name') if isinstance(cat, dict) else cat
                 if cat_name:
                     tags.append(cat_name)
+                if isinstance(cat, dict) and cat.get('parent'):
+                    parent_name = cat['parent'].get('name') if isinstance(cat['parent'], dict) else cat['parent']
+                    if parent_name:
+                        tags.append(parent_name)
         
         # Add pattern_attributes (accessibility and other pattern attributes)
         if pattern.get('pattern_attributes'):

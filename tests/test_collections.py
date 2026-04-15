@@ -543,9 +543,10 @@ class TestAddMultipleProductsToCollection:
         product_data = {
             "name": "Second Product",
             "description": "Another test product",
-            "source": "manual",
-            "category": "Other",
-            "url": "https://example.com/second",
+            "source": "github",
+            "type": "Other",
+            "url": f"https://github.com/example/second-{uuid.uuid4().hex[:8]}",
+            "slug": f"second-product-{uuid.uuid4().hex[:8]}",
             "created_by": test_user["id"],
         }
         result = clean_database.table("products").insert(product_data).execute()

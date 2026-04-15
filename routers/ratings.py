@@ -1,6 +1,6 @@
 """Rating management endpoints.
 
-Handles product ratings (1-5 stars) with ownership tracking.
+Handles product ratings (1-5 stars).
 Security: One rating per user per product (enforced at creation).
 Users can only update/delete their own ratings.
 """

@@ -29,7 +29,7 @@ def test_product_data():
     return {
         "name": "Test Accessible Product",
         "source": "github",
-        "category": "Software",
+        "type": "Software",
         "url": f"https://github.com/user/product-{uuid.uuid4()}",
         "image": None,
         "description": "A test product for integration testing",
@@ -87,16 +87,16 @@ def test_product_submission_sets_correct_created_at(
         "source_url": f"https://github.com/user/test-{uuid.uuid4()}",
     }
     
-    before_submission = datetime.now(UTC).replace(tzinfo=None)
+    before_submission = datetime.now(UTC)
     response = auth_client.post("/api/products", json=product_data)
-    after_submission = datetime.now(UTC).replace(tzinfo=None)
+    after_submission = datetime.now(UTC)
     
     assert response.status_code == 201
     product = response.json()
     assert "created_at" in product
     
     # Verify timestamp is reasonable
-    created_at = datetime.fromisoformat(product["created_at"])
+    created_at = datetime.fromisoformat(product["created_at"].replace("Z", "+00:00"))
     assert before_submission <= created_at <= after_submission
 
 
@@ -208,12 +208,13 @@ def test_discussion_creation_without_parent_starts_new_thread(
 def test_activity_logging_stores_metadata(
     auth_client,
     test_user,
+    test_product,
     clean_database,
 ):
     """
     Activity logging should store extra metadata for later analysis
     """
-    product_id = str(uuid.uuid4())
+    product_id = test_product["id"]
     timestamp = int(datetime.now(UTC).timestamp() * 1000)
     
     response = auth_client.post(
@@ -237,6 +238,7 @@ def test_activity_logging_stores_metadata(
 def test_activities_can_be_queried_by_user(
     auth_client,
     test_user,
+    test_product,
     clean_database,
 ):
     """
@@ -249,7 +251,7 @@ def test_activities_can_be_queried_by_user(
             json={
                 "user_id": test_user["id"],
                 "type": "rating" if i % 2 == 0 else "discussion",
-                "product_id": str(uuid.uuid4()),
+                "product_id": test_product["id"],
                 "timestamp": int(datetime.now(UTC).timestamp() * 1000),
             },
         )

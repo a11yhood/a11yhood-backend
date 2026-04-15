@@ -640,8 +640,10 @@ def test_multiple_product_editor_requests_allowed(client, test_user, test_produc
     product2 = sqlite_db.table("products").insert({
         "name": "Second Product",
         "description": "Another product",
-        "source": "manual",
-        "url": "https://example.com/2"
+        "source": "github",
+        "type": "Other",
+        "url": "https://github.com/example/product-2",
+        "slug": f"second-product-{datetime.now().timestamp():.0f}"
     }).execute().data[0]
     
     # Request ownership of first product

@@ -20,7 +20,6 @@ def test_create_rating_requires_auth(client, test_product):
     rating_data = {
         "product_id": test_product["id"],
         "rating": 5,
-        "owned": True,
     }
 
     response = client.post("/api/ratings", json=rating_data)
@@ -31,7 +30,6 @@ def test_create_rating_success(auth_client, test_user, test_product):
     rating_data = {
         "product_id": test_product["id"],
         "rating": 5,
-        "owned": True,
     }
 
     response = auth_client.post("/api/ratings", json=rating_data)
@@ -51,7 +49,6 @@ def test_create_duplicate_rating_fails(auth_client, clean_database, test_user, t
     response = auth_client.post("/api/ratings", json={
         "product_id": test_product["id"],
         "rating": 5,
-        "owned": True,
     })
     assert response.status_code == 400
     assert "already rated" in response.json()["detail"].lower()
