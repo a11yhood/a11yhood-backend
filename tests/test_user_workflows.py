@@ -8,6 +8,8 @@ These tests verify that complete user actions have the expected side effects:
 """
 
 import pytest
+
+pytestmark = pytest.mark.integration
 from datetime import datetime, UTC
 import uuid
 

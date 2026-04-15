@@ -5,6 +5,8 @@ Story 5.1: User Posts a New Discussion Thread
 Story 5.2: User Replies to a Discussion Thread
 """
 import pytest
+
+pytestmark = pytest.mark.integration
 from fastapi.testclient import TestClient
 from datetime import datetime
 

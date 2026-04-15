@@ -3,6 +3,11 @@ Integration coverage for supported source validation and source-domain request l
 These tests use the real database adapter (Supabase test instance) without mocks.
 """
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
+
 
 def test_load_url_blocks_unsupported_domain(client):
     """Public load-url should reject domains not in supported_sources."""

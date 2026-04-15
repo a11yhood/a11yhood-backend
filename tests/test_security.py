@@ -8,6 +8,11 @@ These tests focus on:
 - Role-based feature gating (admin-only scrapers, manager-only edits)
 """
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
+
 import time
 import uuid
 

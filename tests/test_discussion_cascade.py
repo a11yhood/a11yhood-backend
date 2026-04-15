@@ -3,6 +3,11 @@ Integration tests for cascade block/unblock on discussion threads.
 Uses TestClient and seeded fixtures; no mocks, no external server.
 """
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
+
 def test_block_cascades_to_descendants(auth_client, admin_client, test_product):
     # Create a hierarchy: parent -> (reply1 -> reply1child), (reply2)
     parent = auth_client.post("/api/discussions", json={

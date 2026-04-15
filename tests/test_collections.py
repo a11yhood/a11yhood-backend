@@ -3,6 +3,8 @@ Tests for collection endpoints
 Tests use real API calls via FastAPI TestClient, with test database setup via fixtures
 """
 import pytest
+
+pytestmark = pytest.mark.integration
 import uuid
 from fastapi.testclient import TestClient
 from main import app

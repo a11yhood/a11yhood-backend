@@ -136,9 +136,23 @@ class DatabaseAdapter:
     def cleanup(self):
         """Delete all rows from every table (for test isolation).
 
+        Prefers the truncate_test_tables RPC (single round-trip, server-side
+        TRUNCATE CASCADE) and falls back to sequential per-table DELETEs if the
+        RPC is not yet deployed on the test database.
+
+        Apply migrations/test_only/20260414_add_truncate_test_tables_rpc.sql
+        to the test Supabase instance to enable the fast path.
+
         Uses the service-role key, which bypasses RLS.
-        Deletes in dependency order so foreign-key constraints are satisfied.
         """
+        try:
+            self.supabase.rpc("truncate_test_tables").execute()
+            return
+        except Exception as exc:
+            logger.debug(
+                "truncate_test_tables RPC unavailable, falling back to per-table DELETE: %s",
+                exc,
+            )
         for table in self._TEST_TABLES_ORDER:
             try:
                 column, lower_bound = self._TEST_TABLE_FILTERS.get(

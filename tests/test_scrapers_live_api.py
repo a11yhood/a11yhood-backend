@@ -25,6 +25,8 @@ import time
 import logging
 from urllib.parse import urlparse
 import pytest
+
+pytestmark = pytest.mark.integration
 import httpx
 from dotenv import dotenv_values
 

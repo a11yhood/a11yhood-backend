@@ -8,6 +8,8 @@ Tests the user experience for:
 - Admin approval/rejection of requests
 """
 import pytest
+
+pytestmark = pytest.mark.integration
 from datetime import datetime
 
 

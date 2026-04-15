@@ -1,5 +1,7 @@
 """Test product endpoints using the Supabase test database"""
 import pytest
+
+pytestmark = pytest.mark.integration
 import uuid
 import re
 from datetime import datetime, UTC, timedelta

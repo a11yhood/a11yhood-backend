@@ -1,5 +1,7 @@
 """Tests for scraper endpoints and services using the Supabase test database"""
 import pytest
+
+pytestmark = pytest.mark.integration
 from routers import scrapers as scrapers_router
 
 

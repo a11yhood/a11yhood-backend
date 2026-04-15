@@ -1,4 +1,6 @@
 import pytest
+
+pytestmark = pytest.mark.integration
 import uuid
 from fastapi.testclient import TestClient
 from main import app

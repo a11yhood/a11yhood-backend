@@ -1,5 +1,7 @@
 """Test user account endpoints"""
 import pytest
+
+pytestmark = pytest.mark.integration
 import uuid
 from datetime import datetime, timedelta
 from fastapi.testclient import TestClient

@@ -1,4 +1,9 @@
 """Tests for Ravelry scraper"""
+
+import pytest
+
+pytestmark = pytest.mark.integration
+
 from scrapers.ravelry import RavelryScraper
 
 

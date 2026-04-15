@@ -1,6 +1,8 @@
 """Test rating endpoints against the Supabase test database"""
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 def test_get_ratings(client, clean_database, test_user, test_product):
     clean_database.table("ratings").insert({

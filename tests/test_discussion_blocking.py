@@ -3,6 +3,11 @@ Integration tests for discussion block/unblock endpoints using TestClient.
 No external server required; relies on seeded test data via conftest.
 """
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
+
 def test_block_unblock_flow(auth_client, admin_client, test_product):
     # Create discussion as regular user
     create = auth_client.post("/api/discussions", json={
