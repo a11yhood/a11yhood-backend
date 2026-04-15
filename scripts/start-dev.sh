@@ -110,7 +110,6 @@ fi
 log_step "Checking for existing containers..."
 if cleanup_container "$CONTAINER_NAME"; then
   echo "  Stopped existing container"
-======= end
 fi
 if is_container_running "a11yhood-backend-prod"; then
   echo "  Production container detected and left running"
