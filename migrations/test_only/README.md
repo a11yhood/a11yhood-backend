@@ -19,6 +19,7 @@ Run these in Supabase SQL Editor after creating/resetting a test database if Dat
 Current files:
 
 - `20260308_service_role_public_schema_grants.sql`
+- `20260414_add_truncate_test_tables_rpc.sql` — creates the `truncate_test_tables()` RPC used by `DatabaseAdapter.cleanup()` for fast single-round-trip test teardown
 
 ## Notes
 

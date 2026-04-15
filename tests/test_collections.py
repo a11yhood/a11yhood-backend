@@ -2,10 +2,11 @@
 Tests for collection endpoints
 Tests use real API calls via FastAPI TestClient, with test database setup via fixtures
 """
-import pytest
+
 import uuid
-from fastapi.testclient import TestClient
-from main import app
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 class TestCreateCollection:
@@ -20,7 +21,7 @@ class TestCreateCollection:
                 "name": "My Favorite Products",
                 "description": "Products I love",
                 "is_public": True,
-            }
+            },
         )
         assert response.status_code == 201
         data = response.json()
@@ -42,7 +43,7 @@ class TestCreateCollection:
                 "name": "",
                 "description": "Products I love",
                 "is_public": True,
-            }
+            },
         )
         # Pydantic schema validation returns 422 for min_length violation
         assert response.status_code == 422
@@ -55,7 +56,7 @@ class TestCreateCollection:
             json={
                 "description": "Products I love",
                 "is_public": True,
-            }
+            },
         )
         assert response.status_code == 422  # Validation error
 
@@ -69,7 +70,7 @@ class TestCreateCollection:
                 "name": "My Collection",
                 "description": long_desc,
                 "is_public": True,
-            }
+            },
         )
         assert response.status_code == 422
 
@@ -80,7 +81,7 @@ class TestCreateCollection:
             headers=auth_headers(test_user),
             json={
                 "name": "My Collection",
-            }
+            },
         )
         assert response.status_code == 201
         assert response.json()["is_public"] is True
@@ -92,7 +93,7 @@ class TestCreateCollection:
             json={
                 "name": "My Collection",
                 "is_public": True,
-            }
+            },
         )
         assert response.status_code == 401
 
@@ -104,7 +105,7 @@ class TestCreateCollection:
             json={
                 "name": "My Private Collection",
                 "is_public": False,
-            }
+            },
         )
         assert response.status_code == 201
         assert response.json()["is_public"] is False
@@ -119,7 +120,7 @@ class TestGetUserCollections:
         create_response = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Collection 1", "is_public": True}
+            json={"name": "Collection 1", "is_public": True},
         )
         collection_id = create_response.json()["id"]
 
@@ -137,14 +138,14 @@ class TestGetUserCollections:
         client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "User 1 Collection", "is_public": True}
+            json={"name": "User 1 Collection", "is_public": True},
         )
 
         # Create collection for user 2
         client.post(
             "/api/collections",
             headers=auth_headers(test_user_2),
-            json={"name": "User 2 Collection", "is_public": True}
+            json={"name": "User 2 Collection", "is_public": True},
         )
 
         # User 1 should only see their own
@@ -177,12 +178,12 @@ class TestGetPublicCollections:
         client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Public Collection", "is_public": True}
+            json={"name": "Public Collection", "is_public": True},
         )
         client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Private Collection", "is_public": False}
+            json={"name": "Private Collection", "is_public": False},
         )
 
         # Get public collections (no auth needed)
@@ -197,12 +198,12 @@ class TestGetPublicCollections:
         client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Yarn Stash", "is_public": True}
+            json={"name": "Yarn Stash", "is_public": True},
         )
         client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Patterns Library", "is_public": True}
+            json={"name": "Patterns Library", "is_public": True},
         )
 
         response = client.get("/api/collections/public?search=yarn")
@@ -215,12 +216,12 @@ class TestGetPublicCollections:
         client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "First", "is_public": True}
+            json={"name": "First", "is_public": True},
         )
         client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Second", "is_public": True}
+            json={"name": "Second", "is_public": True},
         )
 
         response = client.get("/api/collections/public?sort_by=created_at")
@@ -237,7 +238,7 @@ class TestGetCollectionDetails:
         create_response = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Public Collection", "description": "A public collection"}
+            json={"name": "Public Collection", "description": "A public collection"},
         )
         collection_id = create_response.json()["id"]
 
@@ -254,7 +255,7 @@ class TestGetCollectionDetails:
         create_response = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Private Collection", "is_public": False}
+            json={"name": "Private Collection", "is_public": False},
         )
         collection_id = create_response.json()["id"]
 
@@ -263,18 +264,22 @@ class TestGetCollectionDetails:
         assert response.status_code == 200
         assert response.json()["name"] == "Private Collection"
 
-    def test_get_collection_details_private_non_owner(self, client, test_user, test_user_2, auth_headers):
+    def test_get_collection_details_private_non_owner(
+        self, client, test_user, test_user_2, auth_headers
+    ):
         """Test non-owner cannot get private collection"""
         # Create private collection as user 1
         create_response = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Private Collection", "is_public": False}
+            json={"name": "Private Collection", "is_public": False},
         )
         collection_id = create_response.json()["id"]
 
         # Try to access as user 2
-        response = client.get(f"/api/collections/{collection_id}", headers=auth_headers(test_user_2))
+        response = client.get(
+            f"/api/collections/{collection_id}", headers=auth_headers(test_user_2)
+        )
         assert response.status_code == 403
 
     def test_get_collection_details_not_found(self, client):
@@ -290,9 +295,7 @@ class TestUpdateCollection:
         """Test successful collection update"""
         # Create collection
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "Original Name"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Original Name"}
         )
         collection_id = create_response.json()["id"]
 
@@ -300,20 +303,20 @@ class TestUpdateCollection:
         response = client.put(
             f"/api/collections/{collection_id}",
             headers=auth_headers(test_user),
-            json={"name": "New Name", "description": "New description"}
+            json={"name": "New Name", "description": "New description"},
         )
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "New Name"
         assert data["description"] == "New description"
 
-    def test_update_collection_requires_ownership(self, client, test_user, test_user_2, auth_headers):
+    def test_update_collection_requires_ownership(
+        self, client, test_user, test_user_2, auth_headers
+    ):
         """Test that only owner can update collection"""
         # Create collection as user 1
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "Collection"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Collection"}
         )
         collection_id = create_response.json()["id"]
 
@@ -321,7 +324,7 @@ class TestUpdateCollection:
         response = client.put(
             f"/api/collections/{collection_id}",
             headers=auth_headers(test_user_2),
-            json={"name": "Hacked"}
+            json={"name": "Hacked"},
         )
         assert response.status_code == 403
 
@@ -330,24 +333,21 @@ class TestUpdateCollection:
         create_response = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Collection", "is_public": True}
+            json={"name": "Collection", "is_public": True},
         )
         collection_id = create_response.json()["id"]
 
         response = client.put(
             f"/api/collections/{collection_id}",
             headers=auth_headers(test_user),
-            json={"is_public": False}
+            json={"is_public": False},
         )
         assert response.status_code == 200
         assert response.json()["is_public"] is False
 
     def test_update_collection_requires_auth(self, client):
         """Test that updating collection requires authentication"""
-        response = client.put(
-            f"/api/collections/{uuid.uuid4()}",
-            json={"name": "New Name"}
-        )
+        response = client.put(f"/api/collections/{uuid.uuid4()}", json={"name": "New Name"})
         assert response.status_code == 401
 
 
@@ -358,32 +358,36 @@ class TestDeleteCollection:
         """Test successful collection deletion"""
         # Create collection
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "To Delete"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "To Delete"}
         )
         collection_id = create_response.json()["id"]
 
         # Delete it
-        response = client.delete(f"/api/collections/{collection_id}", headers=auth_headers(test_user))
+        response = client.delete(
+            f"/api/collections/{collection_id}", headers=auth_headers(test_user)
+        )
         assert response.status_code == 204
 
         # Verify it's gone
-        get_response = client.get(f"/api/collections/{collection_id}", headers=auth_headers(test_user))
+        get_response = client.get(
+            f"/api/collections/{collection_id}", headers=auth_headers(test_user)
+        )
         assert get_response.status_code == 404
 
-    def test_delete_collection_requires_ownership(self, client, test_user, test_user_2, auth_headers):
+    def test_delete_collection_requires_ownership(
+        self, client, test_user, test_user_2, auth_headers
+    ):
         """Test that only owner can delete collection"""
         # Create collection as user 1
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "Collection"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Collection"}
         )
         collection_id = create_response.json()["id"]
 
         # Try to delete as user 2
-        response = client.delete(f"/api/collections/{collection_id}", headers=auth_headers(test_user_2))
+        response = client.delete(
+            f"/api/collections/{collection_id}", headers=auth_headers(test_user_2)
+        )
         assert response.status_code == 403
 
     def test_delete_collection_requires_auth(self, client):
@@ -399,16 +403,14 @@ class TestAddProductToCollection:
         """Test adding a product to collection"""
         # Create collection
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "My Products"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "My Products"}
         )
         collection_id = create_response.json()["id"]
 
         # Add product
         response = client.post(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-            , headers=auth_headers(test_user)
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user),
         )
         assert response.status_code == 200
         data = response.json()
@@ -418,20 +420,18 @@ class TestAddProductToCollection:
         """Test that adding same product twice is idempotent"""
         # Create collection
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "My Products"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "My Products"}
         )
         collection_id = create_response.json()["id"]
 
         # Add product twice
         client.post(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-            , headers=auth_headers(test_user)
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user),
         )
         response = client.post(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-            , headers=auth_headers(test_user)
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user),
         )
 
         assert response.status_code == 200
@@ -439,52 +439,57 @@ class TestAddProductToCollection:
         # Product should only appear once
         assert data["product_ids"].count(test_product["id"]) == 1
 
-    def test_add_product_nonexistent_collection(self, client, test_user, test_product, auth_headers):
+    def test_add_product_nonexistent_collection(
+        self, client, test_user, test_product, auth_headers
+    ):
         """Test adding product to non-existent collection"""
         response = client.post(
-            f"/api/collections/{uuid.uuid4()}/products/{test_product['id']}"
-            , headers=auth_headers(test_user)
+            f"/api/collections/{uuid.uuid4()}/products/{test_product['id']}",
+            headers=auth_headers(test_user),
         )
         assert response.status_code == 404
 
-    def test_add_product_requires_ownership(self, client, test_user, test_user_2, test_product, auth_headers):
+    def test_add_product_requires_ownership(
+        self, client, test_user, test_user_2, test_product, auth_headers
+    ):
         """Test that only owner can add products"""
         # Create collection as user 1
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "My Products"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "My Products"}
         )
         collection_id = create_response.json()["id"]
 
         # Try to add product as user 2
         response = client.post(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-        , headers=auth_headers(test_user_2))
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user_2),
+        )
         assert response.status_code == 403
 
 
 class TestRemoveProductFromCollection:
     """Tests for Story 6.8: Remove Products from Collection"""
 
-    def test_remove_product_from_collection_success(self, client, test_user, test_product, auth_headers):
+    def test_remove_product_from_collection_success(
+        self, client, test_user, test_product, auth_headers
+    ):
         """Test removing a product from collection"""
         # Create collection and add product
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "My Products"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "My Products"}
         )
         collection_id = create_response.json()["id"]
 
         client.post(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-        , headers=auth_headers(test_user))
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user),
+        )
 
         # Remove product
         response = client.delete(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-        , headers=auth_headers(test_user))
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user),
+        )
         assert response.status_code == 200
         data = response.json()
         assert test_product["id"] not in data["product_ids"]
@@ -493,57 +498,62 @@ class TestRemoveProductFromCollection:
         """Test that removing product twice is idempotent"""
         # Create collection with product
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "My Products"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "My Products"}
         )
         collection_id = create_response.json()["id"]
 
         client.post(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-        , headers=auth_headers(test_user))
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user),
+        )
 
         # Remove twice
         client.delete(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-        , headers=auth_headers(test_user))
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user),
+        )
         response = client.delete(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-        , headers=auth_headers(test_user))
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user),
+        )
 
         assert response.status_code == 200
         data = response.json()
         assert test_product["id"] not in data["product_ids"]
 
-    def test_remove_product_requires_ownership(self, client, test_user, test_user_2, test_product, auth_headers):
+    def test_remove_product_requires_ownership(
+        self, client, test_user, test_user_2, test_product, auth_headers
+    ):
         """Test that only owner can remove products"""
         # Create collection as user 1
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "My Products"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "My Products"}
         )
         collection_id = create_response.json()["id"]
 
         # Try to remove as user 2
         response = client.delete(
-            f"/api/collections/{collection_id}/products/{test_product['id']}"
-        , headers=auth_headers(test_user_2))
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user_2),
+        )
         assert response.status_code == 403
 
 
 class TestAddMultipleProductsToCollection:
     """Tests for bulk product operations"""
 
-    def test_add_multiple_products_success(self, client, test_product, clean_database, test_user, auth_headers):
+    def test_add_multiple_products_success(
+        self, client, test_product, clean_database, test_user, auth_headers
+    ):
         """Test adding multiple products at once"""
         # Create another test product
         product_data = {
             "name": "Second Product",
             "description": "Another test product",
-            "source": "manual",
-            "category": "Other",
-            "url": "https://example.com/second",
+            "source": "github",
+            "type": "Other",
+            "url": f"https://github.com/example/second-{uuid.uuid4().hex[:8]}",
+            "slug": f"second-product-{uuid.uuid4().hex[:8]}",
             "created_by": test_user["id"],
         }
         result = clean_database.table("products").insert(product_data).execute()
@@ -551,9 +561,7 @@ class TestAddMultipleProductsToCollection:
 
         # Create collection
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "Multi Products"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Multi Products"}
         )
         collection_id = create_response.json()["id"]
 
@@ -561,7 +569,7 @@ class TestAddMultipleProductsToCollection:
         response = client.post(
             f"/api/collections/{collection_id}/products",
             headers=auth_headers(test_user),
-            json={"product_ids": [test_product["id"], second_product["id"]]}
+            json={"product_ids": [test_product["id"], second_product["id"]]},
         )
         assert response.status_code == 200
         data = response.json()
@@ -572,51 +580,49 @@ class TestAddMultipleProductsToCollection:
     def test_add_multiple_products_empty_list(self, client, test_user, auth_headers):
         """Test that adding empty product list works"""
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "Empty Add"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Empty Add"}
         )
         collection_id = create_response.json()["id"]
 
         response = client.post(
             f"/api/collections/{collection_id}/products",
             headers=auth_headers(test_user),
-            json={"product_ids": []}
+            json={"product_ids": []},
         )
         assert response.status_code == 200
 
-    def test_add_multiple_products_with_duplicates(self, client, test_user, test_product, auth_headers):
+    def test_add_multiple_products_with_duplicates(
+        self, client, test_user, test_product, auth_headers
+    ):
         """Test adding same product twice in bulk"""
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "Duplicates"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Duplicates"}
         )
         collection_id = create_response.json()["id"]
 
         response = client.post(
             f"/api/collections/{collection_id}/products",
             headers=auth_headers(test_user),
-            json={"product_ids": [test_product["id"], test_product["id"]]}
+            json={"product_ids": [test_product["id"], test_product["id"]]},
         )
         assert response.status_code == 200
         data = response.json()
         # Should only contain product once
         assert data["product_ids"].count(test_product["id"]) == 1
 
-    def test_add_multiple_products_requires_ownership(self, client, test_user, test_user_2, test_product, auth_headers):
+    def test_add_multiple_products_requires_ownership(
+        self, client, test_user, test_user_2, test_product, auth_headers
+    ):
         """Test that only owner can bulk add products"""
         create_response = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "Protected"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Protected"}
         )
         collection_id = create_response.json()["id"]
 
         response = client.post(
             f"/api/collections/{collection_id}/products",
             headers=auth_headers(test_user_2),
-            json={"product_ids": [test_product["id"]]}
+            json={"product_ids": [test_product["id"]]},
         )
         assert response.status_code == 403
 
@@ -630,25 +636,25 @@ class TestProductCollections:
         collection1 = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Collection 1", "is_public": True}
+            json={"name": "Collection 1", "is_public": True},
         ).json()
-        
+
         collection2 = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Collection 2", "is_public": True}
+            json={"name": "Collection 2", "is_public": True},
         ).json()
-        
+
         # Add product to both collections
         client.post(
             f"/api/collections/{collection1['id']}/products/{test_product['id']}",
-            headers=auth_headers(test_user)
+            headers=auth_headers(test_user),
         )
         client.post(
             f"/api/collections/{collection2['id']}/products/{test_product['id']}",
-            headers=auth_headers(test_user)
+            headers=auth_headers(test_user),
         )
-        
+
         # Get collections for product (unauthenticated)
         response = client.get(f"/api/products/{test_product['slug']}/collections")
         assert response.status_code == 200
@@ -658,31 +664,33 @@ class TestProductCollections:
         assert "Collection 1" in collection_names
         assert "Collection 2" in collection_names
 
-    def test_get_product_collections_private_filtered(self, client, test_user, test_user_2, test_product, auth_headers):
+    def test_get_product_collections_private_filtered(
+        self, client, test_user, test_user_2, test_product, auth_headers
+    ):
         """Test that private collections are filtered for unauthenticated users"""
         # Create public and private collections
         public_collection = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Public", "is_public": True}
+            json={"name": "Public", "is_public": True},
         ).json()
-        
+
         private_collection = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Private", "is_public": False}
+            json={"name": "Private", "is_public": False},
         ).json()
-        
+
         # Add product to both
         client.post(
             f"/api/collections/{public_collection['id']}/products/{test_product['id']}",
-            headers=auth_headers(test_user)
+            headers=auth_headers(test_user),
         )
         client.post(
             f"/api/collections/{private_collection['id']}/products/{test_product['id']}",
-            headers=auth_headers(test_user)
+            headers=auth_headers(test_user),
         )
-        
+
         # Unauthenticated request should only see public
         response = client.get(f"/api/products/{test_product['slug']}/collections")
         assert response.status_code == 200
@@ -690,25 +698,26 @@ class TestProductCollections:
         assert len(collections) == 1
         assert collections[0]["name"] == "Public"
 
-    def test_get_product_collections_private_owner_can_see(self, client, test_user, test_product, auth_headers):
+    def test_get_product_collections_private_owner_can_see(
+        self, client, test_user, test_product, auth_headers
+    ):
         """Test that collection owner can see their private collections"""
         # Create private collection
         private_collection = client.post(
             "/api/collections",
             headers=auth_headers(test_user),
-            json={"name": "Private", "is_public": False}
+            json={"name": "Private", "is_public": False},
         ).json()
-        
+
         # Add product
         client.post(
             f"/api/collections/{private_collection['id']}/products/{test_product['id']}",
-            headers=auth_headers(test_user)
+            headers=auth_headers(test_user),
         )
-        
+
         # Owner should see their private collection
         response = client.get(
-            f"/api/products/{test_product['slug']}/collections",
-            headers=auth_headers(test_user)
+            f"/api/products/{test_product['slug']}/collections", headers=auth_headers(test_user)
         )
         assert response.status_code == 200
         collections = response.json()
@@ -730,14 +739,14 @@ class TestProductCollections:
 class TestJunctionTableBehavior:
     """Tests for junction table implementation"""
 
-    def test_product_position_maintained(self, client, test_user, test_product, auth_headers, sqlite_db):
+    def test_product_position_maintained(
+        self, client, test_user, test_product, auth_headers, sqlite_db
+    ):
         """Test that products maintain their insertion order via position field"""
         collection = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "Ordered Collection"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Ordered Collection"}
         ).json()
-        
+
         # Create multiple products
         product_ids = []
         for i in range(3):
@@ -747,21 +756,20 @@ class TestJunctionTableBehavior:
                 json={
                     "name": f"Product {i}",
                     "source_url": f"https://github.com/test/product-{i}",
-                    "type": "software"
-                }
+                    "type": "software",
+                },
             ).json()
             product_ids.append(product["id"])
-            
+
             # Add to collection
             client.post(
                 f"/api/collections/{collection['id']}/products/{product['id']}",
-                headers=auth_headers(test_user)
+                headers=auth_headers(test_user),
             )
-        
+
         # Get collection and verify order
         response = client.get(
-            f"/api/collections/{collection['id']}",
-            headers=auth_headers(test_user)
+            f"/api/collections/{collection['id']}", headers=auth_headers(test_user)
         )
         assert response.status_code == 200
         data = response.json()
@@ -770,53 +778,57 @@ class TestJunctionTableBehavior:
     def test_duplicate_product_prevented(self, client, test_user, test_product, auth_headers):
         """Test that adding the same product twice doesn't create duplicates"""
         collection = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "No Duplicates"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "No Duplicates"}
         ).json()
-        
+
         # Add product twice
         client.post(
             f"/api/collections/{collection['id']}/products/{test_product['id']}",
-            headers=auth_headers(test_user)
+            headers=auth_headers(test_user),
         )
         client.post(
             f"/api/collections/{collection['id']}/products/{test_product['id']}",
-            headers=auth_headers(test_user)
+            headers=auth_headers(test_user),
         )
-        
+
         # Should only appear once
         response = client.get(
-            f"/api/collections/{collection['id']}",
-            headers=auth_headers(test_user)
+            f"/api/collections/{collection['id']}", headers=auth_headers(test_user)
         )
         data = response.json()
         assert data["product_ids"].count(test_product["id"]) == 1
 
-    def test_junction_table_cascade_delete(self, client, test_user, test_product, auth_headers, sqlite_db):
+    def test_junction_table_cascade_delete(
+        self, client, test_user, test_product, auth_headers, sqlite_db
+    ):
         """Test that deleting a collection removes junction table entries"""
         collection = client.post(
-            "/api/collections",
-            headers=auth_headers(test_user),
-            json={"name": "Temporary"}
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Temporary"}
         ).json()
-        
+
         # Add product
         client.post(
             f"/api/collections/{collection['id']}/products/{test_product['id']}",
-            headers=auth_headers(test_user)
+            headers=auth_headers(test_user),
         )
-        
+
         # Verify junction entry exists
-        junction_check = sqlite_db.table("collection_products").select("*").eq("collection_id", collection["id"]).execute()
-        assert len(junction_check.data) == 1
-        
-        # Delete collection
-        client.delete(
-            f"/api/collections/{collection['id']}",
-            headers=auth_headers(test_user)
+        junction_check = (
+            sqlite_db.table("collection_products")
+            .select("*")
+            .eq("collection_id", collection["id"])
+            .execute()
         )
-        
+        assert len(junction_check.data) == 1
+
+        # Delete collection
+        client.delete(f"/api/collections/{collection['id']}", headers=auth_headers(test_user))
+
         # Verify junction entry removed (CASCADE)
-        junction_check = sqlite_db.table("collection_products").select("*").eq("collection_id", collection["id"]).execute()
+        junction_check = (
+            sqlite_db.table("collection_products")
+            .select("*")
+            .eq("collection_id", collection["id"])
+            .execute()
+        )
         assert len(junction_check.data) == 0

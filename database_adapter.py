@@ -4,14 +4,14 @@ Database adapter for Supabase.
 Always uses Supabase for both production and testing.
 Configure SUPABASE_URL/SUPABASE_KEY in .env (production) or .env.test (test instance).
 """
+
 import logging
-from typing import Optional
 from contextvars import ContextVar
 
 logger = logging.getLogger(__name__)
 
 # Per-request Supabase JWT for RLS-aware queries
-_supabase_auth_token: ContextVar[Optional[str]] = ContextVar("supabase_auth_token", default=None)
+_supabase_auth_token: ContextVar[str | None] = ContextVar("supabase_auth_token", default=None)
 
 # Tables that are excluded from dev-mode row-limit checks.
 # System tables or pure join tables where a count limit makes no sense.
@@ -25,12 +25,12 @@ _ROW_LIMIT_EXEMPT_TABLES = {
 }
 
 
-def set_supabase_auth_token(token: Optional[str]):
+def set_supabase_auth_token(token: str | None):
     """Store the active Supabase JWT in a context variable for this request."""
     _supabase_auth_token.set(token)
 
 
-def get_supabase_auth_token() -> Optional[str]:
+def get_supabase_auth_token() -> str | None:
     """Retrieve the Supabase JWT for the current request, if set."""
     return _supabase_auth_token.get()
 
@@ -57,7 +57,9 @@ class _RowLimitedTableBuilder:
             resp = self._supabase.table(self._table).select("id", count="exact").execute()
             count = resp.count or 0
         except Exception as exc:
-            logger.warning("Row-limit pre-check failed for '%s': %s – proceeding with insert", self._table, exc)
+            logger.warning(
+                "Row-limit pre-check failed for '%s': %s – proceeding with insert", self._table, exc
+            )
             count = 0
 
         if count >= self._max_rows:
@@ -113,6 +115,7 @@ class DatabaseAdapter:
 
     def __init__(self, settings=None):
         from config import get_settings
+
         self.settings = settings or get_settings()
         self._request_auth_token = None
         self.backend = "supabase"  # Always Supabase
@@ -124,6 +127,7 @@ class DatabaseAdapter:
             )
 
         from supabase import create_client
+
         self.supabase = create_client(
             self.settings.SUPABASE_URL,
             self.settings.SUPABASE_KEY,
@@ -136,9 +140,23 @@ class DatabaseAdapter:
     def cleanup(self):
         """Delete all rows from every table (for test isolation).
 
+        Prefers the truncate_test_tables RPC (single round-trip, server-side
+        TRUNCATE CASCADE) and falls back to sequential per-table DELETEs if the
+        RPC is not yet deployed on the test database.
+
+        Apply migrations/test_only/20260414_add_truncate_test_tables_rpc.sql
+        to the test Supabase instance to enable the fast path.
+
         Uses the service-role key, which bypasses RLS.
-        Deletes in dependency order so foreign-key constraints are satisfied.
         """
+        try:
+            self.supabase.rpc("truncate_test_tables").execute()
+            return
+        except Exception as exc:
+            logger.debug(
+                "truncate_test_tables RPC unavailable, falling back to per-table DELETE: %s",
+                exc,
+            )
         for table in self._TEST_TABLES_ORDER:
             try:
                 column, lower_bound = self._TEST_TABLE_FILTERS.get(
@@ -157,10 +175,7 @@ class DatabaseAdapter:
         _ROW_LIMIT_EXEMPT_TABLES are always returned unwrapped.
         """
         builder = self.supabase.table(table_name)
-        if (
-            self.settings.TEST_MODE
-            and table_name not in _ROW_LIMIT_EXEMPT_TABLES
-        ):
+        if self.settings.TEST_MODE and table_name not in _ROW_LIMIT_EXEMPT_TABLES:
             return _RowLimitedTableBuilder(
                 builder,
                 self.supabase,

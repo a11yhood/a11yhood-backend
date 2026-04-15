@@ -8,14 +8,18 @@ Covers:
 - /api/dev/reset: clears tables and returns counts
 - /api/dev/check-limits: reports over-limit tables
 """
-import pytest
-from unittest.mock import patch, MagicMock
-from fastapi.testclient import TestClient
 
+import pytest
+from unittest.mock import MagicMock
+from fastapi.testclient import TestClient
+from routers import dev as dev_router
+
+pytestmark = pytest.mark.integration
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _admin_headers(test_admin):
     return {"Authorization": f"Bearer dev-token-{test_admin['id']}"}
@@ -25,9 +29,15 @@ def _user_headers(test_user):
     return {"Authorization": f"Bearer dev-token-{test_user['id']}"}
 
 
+class _SettingsOverride:
+    def __init__(self, test_mode: bool):
+        self.TEST_MODE = test_mode
+
+
 # ---------------------------------------------------------------------------
 # Gating: dev endpoints are only available in TEST_MODE
 # ---------------------------------------------------------------------------
+
 
 def test_health_dev_available_in_test_mode(client):
     """health-dev returns 200 when TEST_MODE is active."""
@@ -37,48 +47,44 @@ def test_health_dev_available_in_test_mode(client):
     assert data["mode"] == "dev"
 
 
-def test_health_dev_unavailable_outside_test_mode(clean_database):
+def test_health_dev_unavailable_outside_test_mode(clean_database, monkeypatch):
     """health-dev returns 404 when TEST_MODE is false."""
     from main import app
     from services.database import get_db
+
     app.dependency_overrides[get_db] = lambda: clean_database
     test_client = TestClient(app)
 
-    with patch("routers.dev.load_settings_from_env") as mock_settings:
-        mock_settings.return_value = MagicMock(TEST_MODE=False)
-        response = test_client.get("/api/dev/health-dev")
+    monkeypatch.setattr(dev_router, "load_settings_from_env", lambda: _SettingsOverride(False))
+    response = test_client.get("/api/dev/health-dev")
     app.dependency_overrides.clear()
     assert response.status_code == 404
 
 
-def test_stats_unavailable_outside_test_mode(clean_database, test_admin):
+def test_stats_unavailable_outside_test_mode(clean_database, test_admin, monkeypatch):
     """stats returns 404 when TEST_MODE is false."""
     from main import app
     from services.database import get_db
+
     app.dependency_overrides[get_db] = lambda: clean_database
     test_client = TestClient(app)
 
-    with patch("routers.dev.load_settings_from_env") as mock_settings:
-        mock_settings.return_value = MagicMock(TEST_MODE=False)
-        response = test_client.get(
-            "/api/dev/stats", headers=_admin_headers(test_admin)
-        )
+    monkeypatch.setattr(dev_router, "load_settings_from_env", lambda: _SettingsOverride(False))
+    response = test_client.get("/api/dev/stats", headers=_admin_headers(test_admin))
     app.dependency_overrides.clear()
     assert response.status_code == 404
 
 
-def test_reset_unavailable_outside_test_mode(clean_database, test_admin):
+def test_reset_unavailable_outside_test_mode(clean_database, test_admin, monkeypatch):
     """reset returns 404 when TEST_MODE is false."""
     from main import app
     from services.database import get_db
+
     app.dependency_overrides[get_db] = lambda: clean_database
     test_client = TestClient(app)
 
-    with patch("routers.dev.load_settings_from_env") as mock_settings:
-        mock_settings.return_value = MagicMock(TEST_MODE=False)
-        response = test_client.post(
-            "/api/dev/reset", headers=_admin_headers(test_admin)
-        )
+    monkeypatch.setattr(dev_router, "load_settings_from_env", lambda: _SettingsOverride(False))
+    response = test_client.post("/api/dev/reset", headers=_admin_headers(test_admin))
     app.dependency_overrides.clear()
     assert response.status_code == 404
 
@@ -86,6 +92,7 @@ def test_reset_unavailable_outside_test_mode(clean_database, test_admin):
 # ---------------------------------------------------------------------------
 # Admin-only access
 # ---------------------------------------------------------------------------
+
 
 def test_stats_requires_admin(client, test_user):
     """stats returns 403 for a non-admin user."""
@@ -109,6 +116,7 @@ def test_check_limits_requires_admin(client, test_user):
 # /api/dev/stats
 # ---------------------------------------------------------------------------
 
+
 def test_stats_returns_dev_config(client, test_admin):
     """stats returns mode, max_rows_per_table, test_scraper_limit, and tables dict."""
     response = client.get("/api/dev/stats", headers=_admin_headers(test_admin))
@@ -127,8 +135,22 @@ def test_stats_returns_dev_config(client, test_admin):
 # /api/dev/reset
 # ---------------------------------------------------------------------------
 
-def test_reset_clears_tables(client, test_admin, test_product):
+
+def test_reset_clears_tables(client, test_admin, test_product, monkeypatch):
     """reset returns status='reset' and cleared_tables counts."""
+
+    async def _fake_reset_database():
+        return {
+            "status": "reset",
+            "cleared_tables": {"products": 1, "users": 1},
+            "total_rows_deleted": 2,
+        }
+
+    monkeypatch.setattr(
+        dev_router,
+        "reset_database",
+        _fake_reset_database,
+    )
     response = client.post("/api/dev/reset", headers=_admin_headers(test_admin))
     assert response.status_code == 200
     data = response.json()
@@ -142,6 +164,7 @@ def test_reset_clears_tables(client, test_admin, test_product):
 # /api/dev/check-limits
 # ---------------------------------------------------------------------------
 
+
 def test_check_limits_ok_when_within_limit(client, test_admin):
     """check-limits returns 200 when all tables are within the configured limit."""
     response = client.get("/api/dev/check-limits", headers=_admin_headers(test_admin))
@@ -151,15 +174,14 @@ def test_check_limits_ok_when_within_limit(client, test_admin):
     assert data["status"] == "ok"
 
 
-def test_check_limits_returns_400_when_exceeded(client, test_admin):
+def test_check_limits_returns_400_when_exceeded(client, test_admin, monkeypatch):
     """check-limits returns 400 with details when any table exceeds the limit."""
-    with patch("routers.dev.enforce_dev_row_limits") as mock_enforce:
-        mock_enforce.side_effect = ValueError(
-            "Dev row limits exceeded (max 20):\n  - products: 25/20"
-        )
-        response = client.get(
-            "/api/dev/check-limits", headers=_admin_headers(test_admin)
-        )
+
+    def _raise_limits(*_args, **_kwargs):
+        raise ValueError("Dev row limits exceeded (max 20):\n  - products: 25/20")
+
+    monkeypatch.setattr(dev_router, "enforce_dev_row_limits", _raise_limits)
+    response = client.get("/api/dev/check-limits", headers=_admin_headers(test_admin))
     assert response.status_code == 400
     assert "Dev row limits exceeded" in response.json()["detail"]
 
@@ -167,6 +189,7 @@ def test_check_limits_returns_400_when_exceeded(client, test_admin):
 # ---------------------------------------------------------------------------
 # Automatic row limit enforcement via DatabaseAdapter
 # ---------------------------------------------------------------------------
+
 
 def test_insert_raises_when_table_at_limit(clean_database):
     """_RowLimitedTableBuilder raises ValueError on insert when table is at DEV_MODE_MAX_ROWS_PER_TABLE."""

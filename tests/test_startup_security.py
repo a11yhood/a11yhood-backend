@@ -2,132 +2,185 @@
 
 Ensures that TEST_MODE and default SECRET_KEY are rejected in production-like environments.
 """
+
 import pytest
-import os
-from unittest.mock import patch
 
 
-def test_test_mode_rejected_in_production_with_supabase():
+def _set_env(monkeypatch, values: dict[str, str]) -> None:
+    """Set env vars for one test case."""
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_test_mode_rejected_in_production_with_supabase(monkeypatch):
     """TEST_MODE should be rejected when Supabase config is explicitly marked production."""
-    with patch.dict(os.environ, {
-        "TEST_MODE": "true",
-        "SUPABASE_URL": "https://myproject.supabase.co",
-        "SUPABASE_KEY": "real-key",
-        "ENVIRONMENT": "production",
-    }, clear=False):
-        # Reload config to pick up env changes
-        from importlib import reload
-        import config
-        reload(config)
-        
-        # Try to start app
-        with pytest.raises(RuntimeError, match="TEST_MODE=true in production"):
-            from main import app
-            # Trigger startup event
-            import asyncio
-            from main import validate_security_configuration
-            asyncio.run(validate_security_configuration())
+    _set_env(
+        monkeypatch,
+        {
+            "TEST_MODE": "true",
+            "SUPABASE_URL": "https://myproject.supabase.co",
+            "SUPABASE_KEY": "real-key",
+            "ENVIRONMENT": "production",
+        },
+    )
+    # Reload config to pick up env changes
+    from importlib import reload
+
+    import config
+
+    reload(config)
+
+    # Try to start app
+    with pytest.raises(RuntimeError, match="TEST_MODE=true in production"):
+        # Trigger startup event
+        import asyncio
+
+        from main import validate_security_configuration
+
+        asyncio.run(validate_security_configuration())
 
 
-def test_test_mode_rejected_in_production_with_production_url():
+def test_test_mode_rejected_in_production_with_production_url(monkeypatch):
     """TEST_MODE should be rejected when PRODUCTION_URL is set"""
-    with patch.dict(os.environ, {
-        "TEST_MODE": "true",
-        "PRODUCTION_URL": "https://a11yhood.com",
-    }, clear=False):
-        from importlib import reload
-        import config
-        reload(config)
-        
-        with pytest.raises(RuntimeError, match="TEST_MODE=true in production"):
-            import asyncio
-            from main import validate_security_configuration
-            asyncio.run(validate_security_configuration())
+    _set_env(
+        monkeypatch,
+        {
+            "TEST_MODE": "true",
+            "PRODUCTION_URL": "https://a11yhood.com",
+        },
+    )
+    from importlib import reload
+
+    import config
+
+    reload(config)
+
+    with pytest.raises(RuntimeError, match="TEST_MODE=true in production"):
+        import asyncio
+
+        from main import validate_security_configuration
+
+        asyncio.run(validate_security_configuration())
 
 
-def test_test_mode_rejected_with_environment_variable():
+def test_test_mode_rejected_with_environment_variable(monkeypatch):
     """TEST_MODE should be rejected when ENVIRONMENT=production"""
-    with patch.dict(os.environ, {
-        "TEST_MODE": "true",
-        "ENVIRONMENT": "production",
-    }, clear=False):
-        from importlib import reload
-        import config
-        reload(config)
-        
-        with pytest.raises(RuntimeError, match="TEST_MODE=true in production"):
-            import asyncio
-            from main import validate_security_configuration
-            asyncio.run(validate_security_configuration())
+    _set_env(
+        monkeypatch,
+        {
+            "TEST_MODE": "true",
+            "ENVIRONMENT": "production",
+        },
+    )
+    from importlib import reload
+
+    import config
+
+    reload(config)
+
+    with pytest.raises(RuntimeError, match="TEST_MODE=true in production"):
+        import asyncio
+
+        from main import validate_security_configuration
+
+        asyncio.run(validate_security_configuration())
 
 
-def test_default_secret_key_rejected_in_production():
+def test_default_secret_key_rejected_in_production(monkeypatch):
     """Default SECRET_KEY should be rejected in production"""
-    with patch.dict(os.environ, {
-        "SECRET_KEY": "dev-secret-key-change-in-production",
-        "SUPABASE_URL": "https://myproject.supabase.co",
-        "TEST_MODE": "false",
-        "ENVIRONMENT": "production",
-    }, clear=False):
-        from importlib import reload
-        import config
-        reload(config)
-        
-        with pytest.raises(RuntimeError, match="Default SECRET_KEY in production"):
-            import asyncio
-            from main import validate_security_configuration
-            asyncio.run(validate_security_configuration())
+    _set_env(
+        monkeypatch,
+        {
+            "SECRET_KEY": "dev-secret-key-change-in-production",
+            "SUPABASE_URL": "https://myproject.supabase.co",
+            "TEST_MODE": "false",
+            "ENVIRONMENT": "production",
+        },
+    )
+    from importlib import reload
+
+    import config
+
+    reload(config)
+
+    with pytest.raises(RuntimeError, match="Default SECRET_KEY in production"):
+        import asyncio
+
+        from main import validate_security_configuration
+
+        asyncio.run(validate_security_configuration())
 
 
-def test_short_secret_key_rejected_in_production():
+def test_short_secret_key_rejected_in_production(monkeypatch):
     """Short SECRET_KEY should be rejected in production"""
-    with patch.dict(os.environ, {
-        "SECRET_KEY": "short",
-        "SUPABASE_URL": "https://myproject.supabase.co",
-        "TEST_MODE": "false",
-        "ENVIRONMENT": "production",
-    }, clear=False):
-        from importlib import reload
-        import config
-        reload(config)
-        
-        with pytest.raises(RuntimeError, match="SECRET_KEY too short"):
-            import asyncio
-            from main import validate_security_configuration
-            asyncio.run(validate_security_configuration())
+    _set_env(
+        monkeypatch,
+        {
+            "SECRET_KEY": "short",
+            "SUPABASE_URL": "https://myproject.supabase.co",
+            "TEST_MODE": "false",
+            "ENVIRONMENT": "production",
+        },
+    )
+    from importlib import reload
+
+    import config
+
+    reload(config)
+
+    with pytest.raises(RuntimeError, match="SECRET_KEY too short"):
+        import asyncio
+
+        from main import validate_security_configuration
+
+        asyncio.run(validate_security_configuration())
 
 
-def test_test_mode_allowed_in_development():
+def test_test_mode_allowed_in_development(monkeypatch):
     """TEST_MODE should be allowed when no production indicators present"""
-    with patch.dict(os.environ, {
-        "TEST_MODE": "true",
-        "SUPABASE_URL": "https://dummy.supabase.co",
-        "PRODUCTION_URL": "",
-        "ENVIRONMENT": "development",
-    }, clear=False):
-        from importlib import reload
-        import config
-        reload(config)
-        
-        # Should not raise
-        import asyncio
-        from main import validate_security_configuration
-        asyncio.run(validate_security_configuration())
+    _set_env(
+        monkeypatch,
+        {
+            "TEST_MODE": "true",
+            "SUPABASE_URL": "https://dummy.supabase.co",
+            "PRODUCTION_URL": "",
+            "ENVIRONMENT": "development",
+        },
+    )
+    from importlib import reload
+
+    import config
+
+    reload(config)
+
+    # Should not raise
+    import asyncio
+
+    from main import validate_security_configuration
+
+    asyncio.run(validate_security_configuration())
 
 
-def test_production_with_valid_config_succeeds():
+def test_production_with_valid_config_succeeds(monkeypatch):
     """Production with proper SECRET_KEY should work"""
-    with patch.dict(os.environ, {
-        "TEST_MODE": "false",
-        "SECRET_KEY": "a" * 64,  # Long secure key
-        "SUPABASE_URL": "https://myproject.supabase.co",
-        "ENVIRONMENT": "production",
-    }, clear=False):
-        from importlib import reload
-        import config
-        reload(config)
-        
-        # Should not raise
-        import asyncio
-        from main import validate_security_configuration
-        asyncio.run(validate_security_configuration())
+    _set_env(
+        monkeypatch,
+        {
+            "TEST_MODE": "false",
+            "SECRET_KEY": "a" * 64,  # Long secure key
+            "SUPABASE_URL": "https://myproject.supabase.co",
+            "ENVIRONMENT": "production",
+        },
+    )
+    from importlib import reload
+
+    import config
+
+    reload(config)
+
+    # Should not raise
+    import asyncio
+
+    from main import validate_security_configuration
+
+    asyncio.run(validate_security_configuration())

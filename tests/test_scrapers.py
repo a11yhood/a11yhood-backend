@@ -1,6 +1,9 @@
 """Tests for scraper endpoints and services using the Supabase test database"""
+
 import pytest
 from routers import scrapers as scrapers_router
+
+pytestmark = pytest.mark.integration
 
 
 def test_trigger_github_scraper_success(admin_client, monkeypatch):
@@ -60,13 +63,15 @@ def test_trigger_thingiverse_without_oauth(admin_client):
 
 
 def test_trigger_ravelry_without_token(admin_client, clean_database, test_admin):
-    clean_database.table("oauth_configs").insert({
-        "platform": "ravelry",
-        "client_id": "id",
-        "client_secret": "secret",
-        "redirect_uri": "http://localhost",
-        "access_token": None,
-    }).execute()
+    clean_database.table("oauth_configs").insert(
+        {
+            "platform": "ravelry",
+            "client_id": "id",
+            "client_secret": "secret",
+            "redirect_uri": "http://localhost",
+            "access_token": None,
+        }
+    ).execute()
 
     response = admin_client.post(
         "/api/scrapers/trigger",
@@ -78,15 +83,17 @@ def test_trigger_ravelry_without_token(admin_client, clean_database, test_admin)
 
 
 def test_get_scraping_logs(auth_client, clean_database, test_user):
-    clean_database.table("scraping_logs").insert({
-        "user_id": test_user["id"],
-        "source": "github",
-        "products_found": 2,
-        "products_added": 2,
-        "products_updated": 0,
-        "duration_seconds": 1.2,
-        "status": "success",
-    }).execute()
+    clean_database.table("scraping_logs").insert(
+        {
+            "user_id": test_user["id"],
+            "source": "github",
+            "products_found": 2,
+            "products_added": 2,
+            "products_updated": 0,
+            "duration_seconds": 1.2,
+            "status": "success",
+        }
+    ).execute()
 
     response = auth_client.get("/api/scrapers/logs")
 
@@ -98,15 +105,17 @@ def test_get_scraping_logs(auth_client, clean_database, test_user):
 
 
 def test_get_scraping_logs_with_filter(auth_client, clean_database, test_user):
-    clean_database.table("scraping_logs").insert({
-        "user_id": test_user["id"],
-        "source": "thingiverse",
-        "products_found": 1,
-        "products_added": 1,
-        "products_updated": 0,
-        "duration_seconds": 0.5,
-        "status": "success",
-    }).execute()
+    clean_database.table("scraping_logs").insert(
+        {
+            "user_id": test_user["id"],
+            "source": "thingiverse",
+            "products_found": 1,
+            "products_added": 1,
+            "products_updated": 0,
+            "duration_seconds": 0.5,
+            "status": "success",
+        }
+    ).execute()
 
     response = auth_client.get("/api/scrapers/logs?source=thingiverse&limit=10")
 
@@ -116,17 +125,19 @@ def test_get_scraping_logs_with_filter(auth_client, clean_database, test_user):
 def test_get_oauth_configs_requires_admin(auth_client):
     """Test that non-admin users cannot view OAuth configs"""
     response = auth_client.get("/api/scrapers/oauth-configs")
-    
+
     assert response.status_code == 403
 
 
 def test_get_oauth_configs_as_admin(admin_client, clean_database):
-    clean_database.table("oauth_configs").insert({
-        "platform": "thingiverse",
-        "client_id": "test_client_id",
-        "client_secret": "secret",
-        "redirect_uri": "https://example.com/callback",
-    }).execute()
+    clean_database.table("oauth_configs").insert(
+        {
+            "platform": "thingiverse",
+            "client_id": "test_client_id",
+            "client_secret": "secret",
+            "redirect_uri": "https://example.com/callback",
+        }
+    ).execute()
 
     response = admin_client.get("/api/scrapers/oauth-configs")
 
@@ -161,20 +172,22 @@ def test_create_oauth_config_requires_admin(auth_client):
             "platform": "thingiverse",
             "client_id": "new_client_id",
             "client_secret": "new_secret",
-            "redirect_uri": "https://example.com/callback"
-        }
+            "redirect_uri": "https://example.com/callback",
+        },
     )
-    
+
     assert response.status_code == 403
 
 
 def test_update_oauth_config(admin_client, clean_database):
-    clean_database.table("oauth_configs").insert({
-        "platform": "thingiverse",
-        "client_id": "old",
-        "client_secret": "secret",
-        "redirect_uri": "https://example.com/callback",
-    }).execute()
+    clean_database.table("oauth_configs").insert(
+        {
+            "platform": "thingiverse",
+            "client_id": "old",
+            "client_secret": "secret",
+            "redirect_uri": "https://example.com/callback",
+        }
+    ).execute()
 
     response = admin_client.put(
         "/api/scrapers/oauth-configs/thingiverse",
@@ -221,7 +234,7 @@ def test_oauth_callback_unsupported_platform(admin_client):
 def test_oauth_callback_requires_admin(auth_client):
     """Test that non-admin users cannot handle OAuth callbacks"""
     response = auth_client.post("/api/scrapers/oauth/ravelry/callback?code=test_code")
-    
+
     assert response.status_code == 403
 
 

@@ -1,6 +1,9 @@
 """Test basic API functionality"""
+
 import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.integration
 
 
 def test_root_endpoint(client):
