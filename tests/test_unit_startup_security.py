@@ -62,8 +62,8 @@ def test_validate_security_configuration_rejects_default_secret_in_production(mo
     )
     monkeypatch.setattr(main, "load_settings_from_env", lambda: settings)
     monkeypatch.setattr(main, "get_cors_origins", lambda: ["http://localhost:5173"])
-    monkeypatch.setattr(main, "get_scheduled_scraper_service", lambda: _NoopScheduler())
-    monkeypatch.setattr(main, "get_db", lambda: object())
+    monkeypatch.setattr(main, "get_scheduled_scraper_service", _NoopScheduler)
+    monkeypatch.setattr(main, "get_db", object)
 
     with pytest.raises(RuntimeError, match="Default SECRET_KEY in production"):
         asyncio.run(main.validate_security_configuration())
