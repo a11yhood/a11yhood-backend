@@ -16,7 +16,7 @@ from config import settings
 from services.auth import ensure_admin, get_current_user, get_current_user_optional
 from services.database import get_db
 from services.security_logger import log_role_change
-from services.timestamps import ApiTimestamp, OptionalApiTimestamp, normalize_timestamp_fields
+from services.timestamps import OptionalApiTimestamp, normalize_timestamp_fields
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
