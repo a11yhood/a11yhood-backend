@@ -716,6 +716,7 @@ def test_no_hardcoded_oauth_secrets_in_codebase():
     """Scan codebase for accidentally committed OAuth secrets"""
     import os
     import re
+    from pathlib import Path
 
     # Patterns that indicate a real secret (not a placeholder or env var)
     secret_patterns = [
@@ -737,9 +738,10 @@ def test_no_hardcoded_oauth_secrets_in_codebase():
 
     found_secrets = []
     read_errors = []
+    project_root = Path(__file__).resolve().parents[1]
 
     # Walk through the codebase
-    for root, dirs, files in os.walk("/Users/jmankoff/Research/a11yhood/a11yhood/a11yhood-backend"):
+    for root, dirs, files in os.walk(project_root):
         # Skip excluded directories
         dirs[:] = [d for d in dirs if d not in exclude_dirs]
 
@@ -785,10 +787,7 @@ def test_no_hardcoded_oauth_secrets_in_codebase():
                             ):
                                 found_secrets.append(
                                     {
-                                        "file": filepath.replace(
-                                            "/Users/jmankoff/Research/a11yhood/a11yhood/a11yhood-backend/",
-                                            "",
-                                        ),
+                                        "file": os.path.relpath(filepath, str(project_root)),
                                         "pattern": pattern[:50],
                                         "secret_preview": match[:20]
                                         if isinstance(match, str)
@@ -807,6 +806,7 @@ def test_no_database_passwords_in_code():
     """Verify database passwords are not hardcoded in source files"""
     import os
     import re
+    from pathlib import Path
 
     # Pattern for database connection strings with passwords
     db_password_patterns = [
@@ -818,8 +818,9 @@ def test_no_database_passwords_in_code():
 
     found_issues = []
     read_errors = []
+    project_root = Path(__file__).resolve().parents[1]
 
-    for root, dirs, files in os.walk("/Users/jmankoff/Research/a11yhood/a11yhood/a11yhood-backend"):
+    for root, dirs, files in os.walk(project_root):
         dirs[:] = [d for d in dirs if d not in {".venv", "__pycache__", ".git"}]
 
         for file in files:
@@ -853,11 +854,13 @@ def test_no_api_keys_in_comments():
     """Verify API keys are not exposed even in comments"""
     import os
     import re
+    from pathlib import Path
 
     found_issues = []
     read_errors = []
+    project_root = Path(__file__).resolve().parents[1]
 
-    for root, dirs, files in os.walk("/Users/jmankoff/Research/a11yhood/a11yhood/a11yhood-backend"):
+    for root, dirs, files in os.walk(project_root):
         dirs[:] = [d for d in dirs if d not in {".venv", "__pycache__", ".git"}]
 
         for file in files:

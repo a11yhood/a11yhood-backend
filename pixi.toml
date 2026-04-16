@@ -1,7 +1,7 @@
 [workspace]
 authors = ["tonyfast <tony.fast@uw.edu>"]
 channels = ["conda-forge"]
-name = "a11yhood-backend"
+name = "backend"
 platforms = ["osx-arm64", "osx-64", "linux-64"]
 version = "0.1.0"
 
@@ -41,7 +41,7 @@ cmd = "./scripts/start-dev.sh --reset-db --seed --port 8002"
 
 [tasks.dev-stop]
 description = "Stop dev backend Docker container"
-cmd = "docker stop a11yhood-backend-dev && docker rm a11yhood-backend-dev || true"
+cmd = "docker stop backend-dev && docker rm backend-dev || true"
 
 [tasks.prod]
 description = "Start prod backend in Docker using .env on port 8001"
@@ -49,7 +49,7 @@ cmd = "./scripts/start-prod.sh"
 
 [tasks.prod-stop]
 description = "Stop prod backend Docker container"
-cmd = "docker stop a11yhood-backend-prod && docker rm a11yhood-backend-prod || true"
+cmd = "docker stop backend-prod && docker rm backend-prod || true"
 
 [tasks.test-prod-image]
 description = "Build prod image and run HTTP smoke tests (uses .env.test, port 8099)"

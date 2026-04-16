@@ -86,7 +86,7 @@ If admin support isn't available, we could build Python from source on busybox/a
 
 ### Current Status
 - GitHub Actions successfully builds images
-- Images stored in ghcr.io/a11yhood/a11yhood-backend
+- Images stored in ghcr.io/a11yhood/backend
 - **Blocked**: Cannot deploy to production server until storage driver issue resolved
 
 ---
@@ -114,7 +114,7 @@ Developer → Git Push → GitHub Actions → GitHub Container Registry → Prod
 - Pushes to GitHub Container Registry (ghcr.io)
 - Tags with both `latest` and commit SHA
 
-**Image location**: `ghcr.io/a11yhood/a11yhood-backend:latest`
+**Image location**: `ghcr.io/a11yhood/backend:latest`
 
 ### 2. Docker Image
 
@@ -144,10 +144,10 @@ echo "YOUR_GITHUB_PAT" | docker login ghcr.io -u YOUR_USERNAME --password-stdin
 **Deployment**:
 ```bash
 # Pull latest image
-docker pull ghcr.io/a11yhood/a11yhood-backend:latest
+docker pull ghcr.io/a11yhood/backend:latest
 
 # Tag for local use
-docker tag ghcr.io/a11yhood/a11yhood-backend:latest a11yhood-backend:latest
+docker tag ghcr.io/a11yhood/backend:latest backend:latest
 
 # Start production
 ./scripts/start-prod.sh
@@ -180,8 +180,8 @@ git push -u origin feature/your-change
 # 4. Merge PR (triggers automatic build)
 
 # 5. On server: Pull and deploy new image
-docker pull ghcr.io/a11yhood/a11yhood-backend:latest
-docker tag ghcr.io/a11yhood/a11yhood-backend:latest a11yhood-backend:latest
+docker pull ghcr.io/a11yhood/backend:latest
+docker tag ghcr.io/a11yhood/backend:latest backend:latest
 ./scripts/start-prod.sh
 ```
 
@@ -189,7 +189,7 @@ docker tag ghcr.io/a11yhood/a11yhood-backend:latest a11yhood-backend:latest
 
 ### Server `.env` File
 
-Location: `/path/to/a11yhood-backend/.env`
+Location: `/path/to/backend/.env`
 
 **Critical**: This file is NOT in the Docker image and must exist on the server.
 
@@ -245,13 +245,13 @@ curl [backend]/health
 
 **Logs**:
 ```bash
-docker logs a11yhood-backend-prod
-docker logs -f a11yhood-backend-prod  # Follow mode
+docker logs backend-prod
+docker logs -f backend-prod  # Follow mode
 ```
 
 **Container Status**:
 ```bash
-docker ps | grep a11yhood-backend-prod
+docker ps | grep backend-prod
 ```
 
 ## Security
@@ -327,7 +327,7 @@ docker ps | grep a11yhood-backend-prod
 
 **Check logs**:
 ```bash
-docker logs a11yhood-backend-prod
+docker logs backend-prod
 ```
 
 **Common issues**:
@@ -356,8 +356,8 @@ pixi run prod-stop && pixi run prod
 # 1. Create PR to main branch
 # 2. Merge PR (automatic build)
 # 3. On server:
-docker pull ghcr.io/a11yhood/a11yhood-backend:latest
-docker tag ghcr.io/a11yhood/a11yhood-backend:latest a11yhood-backend:latest
+docker pull ghcr.io/a11yhood/backend:latest
+docker tag ghcr.io/a11yhood/backend:latest backend:latest
 pixi run prod-stop && pixi run prod
 ```
 

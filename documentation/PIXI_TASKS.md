@@ -52,7 +52,7 @@ pixi run serve           # Start uvicorn directly on port 8000 (requires pixi en
 - **Environment**: `.env.test` (Supabase test project)
 - **Port**: 8002
 - **Use when**: You want to develop with a fresh Supabase test database
-- **What it does**: Builds Docker image, starts `a11yhood-backend-dev` container, runs health checks
+- **What it does**: Builds Docker image, starts `backend-dev` container, runs health checks
 
 #### `pixi run dev-seed`
 - **Purpose**: Start development backend and seed test data
@@ -73,7 +73,7 @@ pixi run serve           # Start uvicorn directly on port 8000 (requires pixi en
 
 #### `pixi run dev-stop`
 - **Purpose**: Stop the development backend container
-- **Cleanup**: Removes the `a11yhood-backend-dev` container
+- **Cleanup**: Removes the `backend-dev` container
 - **Use when**: Done developing for the day or switching to production
 
 ### Production Environment
@@ -85,14 +85,14 @@ pixi run serve           # Start uvicorn directly on port 8000 (requires pixi en
 - **Use when**: Testing your app against real Supabase credentials before cloud deployment
 - **What it does**: 
   1. Builds Docker image with production mode flag
-  2. Starts `a11yhood-backend-prod` container
+  2. Starts `backend-prod` container
   3. Runs comprehensive health checks
   4. Seeds supported sources (one-time)
 - **⚠️ Warning**: Uses production database—be careful with changes!
 
 #### `pixi run prod-stop`
 - **Purpose**: Stop the production backend container
-- **Cleanup**: Removes the `a11yhood-backend-prod` container
+- **Cleanup**: Removes the `backend-prod` container
 - **Use when**: Done testing against production or temporarily stopping the server
 
 ### Database Management
@@ -127,7 +127,7 @@ pixi run serve           # Start uvicorn directly on port 8000 (requires pixi en
 #### `pixi run seed`
 - **Purpose**: Run development seed scripts
 - **Behavior**: 
-  - Auto-detects running Docker container (`a11yhood-backend-dev`)
+  - Auto-detects running Docker container (`backend-dev`)
   - Runs inside Docker if container exists
   - Runs locally using Python venv if container not running
 - **Use when**:
@@ -245,14 +245,14 @@ pixi run prod-stop && pixi run dev
 ### Viewing Docker logs
 ```bash
 # Dev backend
-docker logs -f a11yhood-backend-dev
+docker logs -f backend-dev
 
 # Prod backend  
-docker logs -f a11yhood-backend-prod
+docker logs -f backend-prod
 
 # Both (in separate terminals)
-docker logs -f a11yhood-backend-dev &
-docker logs -f a11yhood-backend-prod &
+docker logs -f backend-dev &
+docker logs -f backend-prod &
 ```
 
 ## Configuration Details

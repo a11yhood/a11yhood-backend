@@ -245,7 +245,7 @@ pixi run reset
 ./run-tests.sh backend
 
 # Run specific test file
-cd backend && uv run pytest tests/test_products.py
+pixi run pytest tests/test_products.py
 
 
 # Check API documentation

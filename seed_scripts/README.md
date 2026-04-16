@@ -9,7 +9,7 @@ Seed scripts populate the database with initial data for development and testing
 If the dev server is running in Docker (started with `./start-dev.sh`), the easiest way to seed is:
 
 ```bash
-cd /path/to/a11yhood-backend
+cd /path/to/backend
 ./scripts/seed.sh
 ```
 

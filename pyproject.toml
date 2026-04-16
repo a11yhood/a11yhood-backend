@@ -1,7 +1,7 @@
 [project]
-name = "a11yhood-backend"
+name = "backend"
 version = "0.1.0"
-description = "a11yhood Backend API"
+description = "Backend API"
 requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",

@@ -62,7 +62,7 @@ Skip the build if you already have the image:
 
 ## Docker Image Details
 
-### Development Image: `a11yhood-backend:dev`
+### Development Image: `backend:dev`
 
 - **Base**: Python 3.14-slim
 - **Dependencies**: All development and testing packages
@@ -70,7 +70,7 @@ Skip the build if you already have the image:
 - **Reload**: Enabled with `--reload` flag
 - **User**: Non-root `appuser` (UID 1000)
 
-### Production Image: `a11yhood-backend:prod`
+### Production Image: `backend:prod`
 
 - **Base**: Python 3.14-slim
 - **Dependencies**: Only production packages (no pytest, etc.)
@@ -90,27 +90,27 @@ docker ps
 
 Development:
 ```bash
-docker logs -f a11yhood-backend-dev
+docker logs -f backend-dev
 ```
 
 Production:
 ```bash
-docker logs -f a11yhood-backend-prod
+docker logs -f backend-prod
 ```
 
 ### Stop a specific container
 
 ```bash
-docker stop a11yhood-backend-dev
-docker rm a11yhood-backend-dev
+docker stop backend-dev
+docker rm backend-dev
 ```
 
 ### Remove all containers and images
 
 ```bash
-docker stop a11yhood-backend-dev a11yhood-backend-prod 2>/dev/null
-docker rm a11yhood-backend-dev a11yhood-backend-prod 2>/dev/null
-docker rmi a11yhood-backend:dev a11yhood-backend:prod
+docker stop backend-dev backend-prod 2>/dev/null
+docker rm backend-dev backend-prod 2>/dev/null
+docker rmi backend:dev backend:prod
 ```
 
 ## Building Images Manually
@@ -118,13 +118,13 @@ docker rmi a11yhood-backend:dev a11yhood-backend:prod
 Build the development image:
 
 ```bash
-docker build -t a11yhood-backend:dev --build-arg DOCKER_BUILDKIT=1 .
+docker build -t backend:dev --build-arg DOCKER_BUILDKIT=1 .
 ```
 
 Build the production image:
 
 ```bash
-docker build -t a11yhood-backend:prod .
+docker build -t backend:prod .
 ```
 
 ## Dockerfile Structure
@@ -170,14 +170,14 @@ If the Docker build fails:
 
 1. Check Docker is running: `docker info`
 2. Clear Docker cache: `docker system prune`
-3. Try building manually: `docker build -t a11yhood-backend:prod .`
+3. Try building manually: `docker build -t backend:prod .`
 4. Check logs: See output from failed build
 
 ### Container won't start
 
 Check the logs:
 ```bash
-docker logs a11yhood-backend-dev  # or a11yhood-backend-prod
+docker logs backend-dev  # or backend-prod
 ```
 
 Common issues:
@@ -194,7 +194,7 @@ The container has a health check endpoint at `/health`. If it's failing:
 curl http://localhost:8000/health
 
 # Check logs for errors
-docker logs a11yhood-backend-dev
+docker logs backend-dev
 ```
 
 ## Performance Considerations
@@ -214,14 +214,14 @@ For cloud deployment (AWS, DigitalOcean, etc.):
 3. Pull and run on the server:
 
 ```bash
-docker pull your-registry/a11yhood-backend:prod
+docker pull your-registry/backend:prod
 docker run \
   -d \
-  --name a11yhood-backend \
+  --name backend \
   --env-file /path/to/.env \
   -p 8000:8000 \
   --restart always \
-  your-registry/a11yhood-backend:prod
+  your-registry/backend:prod
 ```
 
 Or use the provided `start-prod.sh` script for consistency.

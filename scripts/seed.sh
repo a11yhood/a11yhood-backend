@@ -21,8 +21,8 @@ if [ "$1" = "--in-docker" ]; then
 fi
 
 # Auto-detect if container is running
-if [ "$IN_DOCKER" = false ] && docker ps --filter "name=a11yhood-backend-dev" --format "{{.Names}}" | grep -q "a11yhood-backend-dev"; then
-  echo "📦 Detected running Docker container 'a11yhood-backend-dev'"
+if [ "$IN_DOCKER" = false ] && docker ps --filter "name=backend-dev" --format "{{.Names}}" | grep -q "backend-dev"; then
+  echo "📦 Detected running Docker container 'backend-dev'"
   echo "   Running seeds inside container..."
   IN_DOCKER=true
 fi
@@ -67,7 +67,7 @@ fi
 if [ "$IN_DOCKER" = true ]; then
   # Run inside Docker container
   echo "🌱 Running seed scripts inside Docker container..."
-  docker exec -w /app a11yhood-backend-dev bash -c "export ENV_FILE=.env.test && /usr/local/bin/python3 seed_scripts/run_seeds.py $@"
+  docker exec -w /app backend-dev bash -c "export ENV_FILE=.env.test && /usr/local/bin/python3 seed_scripts/run_seeds.py $@"
 else
   # Run locally with venv
   if [ ! -f "$PYTHON" ]; then
