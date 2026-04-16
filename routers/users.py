@@ -8,7 +8,6 @@ Privacy: Public username lookup excludes email and preferences.
 import logging
 import os
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
