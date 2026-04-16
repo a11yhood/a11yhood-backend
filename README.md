@@ -215,7 +215,7 @@ This repository publishes release artifacts from tags, not from every merge to `
 
 - Pull request to `main`: validation/build checks run.
 - Push tag `v*`: Docker image publish workflow runs.
-- Push tag `db-v*`: database export/release workflow runs.
+- There is currently no repository workflow triggered by `db-v*` tags.
 
 ### Day-to-day developer steps
 
