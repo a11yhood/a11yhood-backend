@@ -205,7 +205,7 @@ Additional documentation in the `documentation/` folder:
 - **[SECURITY_BEST_PRACTICES.md](documentation/SECURITY_BEST_PRACTICES.md)** - Security guidelines
 - **[ARCHITECTURE.md](documentation/ARCHITECTURE.md)** - System architecture and design
 
-For a complete index of all documentation, see [documentation/README.md](documentation/README.md).
+For additional documentation, use the guides listed above and browse the `documentation/` folder directly.
 
 ## Developer Release Workflow (Tag-Based)
 
