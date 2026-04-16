@@ -45,23 +45,19 @@ jobs:
           CI_SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           CI_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          if [ ! -f .env.test ]; then
-            {
-              echo "SECRET_KEY=test-secret-key-for-ci"
-              echo "TEST_MODE=true"
-              echo "ENVIRONMENT=development"
-            } > .env.test
+          # Always write CI env file to avoid stale or incomplete checked-in values.
+          SUPABASE_URL_VALUE="${CI_SUPABASE_URL:-https://example.supabase.co}"
+          SUPABASE_KEY_VALUE="${CI_SUPABASE_KEY:-test-service-role-key}"
+          SUPABASE_ANON_KEY_VALUE="${CI_SUPABASE_ANON_KEY:-test-anon-key}"
 
-            if [ -n "$CI_SUPABASE_URL" ] && [ -n "$CI_SUPABASE_KEY" ]; then
-              {
-                echo "SUPABASE_URL=$CI_SUPABASE_URL"
-                echo "SUPABASE_KEY=$CI_SUPABASE_KEY"
-                if [ -n "$CI_SUPABASE_ANON_KEY" ]; then
-                  echo "SUPABASE_ANON_KEY=$CI_SUPABASE_ANON_KEY"
-                fi
-              } >> .env.test
-            fi
-          fi
+          {
+            echo "SECRET_KEY=test-secret-key-for-ci"
+            echo "TEST_MODE=true"
+            echo "ENVIRONMENT=development"
+            echo "SUPABASE_URL=$SUPABASE_URL_VALUE"
+            echo "SUPABASE_KEY=$SUPABASE_KEY_VALUE"
+            echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY_VALUE"
+          } > .env.test
 
       - name: Run tests
         run: pixi run test
