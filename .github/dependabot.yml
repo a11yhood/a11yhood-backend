@@ -1,0 +1,34 @@
+version: 2
+updates:
+  # Python dependencies (pixi/pip)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    allow:
+      - dependency-type: "direct"
+    groups:
+      development-dependencies:
+        dependency-types:
+          - "dev"
+      production-dependencies:
+        dependency-types:
+          - "production"
+    commit-message:
+      prefix: "deps:"
+    pull-request-branch-name:
+      separator: "/"
+    reviewers:
+      - "a11yhood/maintainers"
+    open-pull-requests-limit: 5
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    reviewers:
+      - "a11yhood/maintainers"
+    open-pull-requests-limit: 3
