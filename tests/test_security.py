@@ -8,6 +8,7 @@ These tests focus on:
 - Role-based feature gating (admin-only scrapers, manager-only edits)
 """
 
+import os
 import time
 import uuid
 
