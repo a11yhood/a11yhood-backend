@@ -40,16 +40,27 @@ jobs:
           post-cleanup: false
 
       - name: Create CI test env file
+        env:
+          CI_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          CI_SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          CI_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           if [ ! -f .env.test ]; then
             cat > .env.test << 'EOF'
-            SUPABASE_URL=https://example.supabase.co
-            SUPABASE_KEY=test-service-role-key
-            SUPABASE_ANON_KEY=test-anon-key
             SECRET_KEY=test-secret-key-for-ci
             TEST_MODE=true
             ENVIRONMENT=development
             EOF
+
+            if [ -n "$CI_SUPABASE_URL" ] && [ -n "$CI_SUPABASE_KEY" ]; then
+              {
+                echo "SUPABASE_URL=$CI_SUPABASE_URL"
+                echo "SUPABASE_KEY=$CI_SUPABASE_KEY"
+                if [ -n "$CI_SUPABASE_ANON_KEY" ]; then
+                  echo "SUPABASE_ANON_KEY=$CI_SUPABASE_ANON_KEY"
+                fi
+              } >> .env.test
+            fi
           fi
 
       - name: Run tests
