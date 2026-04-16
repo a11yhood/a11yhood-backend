@@ -4,7 +4,7 @@ services:
     build:
       context: .
       target: development
-    container_name: a11yhood-backend
+    container_name: backend
     ports:
       - "8000:8000"
     volumes:
@@ -35,8 +35,8 @@ services:
     build:
       context: .
       target: production
-    image: a11yhood-backend:prod
-    container_name: a11yhood-backend-prod
+    image: backend:prod
+    container_name: backend-prod
     ports:
       - "8001:8000"
     environment:

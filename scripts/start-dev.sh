@@ -21,8 +21,8 @@ source "$SCRIPT_DIR/lib/backend-common.sh"
 # Configuration
 # ============================================================================
 
-CONTAINER_NAME="a11yhood-backend-dev"
-IMAGE_TAG="a11yhood-backend:dev"
+CONTAINER_NAME="backend-dev"
+IMAGE_TAG="backend:dev"
 ENV_FILE=".env.test"
 HOST_PORT=8002
 HTTPS_PORT=8443
@@ -175,13 +175,13 @@ fi
 # Container preparation
 # ============================================================================
 
-prepare_container_startup "$CONTAINER_NAME" "a11yhood-backend-prod" "Production"
+prepare_container_startup "$CONTAINER_NAME" "backend-prod" "Production"
 
 # ============================================================================
 # Build or pull Docker image
 # ============================================================================
 
-if ! ensure_docker_image "$IMAGE_TAG" "$NO_BUILD" "ghcr.io/a11yhood/a11yhood-backend:latest"; then
+if ! ensure_docker_image "$IMAGE_TAG" "$NO_BUILD" "ghcr.io/a11yhood/backend:latest"; then
   exit 1
 fi
 echo ""

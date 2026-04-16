@@ -34,7 +34,7 @@ class ThingiverseScraper(BaseScraper):
     REQUESTS_PER_MINUTE = 5
     RESULTS_PER_PAGE = 20
     MAX_PAGES = 100  # Guard against unbounded pagination in case of broad terms
-    USER_AGENT = "a11yhood-backend/thingiverse-scraper"
+    USER_AGENT = "backend/thingiverse-scraper"
 
     def __init__(self, supabase_client, access_token: str | None = None):
         super().__init__(supabase_client, access_token)

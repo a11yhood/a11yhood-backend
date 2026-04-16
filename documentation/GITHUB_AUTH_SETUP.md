@@ -55,7 +55,7 @@ SUPABASE_ANON_KEY=[your-anon-key]
 
 1. Start backend:
    ```bash
-   uv run uvicorn main:app --reload
+   pixi run serve
    ```
 
 

@@ -7,7 +7,7 @@ Additional documentation files can be found in the documentation directory.
 ## Project Structure
 
 ```
-a11yhood-backend/
+backend/
 ├── main.py                 # FastAPI application entry point
 ├── config.py              # Configuration and environment settings
 ├── database_adapter.py     # Database access wrapper used by the API and scripts
@@ -79,8 +79,8 @@ a11yhood-backend/
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/a11yhood/a11yhood-backend.git
-   cd a11yhood-backend
+   git clone https://github.com/a11yhood/backend.git
+   cd backend
    ```
 
 2. **Configure environment**
@@ -363,7 +363,7 @@ This project is licensed under the [LICENSE](LICENSE) file in this repository.
 
 For issues, questions, or feature requests:
 
-1. Check existing [GitHub Issues](https://github.com/a11yhood/a11yhood-backend/issues)
+1. Check existing [GitHub Issues](https://github.com/a11yhood/backend/issues)
 2. Review [documentation/](documentation/) for existing guidance
 3. Create a new issue with detailed information
 4. For security issues, follow responsible disclosure

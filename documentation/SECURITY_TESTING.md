@@ -12,10 +12,10 @@ This document provides comprehensive guidance on testing security features and i
 ## Quick Commands
 
 ```bash
-uv run pytest tests/test_security.py -v
+pixi run pytest tests/test_security.py -v
 
 # Check for dependency vulnerabilities
-cd backend && uv pip check
+pixi run python -m pip check
 
 # Secret scanning (if available)
 gitleaks detect --no-banner --redact
@@ -156,11 +156,11 @@ Add these checks to your CI pipeline:
 # Example GitHub Actions workflow
 - name: Backend Security Tests
   run: |
-    uv run pytest tests/test_security.py -v
+    pixi run pytest tests/test_security.py -v
     
 - name: Dependency Audit
   run: |
-    uv pip check
+    pixi run python -m pip check
 ```
 
 ## Test Coverage Summary

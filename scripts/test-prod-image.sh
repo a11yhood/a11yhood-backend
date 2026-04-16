@@ -22,8 +22,8 @@ source "$SCRIPT_DIR/lib/backend-common.sh"
 # Configuration
 # ============================================================================
 
-CONTAINER_NAME="a11yhood-backend-smoke"
-IMAGE_TAG="a11yhood-backend:prod-smoke"
+CONTAINER_NAME="backend-smoke"
+IMAGE_TAG="backend:prod-smoke"
 HOST_PORT=8099
 ENV_FILE=".env.test"
 NO_BUILD=false

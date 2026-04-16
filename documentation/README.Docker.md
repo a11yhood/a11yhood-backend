@@ -50,13 +50,13 @@ pixi run prod-stop
 Development image:
 
 ```bash
-docker build -t a11yhood-backend:dev .
+docker build -t backend:dev .
 ```
 
 Production image:
 
 ```bash
-docker build --target production -t a11yhood-backend:prod .
+docker build --target production -t backend:prod .
 ```
 
 ## Run Container Manually (Optional)
@@ -65,20 +65,20 @@ Run dev image directly:
 
 ```bash
 docker run --rm -it \
-  --name a11yhood-backend-dev \
+  --name backend-dev \
   --env-file .env.test \
   -p 8000:8000 \
-  a11yhood-backend:dev
+  backend:dev
 ```
 
 Run prod image directly:
 
 ```bash
 docker run --rm -d \
-  --name a11yhood-backend-prod \
+  --name backend-prod \
   --env-file .env \
   -p 8001:8000 \
-  a11yhood-backend:prod
+  backend:prod
 ```
 
 ## Logs and Debugging
@@ -86,14 +86,14 @@ docker run --rm -d \
 Follow logs:
 
 ```bash
-docker logs -f a11yhood-backend-dev
-docker logs -f a11yhood-backend-prod
+docker logs -f backend-dev
+docker logs -f backend-prod
 ```
 
 Open shell in running container:
 
 ```bash
-docker exec -it a11yhood-backend-dev bash
+docker exec -it backend-dev bash
 ```
 
 ## Notes
