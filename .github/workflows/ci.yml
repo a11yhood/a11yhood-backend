@@ -40,7 +40,18 @@ jobs:
           post-cleanup: false
 
       - name: Run unit tests
-        run: pixi run pytest -m unit -q
+        run: |
+          # Unit tests don't hit Supabase but conftest.py imports main at collection time,
+          # so .env.test must exist. Use placeholder values — no real DB calls are made.
+          {
+            echo "SECRET_KEY=test-secret-key-for-ci"
+            echo "TEST_MODE=true"
+            echo "ENVIRONMENT=development"
+            echo "SUPABASE_URL=https://placeholder.supabase.co"
+            echo "SUPABASE_KEY=placeholder-key"
+            echo "SUPABASE_ANON_KEY=placeholder-anon-key"
+          } > .env.test
+          pixi run pytest -m unit -q
 
       - name: Create CI test env file
         env:
