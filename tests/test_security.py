@@ -712,6 +712,36 @@ def test_collection_cannot_be_added_twice(auth_client, test_product):
 # ============================================================================
 
 
+def _iter_scannable_repo_files(extensions: set[str]) -> list[str]:
+    """Return tracked files that match *extensions*.
+
+    Using `git ls-files` keeps this aligned with .gitignore and avoids scanning
+    local environments such as .venv/.pixi.
+    """
+    import subprocess
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parents[1]
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+        )
+        tracked = [p.decode("utf-8", errors="ignore") for p in result.stdout.split(b"\x00") if p]
+        return [str(project_root / rel_path) for rel_path in tracked if any(rel_path.endswith(ext) for ext in extensions)]
+    except Exception:
+        # Fallback for environments without git available.
+        files_to_scan: list[str] = []
+        for root, dirs, files in os.walk(project_root):
+            dirs[:] = [d for d in dirs if d not in {".venv", ".pixi", "__pycache__", ".git", ".pytest_cache", ".ruff_cache"}]
+            for file in files:
+                if any(file.endswith(ext) for ext in extensions):
+                    files_to_scan.append(os.path.join(root, file))
+        return files_to_scan
+
+
 def test_no_hardcoded_oauth_secrets_in_codebase():
     """Scan codebase for accidentally committed OAuth secrets"""
     import os
@@ -732,70 +762,52 @@ def test_no_hardcoded_oauth_secrets_in_codebase():
         r'api[_-]?key["\']?\s*[:=]\s*["\']([a-f0-9]{32,})["\']',
     ]
 
-    # Directories to scan
-    exclude_dirs = {".venv", "__pycache__", ".pytest_cache", ".git", "node_modules", ".env.test"}
-    exclude_patterns = {".pyc", ".pyo"}
-
     found_secrets = []
     read_errors = []
     project_root = Path(__file__).resolve().parents[1]
 
-    # Walk through the codebase
-    for root, dirs, files in os.walk(project_root):
-        # Skip excluded directories
-        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+    for filepath in _iter_scannable_repo_files({".py", ".yml", ".yaml", ".json", ".toml", ".sh", ".md"}):
+        filename = os.path.basename(filepath)
+        if filename.endswith((".pyc", ".pyo")):
+            continue
 
-        for file in files:
-            # Skip certain file types
-            if any(file.endswith(ext) for ext in exclude_patterns):
-                continue
+        try:
+            with open(filepath, encoding="utf-8", errors="ignore") as f:
+                content = f.read()
 
-            filepath = os.path.join(root, file)
+                # Skip test files and config templates
+                if "test" in filepath or "example" in filepath or "template" in filepath:
+                    continue
 
-            # Only check text files
-            if not any(
-                file.endswith(ext)
-                for ext in [".py", ".yml", ".yaml", ".json", ".toml", ".sh", ".md"]
-            ):
-                continue
-
-            try:
-                with open(filepath, encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-
-                    # Skip test files and config templates
-                    if "test" in filepath or "example" in filepath or "template" in filepath:
-                        continue
-
-                    # Check for secrets (but allow placeholders like "your-secret-here", "dev-key", etc.)
-                    for pattern in secret_patterns:
-                        matches = re.findall(pattern, content, re.IGNORECASE)
-                        for match in matches:
-                            # Ignore common test/dev placeholders
-                            if match and not any(
-                                placeholder in match.lower()
-                                for placeholder in [
-                                    "test",
-                                    "dev",
-                                    "example",
-                                    "placeholder",
-                                    "your-",
-                                    "change-",
-                                    "dummy",
-                                    "fake",
-                                ]
-                            ):
-                                found_secrets.append(
-                                    {
-                                        "file": os.path.relpath(filepath, str(project_root)),
-                                        "pattern": pattern[:50],
-                                        "secret_preview": match[:20]
-                                        if isinstance(match, str)
-                                        else str(match)[:20],
-                                    }
-                                )
-            except Exception as exc:
-                read_errors.append({"file": filepath, "error": str(exc)})
+                # Check for secrets (but allow placeholders like "your-secret-here", "dev-key", etc.)
+                for pattern in secret_patterns:
+                    matches = re.findall(pattern, content, re.IGNORECASE)
+                    for match in matches:
+                        # Ignore common test/dev placeholders
+                        if match and not any(
+                            placeholder in match.lower()
+                            for placeholder in [
+                                "test",
+                                "dev",
+                                "example",
+                                "placeholder",
+                                "your-",
+                                "change-",
+                                "dummy",
+                                "fake",
+                            ]
+                        ):
+                            found_secrets.append(
+                                {
+                                    "file": os.path.relpath(filepath, str(project_root)),
+                                    "pattern": pattern[:50],
+                                    "secret_preview": match[:20]
+                                    if isinstance(match, str)
+                                    else str(match)[:20],
+                                }
+                            )
+        except Exception as exc:
+            read_errors.append({"file": filepath, "error": str(exc)})
 
     # Report findings
     assert not read_errors, f"Failed reading files during secret scan: {read_errors}"
@@ -806,7 +818,6 @@ def test_no_database_passwords_in_code():
     """Verify database passwords are not hardcoded in source files"""
     import os
     import re
-    from pathlib import Path
 
     # Pattern for database connection strings with passwords
     db_password_patterns = [
@@ -818,33 +829,25 @@ def test_no_database_passwords_in_code():
 
     found_issues = []
     read_errors = []
-    project_root = Path(__file__).resolve().parents[1]
 
-    for root, dirs, files in os.walk(project_root):
-        dirs[:] = [d for d in dirs if d not in {".venv", "__pycache__", ".git"}]
+    for filepath in _iter_scannable_repo_files({".py"}):
+        filename = os.path.basename(filepath)
+        if "test" in filename or "conftest" in filename:
+            continue
 
-        for file in files:
-            if not file.endswith(".py"):
-                continue
+        try:
+            with open(filepath, encoding="utf-8") as f:
+                content = f.read()
 
-            if "test" in file or "conftest" in file:
-                continue
-
-            filepath = os.path.join(root, file)
-
-            try:
-                with open(filepath, encoding="utf-8") as f:
-                    content = f.read()
-
-                    for pattern in db_password_patterns:
-                        if re.search(pattern, content):
-                            # Verify it's not a comment or example
-                            for line in content.split("\n"):
-                                if re.search(pattern, line) and not line.strip().startswith("#"):
-                                    found_issues.append(filepath.split("/")[-1])
-                                    break
-            except Exception as exc:
-                read_errors.append({"file": filepath, "error": str(exc)})
+                for pattern in db_password_patterns:
+                    if re.search(pattern, content):
+                        # Verify it's not a comment or example
+                        for line in content.split("\n"):
+                            if re.search(pattern, line) and not line.strip().startswith("#"):
+                                found_issues.append(filename)
+                                break
+        except Exception as exc:
+            read_errors.append({"file": filepath, "error": str(exc)})
 
     assert not read_errors, f"Failed reading files during DB password scan: {read_errors}"
     assert not found_issues, f"Found potential database passwords in: {found_issues}"
@@ -854,35 +857,26 @@ def test_no_api_keys_in_comments():
     """Verify API keys are not exposed even in comments"""
     import os
     import re
-    from pathlib import Path
 
     found_issues = []
     read_errors = []
-    project_root = Path(__file__).resolve().parents[1]
 
-    for root, dirs, files in os.walk(project_root):
-        dirs[:] = [d for d in dirs if d not in {".venv", "__pycache__", ".git"}]
-
-        for file in files:
-            if not file.endswith(".py"):
-                continue
-
-            filepath = os.path.join(root, file)
-
-            try:
-                with open(filepath, encoding="utf-8") as f:
-                    for line_num, line in enumerate(f, 1):
-                        # Check for suspicious patterns in comments
-                        if "#" in line:
-                            comment = line.split("#", 1)[1]
-                            # Check if it looks like an exposed key example
-                            if re.search(
-                                r'(api[_-]?key|token|secret)\s*[:=]\s*["\']([a-zA-Z0-9_\-]{20,})["\']',
-                                comment,
-                            ):
-                                found_issues.append((filepath.split("/")[-1], line_num))
-            except Exception as exc:
-                read_errors.append({"file": filepath, "error": str(exc)})
+    for filepath in _iter_scannable_repo_files({".py"}):
+        filename = os.path.basename(filepath)
+        try:
+            with open(filepath, encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    # Check for suspicious patterns in comments
+                    if "#" in line:
+                        comment = line.split("#", 1)[1]
+                        # Check if it looks like an exposed key example
+                        if re.search(
+                            r'(api[_-]?key|token|secret)\s*[:=]\s*["\']([a-zA-Z0-9_\-]{20,})["\']',
+                            comment,
+                        ):
+                            found_issues.append((filename, line_num))
+        except Exception as exc:
+            read_errors.append({"file": filepath, "error": str(exc)})
 
     assert not read_errors, f"Failed reading files during API-key comment scan: {read_errors}"
     assert not found_issues, f"Found potential API keys in comments: {found_issues}"
