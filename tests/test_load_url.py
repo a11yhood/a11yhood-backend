@@ -20,6 +20,8 @@ async def test_github_scraper_supports_url():
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.requires_oauth
 async def test_github_scraper_with_valid_url(clean_database):
     """Test scraping a valid GitHub repository URL"""
     url = "https://github.com/make4all/psst"

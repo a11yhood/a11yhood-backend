@@ -15,6 +15,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+
+from models.products import ProductCreate
 
 pytestmark = pytest.mark.unit
 
@@ -133,22 +136,18 @@ def test_invalid_json_rejected(unit_client):
     assert response.status_code in [400, 422]
 
 
-def test_type_confusion_prevented(auth_client):
-    """Verify request body type confusion is rejected by validation (not auth)."""
-    # Try to send wrong types for fields
-    response = unit_client.post(
-        "/api/products",
-        json={
-            "name": ["array", "instead", "of", "string"],  # Should be string
-            "description": 12345,  # Should be string
-            "source_url": "https://example.com/test",
-            "source": "github",
-            "type": "Other",
-        },
-    )
-
-    # Auth is valid, so a 422 confirms request/body validation actually executed.
-    assert response.status_code == 422
+def test_type_confusion_prevented():
+    """Verify model validation rejects type confusion without requiring auth or DB setup."""
+    with pytest.raises(ValidationError):
+        ProductCreate.model_validate(
+            {
+                "name": ["array", "instead", "of", "string"],
+                "description": 12345,
+                "source_url": "https://example.com/test",
+                "source": "github",
+                "type": "Other",
+            }
+        )
 
 
 # ============================================================================

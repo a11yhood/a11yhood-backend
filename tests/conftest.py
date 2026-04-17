@@ -34,7 +34,7 @@ def client(clean_database):
 
 
 @pytest.fixture
-def unit_client():
+def unit_client(monkeypatch):
     """Lightweight TestClient backed by a mock DB stub — no Supabase credentials needed.
 
     Suitable for unit tests that exercise middleware, header validation, rate limiting,
@@ -53,6 +53,8 @@ def unit_client():
     mock_db.supabase = mock_supabase
 
     try:
+        monkeypatch.setenv("TEST_MODE", "true")
+        monkeypatch.setenv("PRODUCTION_URL", "")
         app.dependency_overrides[get_db] = lambda: mock_db
         yield TestClient(app)
     finally:
@@ -240,28 +242,6 @@ def _require_supabase(settings):
             "SUPABASE_URL and SUPABASE_KEY are required for tests. "
             "Copy .env.test.example to .env.test and fill in your test Supabase credentials."
         )
-
-
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_database(test_settings):
-    """
-    Session-scoped fixture that resets the test database once at the start of a run.
-
-    Ensures no stale data from a previous session interferes with the current one.
-    Skipped when RUN_AGAINST_SERVER=1 (running tests against a live server).
-    """
-    if os.getenv("RUN_AGAINST_SERVER"):
-        print("\n✓ Skipping test database reset (RUN_AGAINST_SERVER=1)")
-        return
-
-    if not _has_usable_supabase(test_settings):
-        print("\n✓ Skipping test database reset (Supabase not configured for this run)")
-        return
-
-    _require_supabase(test_settings)
-    test_db = DatabaseAdapter(test_settings)
-    _reset_and_assert_clean(test_db)
-    print("\n✓ Test database reset at session start")
 
 
 @pytest.fixture(scope="session")
