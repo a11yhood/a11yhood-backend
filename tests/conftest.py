@@ -346,13 +346,14 @@ def _seed_test_data(db):
     """
     from services.id_generator import normalize_to_snake_case
 
-    # Supported sources (needed for URL validation) — single bulk insert
+    # Supported sources (needed for URL validation) — idempotent bulk upsert.
+    # Some test databases may already keep the canonical source rows seeded.
     supported_sources = [
         {"domain": "ravelry.com", "name": "Ravelry"},
         {"domain": "github.com", "name": "Github"},
         {"domain": "thingiverse.com", "name": "Thingiverse"},
     ]
-    db.table("supported_sources").insert(supported_sources).execute()
+    db.table("supported_sources").upsert(supported_sources, on_conflict="domain").execute()
 
     # Scraper search terms — flatten to a list and bulk upsert in one call
     # (kept aligned with seed_scripts/seed_scraper_search_terms.py)
@@ -405,8 +406,8 @@ def _seed_test_data(db):
         on_conflict="platform,search_term",
     ).execute()
 
-    # Test users with fixed IDs (match DEV_USER_IDS in services/auth.py) — bulk insert
-    db.table("users").insert(list(TEST_USERS)).execute()
+    # Test users with fixed IDs (match DEV_USER_IDS in services/auth.py) — idempotent bulk upsert
+    db.table("users").upsert(list(TEST_USERS), on_conflict="id").execute()
 
     # Test products — normalise each row then bulk insert in one call
     products_to_insert = []
@@ -422,7 +423,7 @@ def _seed_test_data(db):
         if not p.get("description"):
             p["description"] = p.get("name", "Test product")
         products_to_insert.append(p)
-    db.table("products").insert(products_to_insert).execute()
+    db.table("products").upsert(products_to_insert, on_conflict="id").execute()
 
 
 @pytest.fixture
