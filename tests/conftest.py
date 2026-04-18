@@ -9,7 +9,7 @@ os.environ.setdefault("ENV_FILE", ".env.test")
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(os.environ["ENV_FILE"])
+    load_dotenv(os.environ["ENV_FILE"], override=True)
 except Exception as exc:
     # Optional .env loading for tests; ignore if unavailable but log for diagnostics.
     logger.debug("Failed to load test ENV_FILE %r: %s", os.environ.get("ENV_FILE"), exc)
@@ -25,8 +25,9 @@ from .test_data import TEST_PRODUCTS, TEST_USERS
 
 
 @pytest.fixture
-def client(clean_database):
+def client(clean_database, monkeypatch):
     """Test client backed by the test Supabase instance. Auth via Authorization headers."""
+    monkeypatch.setenv("TEST_MODE", "true")
     app.dependency_overrides[get_db] = lambda: clean_database
     client = TestClient(app)
     yield client
