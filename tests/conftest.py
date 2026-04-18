@@ -413,9 +413,6 @@ def _seed_test_data(db):
     products_to_insert = []
     for product in TEST_PRODUCTS:
         p = dict(product)
-        # Map source_url -> url (Supabase schema uses 'url')
-        if "source_url" in p:
-            p["url"] = p.pop("source_url")
         # Products require a slug (NOT NULL UNIQUE in Supabase)
         if not p.get("slug"):
             p["slug"] = normalize_to_snake_case(p.get("name", "product"))
@@ -488,7 +485,7 @@ def test_product(clean_database, test_user):
         "description": "A test product for testing",
         "source": "github",
         "type": "Software",
-        "url": f"https://github.com/test/test-product-{uuid4()}",
+        "source_url": f"https://github.com/test/test-product-{uuid4()}",
         "slug": f"test-product-{uuid4()}",
         "created_by": test_user["id"],
     }
