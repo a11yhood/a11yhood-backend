@@ -176,7 +176,9 @@ class GitHubSourceAdapter(BaseSourceScraper):
             )
 
         if image_url and not image_alt:
-            image_alt = f"{raw.get('name', 'GitHub repository')} image"
+            image_alt = (
+                f"{raw.get('name', 'GitHub repository')} image (ALT text missing on source)"
+            )
 
         source_last_updated = self._parse_source_timestamp(raw)
         matched_search_terms = []
