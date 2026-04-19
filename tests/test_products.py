@@ -925,7 +925,7 @@ def test_product_exists_endpoint_returns_false_for_new_url(client):
 
 def test_product_exists_endpoint_returns_product(client, test_product):
     """Test that /exists endpoint returns existing product"""
-    response = client.get(f"/api/products/exists?source_url={test_product['url']}")
+    response = client.get(f"/api/products/exists?source_url={test_product['source_url']}")
     assert response.status_code == 200
     data = response.json()
     assert data["exists"] is True
@@ -1005,7 +1005,7 @@ def test_reject_create_when_existing_product_is_banned(auth_client, clean_databa
         "name": "Attempted Recreate",
         "description": "Trying to recreate banned product",
         "source": "github",
-        "source_url": test_product["url"],
+        "source_url": test_product["source_url"],
     }
 
     resp = auth_client.post("/api/products", json=payload)
