@@ -34,8 +34,11 @@ ON CONFLICT DO NOTHING;
 DROP INDEX IF EXISTS public.products_url_idx;
 DROP INDEX IF EXISTS public.products_url_idx1;
 
--- Step 5: Drop old unique constraint/index on url (constraint was renamed to products_url_key
---         on source_url in the 20260307 migration; drop both the url index and any stale name)
+-- Step 5: Drop old unique constraints/indexes for url/source_url.
+-- In some environments, products_url_key is a UNIQUE CONSTRAINT-backed index.
+-- Drop constraints first (safe no-op when absent), then stale indexes.
+ALTER TABLE public.products DROP CONSTRAINT IF EXISTS products_url_key;
+ALTER TABLE public.products DROP CONSTRAINT IF EXISTS products_source_url_key;
 DROP INDEX IF EXISTS public.products_url_key;
 
 -- Drop the old non-partial unique index on source_url that was added in 20260307.

@@ -3,13 +3,13 @@ GitHub scraper for accessibility and assistive technology projects
 Uses GitHub REST API to search for repositories focused on assistive technologies
 """
 
-import math
 from datetime import datetime
 from typing import Any
 
 import httpx
 
 from .base_scraper import BaseScraper
+from .core.github_adapter import GitHubSourceAdapter
 
 
 class GitHubScraper(BaseScraper):
@@ -235,10 +235,14 @@ class GitHubScraper(BaseScraper):
 
         return False
 
+    def map_source_rating(self, raw_data: dict[str, Any]) -> tuple[float | None, int | None]:
+        stars = int(raw_data.get("stargazers_count") or 0)
+        return GitHubSourceAdapter.map_stars_to_source_rating(stars), stars
+
     def _create_product_dict(self, repo: dict[str, Any]) -> dict[str, Any]:
         """Convert GitHub repo data to product dict"""
         # GitHub doesn't have ratings, but we can use stars as a proxy
-        stars = repo.get("stargazers_count", 0)
+        star_rating, stars = self.map_source_rating(repo)
 
         # Extract topics as tags
         topics = repo.get("topics", [])
@@ -256,15 +260,6 @@ class GitHubScraper(BaseScraper):
         language = repo.get("language")
         if language and language not in seen:
             tags.append(language)
-
-        # Convert stars to a continuous 1–5 rating using a log10 scale.
-        # Formula: clamp(log10(stars), 1.0, 5.0)
-        # Anchor points: 10→1.0, 100→2.0, 1000→3.0, 10000→4.0, 100000→5.0.
-        # Repos with 0 stars receive no rating.
-        if stars > 0:
-            star_rating = round(min(max(math.log10(stars), 1.0), 5.0), 2)
-        else:
-            star_rating = None
 
         # Extract last updated timestamp from GitHub
         # GitHub provides both 'updated_at' and 'pushed_at' - use pushed_at as it's more accurate for code changes

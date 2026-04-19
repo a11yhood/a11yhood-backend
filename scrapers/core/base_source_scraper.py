@@ -1,4 +1,3 @@
-import math
 from abc import ABC, abstractmethod
 from datetime import UTC
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -48,29 +47,37 @@ class BaseSourceScraper(ABC):
         tags = source_raw.get("tags") or raw.get("tags") or []
         return [str(tag).strip() for tag in tags if str(tag).strip()]
 
-    def normalize_rating_exponential(
+    def max_products_for_run(self, context: ScrapeRunContext) -> int | None:
+        if context.max_products is None:
+            return None
+        if context.max_products <= 0:
+            return None
+        return context.max_products
+
+    def should_stop_collection(self, collected_count: int, context: ScrapeRunContext) -> bool:
+        limit = self.max_products_for_run(context)
+        return limit is not None and collected_count >= limit
+
+    def normalize_rating(
         self,
         *,
         raw_value: float | int | None,
         expected_max: float | int,
         min_rating: float = DEFAULT_MIN_RATING,
         max_rating: float = DEFAULT_MAX_RATING,
-        target_at_max: float = 0.95,
     ) -> float | None:
+        """Simple linear normalization from a raw value into rating bounds."""
         if raw_value is None:
             return None
 
-        raw = max(float(raw_value), 0.0)
-        expected = max(float(expected_max), 1.0)
+        expected = float(expected_max)
+        if expected <= 0:
+            return None
 
-        # Make expected_max map close to max_rating while preserving a smooth curve.
-        target = min(max(target_at_max, 0.01), 0.99)
-        k = -math.log(1.0 - target) / expected
-        numerator = 1.0 - math.exp(-k * raw)
-        denominator = 1.0 - math.exp(-k * expected)
-        scaled = numerator / denominator if denominator > 0 else 0.0
+        raw = max(float(raw_value), 0.0)
+        scaled = min(max(raw / expected, 0.0), 1.0)
         normalized = min_rating + (max_rating - min_rating) * scaled
-        return round(min(max(normalized, min_rating), max_rating), 2)
+        return round(normalized, 2)
 
     def pick_representative_image(
         self,

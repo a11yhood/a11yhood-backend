@@ -12,6 +12,7 @@ from .contracts import (
     ScrapeRunContext,
     SourceScrapedProduct,
 )
+from .github_adapter import GitHubSourceAdapter
 
 __all__ = [
     "AuthResolution",
@@ -19,6 +20,7 @@ __all__ = [
     "AuthorizationStrategyResolver",
     "AuthorizationStrategy",
     "BaseSourceScraper",
+    "GitHubSourceAdapter",
     "PersistOutcome",
     "RateLimitPolicy",
     "ScrapeMode",

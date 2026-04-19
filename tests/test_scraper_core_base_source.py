@@ -33,12 +33,22 @@ class _DummySourceScraper(BaseSourceScraper):
         }
 
 
-def test_normalize_rating_exponential_bounds():
+def test_normalize_rating_bounds_and_clamp():
     scraper = _DummySourceScraper(supabase_client=None)
 
-    assert scraper.normalize_rating_exponential(raw_value=0, expected_max=100) == 1.0
-    assert scraper.normalize_rating_exponential(raw_value=100, expected_max=100) <= 5.0
-    assert scraper.normalize_rating_exponential(raw_value=500, expected_max=100) == 5.0
+    assert scraper.normalize_rating(raw_value=0, expected_max=100) == 1.0
+    assert scraper.normalize_rating(raw_value=100, expected_max=100) == 5.0
+    assert scraper.normalize_rating(raw_value=500, expected_max=100) == 5.0
+
+
+def test_normalize_rating_midpoint_and_invalid_expected_max():
+    scraper = _DummySourceScraper(supabase_client=None)
+
+    midpoint = scraper.normalize_rating(raw_value=50, expected_max=100)
+    invalid = scraper.normalize_rating(raw_value=10, expected_max=0)
+
+    assert midpoint == 3.0
+    assert invalid is None
 
 
 def test_pick_representative_image_uses_first_valid_url():

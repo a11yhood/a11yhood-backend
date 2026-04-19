@@ -431,6 +431,13 @@ class BaseScraper(ABC):
         """
         raise NotImplementedError("Subclasses must implement _create_product_dict")
 
+    def map_source_rating(self, raw_data: dict[str, Any]) -> tuple[float | None, int | None]:
+        """Map source-specific rating signals to (normalized_rating, raw_count).
+
+        Subclasses can override this to keep rating math separate from field mapping.
+        """
+        return None, None
+
     def _load_supported_sources(self) -> dict[str, str]:
         """Return cached supported_sources mapping of domain -> canonical name.
 

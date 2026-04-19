@@ -40,6 +40,7 @@ class ScrapeRunContext:
     matched_search_terms: list[str] = field(default_factory=list)
     fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     expected_max_rating: float | None = None
+    max_products: int | None = None
 
 
 @dataclass(slots=True)
