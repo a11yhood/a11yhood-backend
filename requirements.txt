@@ -76,7 +76,7 @@ idna==3.11
     #   yarl
 limits==5.8.0
     # via slowapi
-lxml==6.0.4
+lxml==6.1.0
     # via backend (pyproject.toml)
 markdown-it-py==4.0.0
     # via rich
