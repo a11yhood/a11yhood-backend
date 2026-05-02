@@ -1,115 +1,105 @@
 # GitHub Repository + GitLab CI Deployment
 
-This guide explains how to keep source code in GitHub while deploying to department test and production hosts with GitLab CI.
+This guide explains how this repository uses GitHub as the source of truth while GitLab CI performs validation, build, and deployment.
 
-## How It Works
+## Current Deployment Model
 
-1. GitHub remains the source of truth for code, pull requests, and releases.
-2. GitLab CI runs pipelines when branch/tag updates arrive.
-3. Deploy jobs SSH to test/prod hosts and run Docker Compose there.
-4. Test deploys from `main` automatically.
-5. Production deploys from release tags manually (approval gate).
+1. Code is developed and reviewed in GitHub.
+2. Changes are mirrored (or pushed) to the GitLab remote.
+3. GitLab pipeline runs from [.gitlab-ci.yml](../.gitlab-ci.yml).
+4. Test deployment runs automatically from `main`.
+5. Production deployment runs manually from tag pipelines.
 
-## One-Time Setup
+Important: deployment jobs run on host-specific GitLab runners, not over SSH from a generic runner.
 
-### 1. Connect GitHub to GitLab
+## Git Remote Setup
 
-Use one of these options:
+This repo is expected to have both remotes:
 
-- Pull mirror in GitLab (recommended).
-- GitLab project that pulls from GitHub with deploy token.
+- `github`: `git@github.com:a11yhood/backend.git`
+- `gitlab`: `git@gitlab.cs.washington.edu:a11yhood/backend.git`
 
-For either option, confirm GitLab receives:
-
-- `main` updates.
-- Release tags like `v1.2.3`.
-
-### 2. Add CI Variables In GitLab
-
-Set the following as masked/protected variables:
-
-- `TEST_DEPLOY_SSH_PRIVATE_KEY`: private key used by CI to SSH to the test host.
-- `PROD_DEPLOY_SSH_PRIVATE_KEY`: private key used by CI to SSH to the production host.
-- `GITHUB_REPO_URL`: repository clone URL reachable by target hosts.
-  - Example (SSH): `git@github.com:a11yhood/backend.git`
-  - Example (HTTPS token): `https://<token>@github.com/a11yhood/backend.git`
-- `TEST_DEPLOY_HOST`: hostname/IP of test server.
-- `TEST_DEPLOY_USER`: SSH user for test server.
-- `TEST_DEPLOY_PORT`: SSH port for test server (optional, defaults to 22).
-- `PROD_DEPLOY_HOST`: hostname/IP of production server.
-- `PROD_DEPLOY_USER`: SSH user for production server.
-- `PROD_DEPLOY_PORT`: SSH port for production server (optional, defaults to 22).
-
-### 3. Prepare Test Host
-
-Run once on the test host:
+Verify:
 
 ```bash
-sudo mkdir -p /opt/a11yhood/backend-test
-sudo chown -R <deploy-user>:<deploy-user> /opt/a11yhood/backend-test
+git remote -v
 ```
 
-Requirements on host:
-
-- Docker Engine installed.
-- Docker Compose plugin available (`docker compose version`).
-- Deploy user can run Docker commands.
-
-### 4. Prepare Production Host
-
-Run once on the production host:
+If you are not using GitLab pull mirroring, push branches and tags explicitly:
 
 ```bash
-sudo mkdir -p /opt/a11yhood/backend-prod
-sudo chown -R <deploy-user>:<deploy-user> /opt/a11yhood/backend-prod
+git push gitlab --all
+git push gitlab --tags
 ```
 
-Requirements on host:
+## Required GitLab CI Variables
 
-- Docker Engine installed.
-- Docker Compose plugin available (`docker compose version`).
-- Deploy user can run Docker commands.
-- Production `.env` created at `/opt/a11yhood/backend-prod/.env`.
+Set these variables in GitLab CI/CD settings:
+
+- `ENV_TEST_FILE` (recommended type: File): `.env.test` content for test deployments.
+- `ENV_PROD_FILE` (recommended type: File, protected): `.env` content for production deployments.
+
+Notes:
+
+- The pipeline copies these files during deploy jobs:
+  - test: `cp "$ENV_TEST_FILE" .env.test`
+  - prod: `cp "$ENV_PROD_FILE" .env`
+- Do not commit deployment secrets to the repository.
 
 ## Pipeline Behavior
 
 Configured in [.gitlab-ci.yml](../.gitlab-ci.yml):
 
-- `validate:compose`: checks Compose renders cleanly.
-- `build:image`: verifies Docker build succeeds.
-- `deploy:test`: on `main`, SSH deploys `backend` service to test host.
-- `deploy:prod`: on release tags `vX.Y.Z`, manual SSH deploys `backend-prod` with `production` profile.
+- `validate:compose`
+  - Runs on branches and tags.
+  - Executes `docker compose config` to verify Compose syntax and interpolation.
 
-## Local Prerequisite Check (Before Adopting CI)
+- `build:image`
+  - Runs on branches and tags.
+  - Executes `docker build -t a11yhood-backend:$CI_COMMIT_SHORT_SHA .`.
 
-Before relying on CI, verify local Compose behavior in this repo:
+- `deploy_test`
+  - Runs only on `main`.
+  - Uses runner tag `lab-docker-test`.
+  - Copies test env file and executes `docker compose up -d --build`.
+  - Publishes environment URL `https://a11yhood-test.cs.washington.edu`.
+
+- `deploy_prod`
+  - Runs only on tag pipelines.
+  - Uses runner tag `lab-docker-prod`.
+  - Is manual (`when: manual`) as the production approval gate.
+  - Copies prod env file and executes `docker compose --profile production up -d --build`.
+  - Publishes environment URL `https://a11yhood.cs.washington.edu`.
+
+## Suggested Release Flow
+
+1. Merge reviewed work into `main` on GitHub.
+2. Ensure `main` is available in GitLab (mirror or `git push gitlab main`).
+3. Confirm `deploy_test` succeeds in GitLab.
+4. Create and push a release tag, for example `vX.Y.Z`.
+5. Open the GitLab tag pipeline and manually trigger `deploy_prod`.
+
+## Local Verification Before CI
+
+Run local checks before relying on CI:
 
 ```bash
-docker compose build backend
-docker compose up -d backend
-curl -k https://localhost:8000/health || curl http://localhost:8000/health
-docker compose down
+# quick compose validation
+docker compose config > /dev/null
+
+# optional local image build parity check
+docker build -t a11yhood-backend:local .
 ```
 
-For production profile locally:
+For backend behavior checks, prefer the local test workflow:
 
 ```bash
-docker compose --profile production up -d --build backend-prod
-curl http://localhost:8001/health
-docker compose --profile production down
+pixi run test-unit
+pixi run test-integration
 ```
-
-## Release Flow
-
-1. Merge reviewed code into `main` on GitHub.
-2. GitLab pipeline auto-deploys test from `main`.
-3. Create and push release tag on GitHub, e.g. `v1.4.0`.
-4. GitLab pipeline appears for that tag.
-5. Approver triggers `deploy:prod` manually in GitLab.
 
 ## Security Notes
 
-- Do not commit production secrets to GitHub.
-- Keep production secrets in host `.env` and protected GitLab variables only.
-- Use separate SSH keys for CI and limit key scope to deploy users.
-- Keep production deploy job protected and approval-gated.
+- Store secrets in GitLab CI variables and environment files, not in git.
+- Keep `ENV_PROD_FILE` protected and restricted to protected refs.
+- Keep `deploy_prod` as a manual action with limited approver access.
