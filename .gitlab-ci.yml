@@ -63,6 +63,8 @@ deploy_prod:
   stage: deploy
   before_script:
     - cp "$ENV_PROD_FILE" .env
+  variables:
+    ENV_FILE: .env
   script:
     - docker compose --profile production up -d --build
   environment:

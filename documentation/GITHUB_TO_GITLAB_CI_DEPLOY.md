@@ -131,7 +131,6 @@ git push gitlab main --force-with-lease
 
 git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
-git push gitlab vX.Y.Z
 ```
 
 ### Updating a Tag (Before and After Push)
