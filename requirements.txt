@@ -19,7 +19,7 @@ beautifulsoup4==4.14.3
     # via backend (pyproject.toml)
 bleach==6.3.0
     # via backend (pyproject.toml)
-cachetools==7.0.6
+cachetools==6.2.2
     # via pyiceberg
 certifi==2026.4.22
     # via
@@ -142,7 +142,7 @@ requests==2.33.1
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via backend (pyproject.toml)
-rich==15.0.0
+rich==14.3.4
     # via
     #   backend (pyproject.toml)
     #   pyiceberg
