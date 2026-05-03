@@ -490,7 +490,26 @@ def test_product(clean_database, test_user):
         "slug": f"test-product-{uuid4()}",
         "created_by": test_user["id"],
     }
-    result = clean_database.table("products").insert(product_data).execute()
+    try:
+        result = clean_database.table("products").insert(product_data).execute()
+    except Exception as exc:
+        # Occasionally CI can hit a stale/partial seed view where the regular
+        # user row is not visible at insert time. Re-seed the exact user and retry.
+        message = str(exc)
+        if "products_created_by_fkey" not in message:
+            raise
+
+        user_row = {
+            "id": test_user["id"],
+            "github_id": test_user["github_id"],
+            "username": test_user["username"],
+            "display_name": test_user["display_name"],
+            "email": test_user["email"],
+            "role": test_user["role"],
+        }
+        clean_database.table("users").upsert(user_row, on_conflict="id").execute()
+        result = clean_database.table("products").insert(product_data).execute()
+
     return result.data[0]
 
 

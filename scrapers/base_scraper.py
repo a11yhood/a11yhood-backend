@@ -210,6 +210,8 @@ class BaseScraper(ABC):
         Raises:
             httpx.HTTPStatusError: If request fails after all attempts
         """
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be >= 1")
         for attempt in range(1, max_attempts + 1):
             await self._throttle_request()
             response = await self.client.get(url, params=params)
@@ -430,6 +432,13 @@ class BaseScraper(ABC):
             Product dict ready for database insertion
         """
         raise NotImplementedError("Subclasses must implement _create_product_dict")
+
+    def map_source_rating(self, raw_data: dict[str, Any]) -> tuple[float | None, int | None]:
+        """Map source-specific rating signals to (normalized_rating, raw_count).
+
+        Subclasses can override this to keep rating math separate from field mapping.
+        """
+        return None, None
 
     def _load_supported_sources(self) -> dict[str, str]:
         """Return cached supported_sources mapping of domain -> canonical name.
