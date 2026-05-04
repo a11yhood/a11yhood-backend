@@ -19,7 +19,7 @@ beautifulsoup4==4.14.3
     # via backend (pyproject.toml)
 bleach==6.3.0
     # via backend (pyproject.toml)
-cachetools==6.2.2
+cachetools==7.1.1
     # via pyiceberg
 certifi==2026.4.22
     # via
@@ -44,7 +44,7 @@ deprecation==2.1.0
     #   storage3
 fastapi==0.136.1
     # via backend (pyproject.toml)
-fsspec==2026.3.0
+fsspec==2026.4.0
     # via pyiceberg
 h11==0.16.0
     # via
@@ -129,7 +129,7 @@ python-dotenv==1.2.2
     #   backend (pyproject.toml)
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.26
+python-multipart==0.0.27
     # via backend (pyproject.toml)
 pyyaml==6.0.3
     # via uvicorn
@@ -142,7 +142,7 @@ requests==2.33.1
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via backend (pyproject.toml)
-rich==14.3.4
+rich==15.0.0
     # via
     #   backend (pyproject.toml)
     #   pyiceberg
@@ -198,7 +198,7 @@ watchfiles==1.1.1
     # via uvicorn
 webencodings==0.5.1
     # via bleach
-websockets==15.0.1
+websockets==16.0
     # via
     #   realtime
     #   uvicorn
