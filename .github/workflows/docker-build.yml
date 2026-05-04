@@ -10,7 +10,6 @@ on:
 
 jobs:
   build:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,15 +18,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Docker image (PR validation only)
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: false
-          tags: ghcr.io/${{ github.repository }}:pr-${{ github.event.pull_request.number }}
+      - name: Build Docker image (validation)
+        run: docker build .
 
   publish:
     if: github.event_name != 'pull_request'
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
