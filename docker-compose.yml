@@ -3,7 +3,6 @@ services:
   backend:
     build:
       context: .
-      target: development
     container_name: backend
     ports:
       - "8000:8000"
@@ -34,7 +33,6 @@ services:
   backend-prod:
     build:
       context: .
-      target: production
     image: backend:prod
     container_name: backend-prod
     ports:
