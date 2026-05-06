@@ -41,6 +41,8 @@ app = FastAPI(
     )
 )
 
+APP_VERSION = app.version
+
 import logging
 import os
 
@@ -317,7 +319,7 @@ async def root(request: Request):
     """API root endpoint."""
     return {
         "message": "a11yhood API",
-        "version": "1.0.0",
+        "version": APP_VERSION,
         "status": "running"
     }
 
@@ -342,12 +344,20 @@ async def health_check():
         os.getenv("ENV") == "production",
     ])
 
-    return {
+    response = {
         "status": "healthy",
+        "version": APP_VERSION,
         "mode": "production" if is_production else "development",
         "test_mode": current_settings.TEST_MODE,
         "database": "supabase" if current_settings.SUPABASE_URL and "dummy" not in current_settings.SUPABASE_URL else "unconfigured"
     }
+
+    # Optional build metadata for deployment verification.
+    git_sha = os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA")
+    if git_sha:
+        response["git_sha"] = git_sha
+
+    return response
 
 
 @app.get("/api/scraping-logs")
