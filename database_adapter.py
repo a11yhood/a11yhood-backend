@@ -118,6 +118,8 @@ class DatabaseAdapter:
 
     def __init__(self, settings=None):
         from config import get_settings
+        from supabase import create_client
+        from supabase.lib.client_options import SyncClientOptions
 
         self.settings = settings or get_settings()
         self._request_auth_token = None
@@ -128,9 +130,6 @@ class DatabaseAdapter:
                 "SUPABASE_URL must be configured. "
                 "Set it in .env (production) or .env.test (test instance)."
             )
-
-        from supabase import create_client
-        from supabase.lib.client_options import SyncClientOptions
 
         self.supabase = create_client(
             self.settings.SUPABASE_URL,

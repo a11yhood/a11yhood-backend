@@ -111,11 +111,11 @@ cmd = "python scripts/db-export/export_full_database.py --mode test --output sup
 
 [tasks.lint-python]
 description = "Lint Python code with ruff (whole project)"
-cmd = "ruff check ."
+cmd = "ruff check . --exclude '*.ipynb'"
 
 [tasks.lint-python-fix]
 description = "Lint Python code with ruff and auto-fix (whole project)"
-cmd = "ruff check . --fix"
+cmd = "ruff check . --fix --exclude '*.ipynb'"
 
 [tasks.format-python]
 description = "Format Python code with ruff (whole project)"
