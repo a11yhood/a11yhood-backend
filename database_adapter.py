@@ -8,10 +8,10 @@ Configure SUPABASE_URL/SUPABASE_KEY in .env (production) or .env.test (test inst
 import logging
 from contextvars import ContextVar
 
-from supabase import create_client
 from supabase.lib.client_options import SyncClientOptions
 
 from config import get_settings
+from supabase import create_client
 
 logger = logging.getLogger(__name__)
 
