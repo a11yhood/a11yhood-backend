@@ -1,16 +1,18 @@
-"""Unit tests for the image-upload endpoint (POST /api/images/upload).
+"""Unit tests for the image upload and delete endpoints.
 
-These tests override the ``get_current_user`` FastAPI dependency directly so
-that no real database calls or Supabase credentials are needed.
+These tests override the ``get_current_user`` and ``get_db`` FastAPI dependencies
+directly so that no real database calls or Supabase credentials are needed.
 """
 
 import base64
 import io
+from unittest.mock import MagicMock
 
 import pytest
 
 from main import app
 from services.auth import get_current_user
+from services.database import get_db
 
 pytestmark = pytest.mark.unit
 
@@ -425,3 +427,172 @@ class TestApplyCrop:
         with pytest.raises(HTTPException) as exc_info:
             _apply_crop(_PNG_10PX, "image/png", 200, 200, 50, 50)
         assert exc_info.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Delete endpoint helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_db_mock(*, found: bool = True) -> MagicMock:
+    """Return a mock DB client that simulates a found or missing row."""
+    db = MagicMock()
+    select_result = MagicMock()
+    select_result.data = [{"id": "some-id"}] if found else []
+    (
+        db.table.return_value
+        .select.return_value
+        .eq.return_value
+        .limit.return_value
+        .execute.return_value
+    ) = select_result
+    return db
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/images/product/{product_id}
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteProductImage:
+    def _client(self, unit_client, user: dict, found: bool = True):
+        db_mock = _make_db_mock(found=found)
+        app.dependency_overrides[get_current_user] = lambda: user
+        app.dependency_overrides[get_db] = lambda: db_mock
+        yield unit_client, db_mock
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_db, None)
+
+    def test_moderator_can_delete_product_image(self, unit_client):
+        db_mock = _make_db_mock(found=True)
+        app.dependency_overrides[get_current_user] = lambda: _MODERATOR_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            resp = unit_client.delete("/api/images/product/prod-123")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        assert resp.status_code == 204
+
+    def test_admin_can_delete_product_image(self, unit_client):
+        db_mock = _make_db_mock(found=True)
+        app.dependency_overrides[get_current_user] = lambda: _ADMIN_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            resp = unit_client.delete("/api/images/product/prod-456")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        assert resp.status_code == 204
+
+    def test_regular_user_cannot_delete_product_image(self, unit_client):
+        db_mock = _make_db_mock(found=True)
+        app.dependency_overrides[get_current_user] = lambda: _REGULAR_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            resp = unit_client.delete("/api/images/product/prod-123")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        assert resp.status_code == 403
+
+    def test_unauthenticated_delete_product_image_returns_401(self, unit_client):
+        resp = unit_client.delete("/api/images/product/prod-123")
+        assert resp.status_code == 401
+
+    def test_missing_product_returns_404(self, unit_client):
+        db_mock = _make_db_mock(found=False)
+        app.dependency_overrides[get_current_user] = lambda: _MODERATOR_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            resp = unit_client.delete("/api/images/product/nonexistent")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        assert resp.status_code == 404
+        assert "detail" in resp.json()
+
+    def test_delete_calls_update_with_null_image(self, unit_client):
+        db_mock = _make_db_mock(found=True)
+        app.dependency_overrides[get_current_user] = lambda: _MODERATOR_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            unit_client.delete("/api/images/product/prod-123")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        # Verify the update was called with NULL image fields
+        db_mock.table.assert_any_call("products")
+        update_call = db_mock.table.return_value.update
+        update_call.assert_called_with({"image": None, "image_alt": None, "image_id": None})
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/images/blog-post/{post_id}
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteBlogPostImage:
+    def test_moderator_can_delete_blog_post_image(self, unit_client):
+        db_mock = _make_db_mock(found=True)
+        app.dependency_overrides[get_current_user] = lambda: _MODERATOR_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            resp = unit_client.delete("/api/images/blog-post/post-abc")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        assert resp.status_code == 204
+
+    def test_admin_can_delete_blog_post_image(self, unit_client):
+        db_mock = _make_db_mock(found=True)
+        app.dependency_overrides[get_current_user] = lambda: _ADMIN_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            resp = unit_client.delete("/api/images/blog-post/post-abc")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        assert resp.status_code == 204
+
+    def test_regular_user_cannot_delete_blog_post_image(self, unit_client):
+        db_mock = _make_db_mock(found=True)
+        app.dependency_overrides[get_current_user] = lambda: _REGULAR_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            resp = unit_client.delete("/api/images/blog-post/post-abc")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        assert resp.status_code == 403
+
+    def test_unauthenticated_delete_blog_post_image_returns_401(self, unit_client):
+        resp = unit_client.delete("/api/images/blog-post/post-abc")
+        assert resp.status_code == 401
+
+    def test_missing_blog_post_returns_404(self, unit_client):
+        db_mock = _make_db_mock(found=False)
+        app.dependency_overrides[get_current_user] = lambda: _MODERATOR_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            resp = unit_client.delete("/api/images/blog-post/nonexistent")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        assert resp.status_code == 404
+        assert "detail" in resp.json()
+
+    def test_delete_calls_update_with_null_image_fields(self, unit_client):
+        db_mock = _make_db_mock(found=True)
+        app.dependency_overrides[get_current_user] = lambda: _MODERATOR_USER
+        app.dependency_overrides[get_db] = lambda: db_mock
+        try:
+            unit_client.delete("/api/images/blog-post/post-abc")
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+        db_mock.table.assert_any_call("blog_posts")
+        update_call = db_mock.table.return_value.update
+        update_call.assert_called_with(
+            {"header_image": None, "header_image_alt": None, "header_image_id": None}
+        )

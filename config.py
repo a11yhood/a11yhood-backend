@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""  # service_role key for backend
     SUPABASE_ANON_KEY: str = ""  # anon/public key
+    SUPABASE_POSTGREST_TIMEOUT: int = 180
 
     # CORS - strict allowlist for security
     # Dev: Uses Vite proxy (https://localhost:5173 -> http://localhost:8000)

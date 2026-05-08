@@ -1,6 +1,6 @@
-"""Image upload endpoint.
+"""Image upload and delete endpoints.
 
-Moderator/admin-only image upload that converts files to base64 data URLs for
+Moderator/admin-only image management that converts files to base64 data URLs for
 storage in the database as text strings. This avoids the need for a separate
 object-storage backend while still supporting rich product images.
 
@@ -17,10 +17,11 @@ import io
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from services.auth import ensure_moderator_or_admin, get_current_user
+from services.database import get_db
 from services.limiter import limiter
 
 logger = logging.getLogger(__name__)
@@ -244,3 +245,87 @@ async def upload_image(
     )
 
     return ImageUploadResponse(url=data_url)
+
+
+# ---------------------------------------------------------------------------
+# Delete endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/product/{product_id}", status_code=204)
+@limiter.limit("30/minute")
+async def delete_product_image(
+    request: Request,
+    product_id: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+) -> Response:
+    """Remove the image from a product (sets ``image`` and ``image_alt`` to NULL).
+
+    **Permissions:** Moderator or Admin only.
+
+    **Error codes:**
+
+    | Status | Reason |
+    |--------|--------|
+    | 401    | Not authenticated |
+    | 403    | Authenticated but not moderator/admin |
+    | 404    | Product not found |
+    | 429    | Rate limit exceeded |
+    """
+    ensure_moderator_or_admin(current_user)
+
+    existing = db.table("products").select("id").eq("id", product_id).limit(1).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Product not found.")
+
+    db.table("products").update({"image": None, "image_alt": None, "image_id": None}).eq(
+        "id", product_id
+    ).execute()
+
+    logger.info(
+        "Image deleted from product %s by user %s",
+        product_id,
+        current_user.get("id"),
+    )
+    return Response(status_code=204)
+
+
+@router.delete("/blog-post/{post_id}", status_code=204)
+@limiter.limit("30/minute")
+async def delete_blog_post_image(
+    request: Request,
+    post_id: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+) -> Response:
+    """Remove the header image from a blog post (sets ``header_image`` and
+    ``header_image_alt`` to NULL).
+
+    **Permissions:** Moderator or Admin only.
+
+    **Error codes:**
+
+    | Status | Reason |
+    |--------|--------|
+    | 401    | Not authenticated |
+    | 403    | Authenticated but not moderator/admin |
+    | 404    | Blog post not found |
+    | 429    | Rate limit exceeded |
+    """
+    ensure_moderator_or_admin(current_user)
+
+    existing = db.table("blog_posts").select("id").eq("id", post_id).limit(1).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Blog post not found.")
+
+    db.table("blog_posts").update(
+        {"header_image": None, "header_image_alt": None, "header_image_id": None}
+    ).eq("id", post_id).execute()
+
+    logger.info(
+        "Image deleted from blog post %s by user %s",
+        post_id,
+        current_user.get("id"),
+    )
+    return Response(status_code=204)

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from models.blog_posts import BlogPostCreate, BlogPostResponse, BlogPostUpdate
 from services.auth import ensure_admin, get_current_user, get_current_user_optional
 from services.database import get_db
+from services.image_references import get_or_create_image_id
 from services.sanitizer import sanitize_html
 from services.timestamps import normalize_timestamp_value
 
@@ -276,6 +277,7 @@ async def create_blog_post(
 
     normalized_image = _normalize_image_string(payload.header_image)
     _validate_image_size(normalized_image)
+    header_image_id = get_or_create_image_id(db, normalized_image, created_by=current_user.get("id"))
 
     normalized_content = _normalize_content_images(payload.content)
 
@@ -288,6 +290,7 @@ async def create_blog_post(
         "content": sanitized_content,
         "excerpt": payload.excerpt,
         "header_image": normalized_image,
+        "header_image_id": header_image_id,
         "header_image_alt": payload.header_image_alt,
         "author_id": payload.author_id,
         "author_name": payload.author_name,
@@ -341,6 +344,9 @@ async def update_blog_post(
         normalized_image = _normalize_image_string(updates.header_image)
         _validate_image_size(normalized_image)
         update_data["header_image"] = normalized_image
+        update_data["header_image_id"] = get_or_create_image_id(
+            db, normalized_image, created_by=current_user.get("id")
+        )
     if updates.header_image_alt is not None:
         update_data["header_image_alt"] = updates.header_image_alt
     if updates.tags is not None:

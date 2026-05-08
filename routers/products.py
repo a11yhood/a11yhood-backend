@@ -21,6 +21,7 @@ from models.products import ProductCreate, ProductResponse, ProductUpdate
 from services.auth import get_current_user, get_current_user_optional
 from services.database import get_db
 from services.id_generator import generate_id_with_uniqueness_check
+from services.image_references import get_or_create_image_id
 from services.sources import extract_domain, find_source_for_domain
 
 router = APIRouter(prefix="/api/products", tags=["products"])
@@ -1271,6 +1272,13 @@ async def create_product(
     # Enrich metadata from source scrapers (best-effort)
     await _enrich_manual_product_metadata(db, determined_source, source_url, product, db_data)
 
+    # Maintain normalized image reference without changing API payload shape.
+    db_data["image_id"] = get_or_create_image_id(
+        db,
+        db_data.get("image"),
+        created_by=current_user.get("id"),
+    )
+
     # Upsert behavior: resolve existing product by external_id first, then source_url.
     # This prevents duplicate products from scrapers while allowing manual updates.
     existing_product = None
@@ -1502,6 +1510,11 @@ async def update_product(
         db_data["source_url"] = str(product.source_url)
     if "image_url" in product_data and product.image_url is not None:
         db_data["image"] = str(product.image_url)
+        db_data["image_id"] = get_or_create_image_id(
+            db,
+            db_data["image"],
+            created_by=current_user.get("id"),
+        )
     if "image_alt" in product_data:
         db_data["image_alt"] = product.image_alt
     if "source" in product_data:
@@ -1616,6 +1629,11 @@ async def patch_product(
         db_data["source_url"] = str(product.source_url)
     if "image_url" in product_data and product.image_url is not None:
         db_data["image"] = str(product.image_url)
+        db_data["image_id"] = get_or_create_image_id(
+            db,
+            db_data["image"],
+            created_by=current_user.get("id"),
+        )
     if "image_alt" in product_data:
         db_data["image_alt"] = product.image_alt
     if "source" in product_data:

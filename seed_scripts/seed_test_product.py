@@ -35,7 +35,7 @@ def seed_product():
     product_slug = normalize_to_snake_case(product_name)
     tag_names = ["accessibility", "testing"]
 
-    # Upsert product (conflict on source_url)
+    # Upsert product (conflict on slug for deterministic test identity)
     product_data = {
         "name": product_name,
         "source_url": product_url,
@@ -45,7 +45,7 @@ def seed_product():
         "description": "A test product for accessibility",
     }
     try:
-        result = db.table("products").upsert(product_data, on_conflict="source_url").execute()
+        result = db.table("products").upsert(product_data, on_conflict="slug").execute()
         if result.data:
             product = result.data[0]
             print(f"  ✓ Product: {product_name} (ID: {product['id']}, Slug: {product['slug']})")

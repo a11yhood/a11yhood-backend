@@ -271,6 +271,7 @@ def _reset_and_assert_clean(db):
 
     tables_must_be_empty = [
         "products",
+        "images",
         "users",
         "ratings",
         "discussions",
@@ -421,7 +422,7 @@ def _seed_test_data(db):
         if not p.get("description"):
             p["description"] = p.get("name", "Test product")
         products_to_insert.append(p)
-    db.table("products").upsert(products_to_insert, on_conflict="id").execute()
+    db.table("products").upsert(products_to_insert, on_conflict="slug").execute()
 
 
 @pytest.fixture
