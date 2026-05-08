@@ -355,6 +355,24 @@ def ensure_admin(current_user: dict):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
+def ensure_moderator_or_admin(current_user: dict):
+    """
+    Enforce moderator or admin access.
+
+    Security: Server-side role check prevents privilege escalation.
+    Raises 403 Forbidden if current_user lacks moderator or admin role.
+    """
+    from services.security_logger import log_unauthorized_access
+
+    if not current_user or current_user.get("role") not in ("moderator", "admin"):
+        log_unauthorized_access(
+            current_user.get("id") if current_user else None,
+            "moderator",
+            f"Attempted moderator action with role: {current_user.get('role') if current_user else 'none'}",
+        )
+        raise HTTPException(status_code=403, detail="Moderator or admin access required")
+
+
 def ensure_self_or_admin(current_user: dict, user_id: str):
     """
     Permit if editing own record or user is admin; else 403.

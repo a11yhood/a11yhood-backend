@@ -8,6 +8,11 @@ Configure SUPABASE_URL/SUPABASE_KEY in .env (production) or .env.test (test inst
 import logging
 from contextvars import ContextVar
 
+from supabase.lib.client_options import SyncClientOptions
+
+from config import get_settings
+from supabase import create_client
+
 logger = logging.getLogger(__name__)
 
 # Per-request Supabase JWT for RLS-aware queries
@@ -97,6 +102,7 @@ class DatabaseAdapter:
         "scraping_logs",
         # Parent tables
         "tags",
+        "images",
         "blog_posts",
         "collections",
         "products",
@@ -109,13 +115,13 @@ class DatabaseAdapter:
     _TEST_TABLE_FILTERS = {
         # Composite PK; no standalone id column.
         "collection_products": ("collection_id", "00000000-0000-0000-0000-000000000000"),
-        # Normalized search-term rows keep a bigint id in the live schema.
-        "scraper_search_terms": ("id", 0),
+        # Some schemas keep scraper_search_terms without a stable id column.
+        "scraper_search_terms": ("search_term", ""),
+        # supported_sources is keyed by domain in test and production schemas.
+        "supported_sources": ("domain", ""),
     }
 
     def __init__(self, settings=None):
-        from config import get_settings
-
         self.settings = settings or get_settings()
         self._request_auth_token = None
         self.backend = "supabase"  # Always Supabase
@@ -126,11 +132,12 @@ class DatabaseAdapter:
                 "Set it in .env (production) or .env.test (test instance)."
             )
 
-        from supabase import create_client
-
         self.supabase = create_client(
             self.settings.SUPABASE_URL,
             self.settings.SUPABASE_KEY,
+            options=SyncClientOptions(
+                postgrest_client_timeout=self.settings.SUPABASE_POSTGREST_TIMEOUT,
+            ),
         )
 
     def init(self):

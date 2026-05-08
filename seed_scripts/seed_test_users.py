@@ -65,7 +65,7 @@ def seed_users():
 
     for user in TEST_USERS:
         try:
-            result = db.table("users").upsert(user).execute()
+            result = db.table("users").upsert(user, on_conflict="id").execute()
             if result.data:
                 print(f"  ✓ {user['role']}: {user['username']} (ID: {user['id']})")
             else:
