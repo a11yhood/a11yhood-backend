@@ -13,7 +13,6 @@ from .contracts import (
     SourceScrapedProduct,
 )
 from .github_adapter import GitHubSourceAdapter
-from .ravelry_adapter import RavelrySourceAdapter
 
 __all__ = [
     "AuthResolution",
@@ -24,7 +23,6 @@ __all__ = [
     "GitHubSourceAdapter",
     "PersistOutcome",
     "RateLimitPolicy",
-    "RavelrySourceAdapter",
     "ScrapeMode",
     "ScrapeRunContext",
     "SourceScrapedProduct",
