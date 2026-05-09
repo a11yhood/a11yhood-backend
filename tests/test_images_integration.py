@@ -1,5 +1,6 @@
 """Integration tests for image upload/delete endpoints and image references."""
 
+import base64
 import io
 import uuid
 
@@ -48,8 +49,10 @@ def test_delete_product_image_clears_image_fields(client, clean_database, test_u
             "description": "integration test product",
             "source_url": source_url,
             "type": "Software",
-            "image_url": "https://example.com/product-image.png",
-            "image_alt": "product alt",
+            "image": {
+                "url": "https://example.com/product-image.png",
+                "alt": "product alt",
+            },
         },
     )
     assert product_response.status_code == 201
@@ -70,6 +73,81 @@ def test_delete_product_image_clears_image_fields(client, clean_database, test_u
     assert after.data
     # Only the FK is cleared; the shared image row remains intact.
     assert after.data[0]["image_id"] is None
+
+
+def test_product_response_includes_image_identifiers(client, test_user, auth_headers):
+    source_url = f"https://github.com/a11yhood/image-id-test-{uuid.uuid4()}"
+    create_response = client.post(
+        "/api/products",
+        headers=auth_headers(test_user),
+        json={
+            "name": "Image Identifier Product",
+            "description": "integration test product",
+            "source_url": source_url,
+            "type": "Software",
+            "image": {
+                "url": "https://example.com/product-image-id.png",
+                "alt": "image id alt",
+            },
+        },
+    )
+    assert create_response.status_code == 201
+    created = create_response.json()
+    assert created["image_id"] is not None
+    assert "image" not in created
+    assert "image_url" not in created
+
+    get_response = client.get(f"/api/products/{created['id']}")
+    assert get_response.status_code == 200
+    loaded = get_response.json()
+    assert loaded["image_id"] == created["image_id"]
+    assert "image" not in loaded
+    assert "image_url" not in loaded
+
+
+def test_get_image_by_id_serves_uploaded_image_bytes(client, test_user, auth_headers):
+    source_url = f"https://github.com/a11yhood/image-by-id-uploaded-{uuid.uuid4()}"
+    data_url = f"data:image/png;base64,{base64.b64encode(_PNG_1PX).decode('ascii')}"
+    create_response = client.post(
+        "/api/products",
+        headers=auth_headers(test_user),
+        json={
+            "name": "Image by ID Uploaded",
+            "description": "integration test product",
+            "source_url": source_url,
+            "type": "Software",
+            "image": {"url": data_url},
+        },
+    )
+    assert create_response.status_code == 201
+    created = create_response.json()
+
+    image_response = client.get(f"/api/images/{created['image_id']}")
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"].startswith("image/png")
+    assert image_response.content == _PNG_1PX
+
+
+def test_get_image_by_id_redirects_external_image(client, test_user, auth_headers):
+    source_url = f"https://github.com/a11yhood/image-by-id-external-{uuid.uuid4()}"
+    external_image_url = "https://example.com/external-image.png"
+    create_response = client.post(
+        "/api/products",
+        headers=auth_headers(test_user),
+        json={
+            "name": "Image by ID External",
+            "description": "integration test product",
+            "source_url": source_url,
+            "type": "Software",
+            "image": {"url": external_image_url},
+        },
+    )
+    assert create_response.status_code == 201
+    created = create_response.json()
+
+    image_response = client.get(f"/api/images/{created['image_id']}", follow_redirects=False)
+    assert image_response.status_code == 307
+    assert image_response.headers.get("location") == external_image_url
 
 
 def test_delete_blog_post_image_clears_image_fields(client, clean_database, test_admin, auth_headers):

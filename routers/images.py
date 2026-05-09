@@ -19,6 +19,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
+from starlette.responses import RedirectResponse
 
 from services.auth import ensure_moderator_or_admin, get_current_user
 from services.database import get_db
@@ -245,6 +246,50 @@ async def upload_image(
     )
 
     return ImageUploadResponse(url=data_url)
+
+
+@router.get("/{image_id}")
+@limiter.limit("240/minute")
+async def get_image_by_id(
+    request: Request,
+    image_id: str,
+    db=Depends(get_db),
+) -> Response:
+    """Resolve an image ID into image bytes or a redirect to an external URL.
+
+    - Uploaded images are returned as image bytes with the stored MIME type.
+    - External images are redirected to their canonical URL.
+    """
+    image_response = (
+        db.table("images")
+        .select("canonical_url, image_data_base64, mime_type")
+        .eq("id", image_id)
+        .limit(1)
+        .execute()
+    )
+
+    row = image_response.data[0] if image_response.data else None
+    if not row:
+        raise HTTPException(status_code=404, detail="Image not found.")
+
+    image_payload = str(row.get("image_data_base64") or "").strip()
+    if image_payload:
+        mime_type = str(row.get("mime_type") or "image/png").strip() or "image/png"
+        try:
+            image_bytes = base64.b64decode(image_payload)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Image data is corrupted.") from exc
+        return Response(
+            content=image_bytes,
+            media_type=mime_type,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    canonical_url = str(row.get("canonical_url") or "").strip()
+    if canonical_url:
+        return RedirectResponse(url=canonical_url, status_code=307)
+
+    raise HTTPException(status_code=404, detail="Image payload not available.")
 
 
 # ---------------------------------------------------------------------------

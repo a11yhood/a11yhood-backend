@@ -187,34 +187,17 @@ def sync_image_alt_if_missing(db, image_id: str | None, alt_text: str | None) ->
 
 
 def resolve_image_metadata(db, image_id: str | None) -> dict[str, str | None]:
-    """Resolve the displayable URL and default alt text for an image row."""
+    """Resolve canonical API image URL and default alt text for an image row."""
     if not image_id:
         return {"image_url": None, "image_alt": None}
 
     try:
-        response = (
-            db.table("images")
-            .select("canonical_url, image_data_base64, mime_type, source_kind, default_alt")
-            .eq("id", image_id)
-            .limit(1)
-            .execute()
-        )
+        response = db.table("images").select("id, default_alt").eq("id", image_id).limit(1).execute()
         row = response.data[0] if response.data else None
         if not row:
             return {"image_url": None, "image_alt": None}
 
-        image_url = None
-        source_kind = str(row.get("source_kind") or "").strip().lower()
-        image_payload = str(row.get("image_data_base64") or "").strip()
-        if source_kind == "uploaded" and image_payload:
-            mime_type = str(row.get("mime_type") or "image/png").strip() or "image/png"
-            image_url = f"data:{mime_type};base64,{image_payload}"
-        else:
-            canonical_url = str(row.get("canonical_url") or "").strip()
-            if canonical_url:
-                image_url = canonical_url
-
-        return {"image_url": image_url, "image_alt": row.get("default_alt")}
+        return {"image_url": f"/api/images/{image_id}", "image_alt": row.get("default_alt")}
     except Exception:
         return {"image_url": None, "image_alt": None}
 
