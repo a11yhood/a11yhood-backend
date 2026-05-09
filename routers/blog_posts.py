@@ -301,7 +301,6 @@ async def create_blog_post(
         "slug": slug,
         "content": sanitized_content,
         "excerpt": payload.excerpt,
-        "header_image": normalized_image,
         "header_image_alt": payload.header_image_alt,
         "header_image_id": header_image_id,
         "author_id": payload.author_id,
@@ -357,7 +356,6 @@ async def update_blog_post(
     if updates.header_image is not None:
         normalized_image = _normalize_image_string(updates.header_image)
         _validate_image_size(normalized_image)
-        update_data["header_image"] = normalized_image
         update_data["header_image_id"] = get_or_create_image_id(
             db, normalized_image, created_by=current_user.get("id"), alt_text=updates.header_image_alt
         )

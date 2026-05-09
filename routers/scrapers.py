@@ -21,6 +21,7 @@ from scrapers.thingiverse import ThingiverseScraper
 from services.auth import get_current_user
 from services.database import get_db
 from services.id_generator import normalize_to_snake_case
+from services.image_references import get_or_create_image_id, resolve_image_value
 from services.scrapers import ScraperOAuth, ScraperService
 from services.sources import extract_domain, find_source_for_domain
 from supabase import Client
@@ -206,6 +207,8 @@ async def load_url(
         if not value:
             return False
         v = value.lower()
+        if v.startswith("data:image/"):
+            return True
         return v.endswith((".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg"))
 
     # First, check if product already exists in database
@@ -213,9 +216,9 @@ async def load_url(
     if existing.data:
         product = existing.data[0]
         # Normalize fields for API response
-        product["image_url"] = product.get("image")
         product["external_id"] = product.get("external_id")
         product["sourceUrl"] = product.get("source_url")
+        resolved_image_url = resolve_image_value(db, product.get("image_id"))
 
         # Attach tags
         pt_rows = get_product_tag_rows(db, [product["id"]])
@@ -232,7 +235,7 @@ async def load_url(
         )
 
         # If the stored image is missing or not an image, attempt a light re-scrape to refresh media
-        if not is_image_url(product.get("image_url")):
+        if not is_image_url(resolved_image_url):
             refreshed = None
             try:
                 # Try GitHub
@@ -322,8 +325,8 @@ async def load_url(
                     or refreshed.get("imageUrl")
                     or refreshed.get("image_url")
                 )
-                db.table("products").update({"image": new_image}).eq("id", product["id"]).execute()
-                product["image_url"] = new_image
+                image_id = get_or_create_image_id(db, new_image)
+                db.table("products").update({"image_id": image_id}).eq("id", product["id"]).execute()
 
         return {"success": True, "product": product, "source": "database"}
 
@@ -416,9 +419,11 @@ async def load_url(
         "name": scraped_data.get("name"),
         "description": scraped_data.get("description"),
         "source_url": url,
-        "image": scraped_data.get("image")
-        or scraped_data.get("imageUrl")
-        or scraped_data.get("image_url"),
+        "image_id": get_or_create_image_id(
+            db,
+            scraped_data.get("image") or scraped_data.get("imageUrl") or scraped_data.get("image_url"),
+        ),
+        "image_alt": scraped_data.get("image_alt"),
         "source": scraped_data.get("source", scraper_name),
         "type": scraped_data.get("type", "Other"),
         "external_id": scraped_data.get("external_id"),
@@ -439,7 +444,6 @@ async def load_url(
 
     # Get the saved product
     saved_product = response.data[0]
-    saved_product["image_url"] = saved_product.get("image")
     saved_product["external_id"] = saved_product.get("external_id")
     saved_product["sourceUrl"] = saved_product.get("source_url")
 

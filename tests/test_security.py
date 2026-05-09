@@ -36,7 +36,6 @@ def _sample_product_payload():
         "name": "Secure Test Product",
         "description": "Security negative-path test product",
         "source_url": "https://github.com/user/secure-product",
-        "image_url": None,
         "source": "github",
         "type": "Other",
         "tags": [],
