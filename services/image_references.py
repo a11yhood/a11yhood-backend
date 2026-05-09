@@ -6,7 +6,9 @@ returning URL strings, while also maintaining normalized references in
 """
 
 import hashlib
+import logging
 
+logger = logging.getLogger(__name__)
 _capability_cache: dict[tuple[str, str], bool] = {}
 
 
@@ -181,7 +183,7 @@ def sync_image_alt_if_missing(db, image_id: str | None, alt_text: str | None) ->
             return
         db.table("images").update({"default_alt": alt}).eq("id", image_id).execute()
     except Exception:
-        pass
+        logger.debug("Ignoring alt-text sync failure for image_id=%s", image_id, exc_info=True)
 
 
 def resolve_image_metadata(db, image_id: str | None) -> dict[str, str | None]:
