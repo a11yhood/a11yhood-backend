@@ -145,6 +145,28 @@ def test_activities_can_be_queried_by_user(
     assert len(activities) >= 3
 
 
+def test_activity_logging_accepts_product_slug(
+    auth_client,
+    test_user,
+    test_product,
+):
+    """Activity logging should resolve product slug identifiers to canonical UUIDs."""
+    response = auth_client.post(
+        "/api/activities",
+        json={
+            "user_id": test_user["id"],
+            "type": "product_submit",
+            "product_id": test_product["slug"],
+            "timestamp": datetime.now(UTC).isoformat(),
+            "metadata": {"action": "edit"},
+        },
+    )
+
+    assert response.status_code == 201
+    activity = response.json()
+    assert activity["product_id"] == test_product["id"]
+
+
 # ============================================================================
 # STORY 3.3: USER REQUESTS PRODUCT MANAGEMENT
 # ============================================================================

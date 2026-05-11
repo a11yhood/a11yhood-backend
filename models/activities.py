@@ -11,7 +11,7 @@ from services.timestamps import ApiTimestamp, OptionalApiTimestamp
 class UserActivityCreate(BaseModel):
     """Request model for creating user activity"""
 
-    user_id: str
+    user_id: str | None = None
     type: str  # 'product_submit' | 'rating' | 'discussion' | 'tag'
     product_id: str | None = None
     timestamp: ApiTimestamp

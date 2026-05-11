@@ -30,6 +30,7 @@ from urllib.parse import urlparse, urlsplit
 import httpx
 
 from services.id_generator import normalize_to_snake_case
+from services.image_references import get_or_create_image_id
 
 T = TypeVar("T")
 
@@ -529,6 +530,39 @@ class BaseScraper(ABC):
         )
         return {**product_data, "slug": slug}
 
+    def _normalize_image_reference_fields(self, product_data: dict[str, Any]) -> dict[str, Any]:
+        """Translate legacy scraper image field into normalized image_id references.
+
+        Scrapers historically emitted ``image`` as a URL/data URL string. The products
+        table now stores ``image_id`` that references ``images.id``.
+        """
+        normalized = dict(product_data)
+        legacy_image = normalized.pop("image", None)
+
+        # Respect already-normalized payloads.
+        if normalized.get("image_id"):
+            return normalized
+
+        if legacy_image is None:
+            return normalized
+
+        image_value = str(legacy_image).strip()
+        if not image_value:
+            return normalized
+
+        try:
+            image_id = get_or_create_image_id(
+                self.supabase,
+                image_value,
+                alt_text=normalized.get("image_alt"),
+            )
+            if image_id:
+                normalized["image_id"] = image_id
+        except Exception as e:
+            print(f"[BaseScraper] Warning: failed to normalize image reference: {e}")
+
+        return normalized
+
     async def _create_product(self, raw_data: dict[str, Any]) -> bool:
         """
         Create a new product in the database
@@ -547,6 +581,7 @@ class BaseScraper(ABC):
                 self._create_product_dict(raw_data), ensure_unique=True
             )
             product_data = self._canonicalize_source(product_data)
+            product_data = self._normalize_image_reference_fields(product_data)
             # Extract tags for relationship table; avoid inserting into products table
             tag_names = product_data.pop("tags", None)
             # Recursively convert any datetime fields to ISO strings
@@ -629,6 +664,7 @@ class BaseScraper(ABC):
         try:
             product_data = self._create_product_dict(raw_data)
             product_data = self._canonicalize_source(product_data)
+            product_data = self._normalize_image_reference_fields(product_data)
             tag_names = product_data.pop("tags", None)
             # Do not overwrite slug on update; only backfill if completely missing
             if not product_data.get("slug"):

@@ -265,9 +265,9 @@ describe('ProductCard', () => {
       expect(screen.getByText('Test Product')).toBeInTheDocument()
     })
     
-    it('shows product image when imageUrl is provided', () => {
+    it('shows product image when imageId is provided', () => {
       const product = createMockProduct({ 
-        imageUrl: 'data:image/png;base64,abc123',
+        imageId: '8be8bb31-8f3d-4f53-8bd1-c167a0c5f184',
         imageAlt: 'Product image'
       })
       render(<ProductCard product={product} />)
@@ -292,7 +292,7 @@ describe('ProductCard', () => {
   describe('edge cases', () => {
     it('handles missing optional fields gracefully', () => {
       const product = createMockProduct({ 
-        imageUrl: undefined,
+        imageId: undefined,
         description: undefined
       })
       render(<ProductCard product={product} />)

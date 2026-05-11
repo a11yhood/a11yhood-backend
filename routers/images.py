@@ -1,8 +1,8 @@
 """Image upload and delete endpoints.
 
-Moderator/admin-only image management that converts files to base64 data URLs for
-storage in the database as text strings. This avoids the need for a separate
-object-storage backend while still supporting rich product images.
+Moderator/admin-only image management for normalized image references.
+Uploads are stored in the shared ``images`` table and return an ``image_id``
+that can be used anywhere an image reference is needed.
 
 Supported formats: image/jpeg, image/png, image/webp
 Max size: 5 MB
@@ -23,6 +23,7 @@ from starlette.responses import RedirectResponse
 
 from services.auth import ensure_moderator_or_admin, get_current_user
 from services.database import get_db
+from services.image_references import get_or_create_image_id
 from services.limiter import limiter
 
 logger = logging.getLogger(__name__)
@@ -43,8 +44,8 @@ MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024  # 5 MB
 
 
 class ImageUploadResponse(BaseModel):
-    url: str
-    """Base-64 data URL (data:<mime>;base64,...) ready for use in img src or DB storage."""
+    image_id: str
+    """Normalized image row ID for /api/images/{image_id} retrieval."""
 
 
 # ---------------------------------------------------------------------------
@@ -154,14 +155,14 @@ async def upload_image(
     crop_width: Annotated[int | None, Form(description="Width of crop region in pixels")] = None,
     crop_height: Annotated[int | None, Form(description="Height of crop region in pixels")] = None,
     current_user: dict = Depends(get_current_user),
+    db=Depends(get_db),
 ) -> ImageUploadResponse:
-    """Upload an image and receive a base-64 data URL.
+    """Upload an image and receive a normalized image ID.
 
     **Permissions:** Moderator or Admin only.
 
-    The returned ``url`` value is a ``data:<mime>;base64,...`` string that can
-    be stored directly in the database ``image`` column of a product or used as
-    an ``<img src>`` attribute.
+    The returned ``image_id`` can be attached to products/blog posts and later
+    rendered via ``/api/images/{image_id}``.
 
     **Crop parameters** (all four must be supplied together if any are given):
 
@@ -233,9 +234,21 @@ async def upload_image(
             crop_height,  # type: ignore[arg-type]
         )
 
-    # Encode to base64 data URL
+    # Persist uploaded bytes in images table via canonical helper used across product/blog flows.
     b64 = base64.b64encode(image_bytes).decode("ascii")
     data_url = f"data:{mime};base64,{b64}"
+    try:
+        image_id = get_or_create_image_id(
+            db,
+            data_url,
+            created_by=current_user.get("id"),
+        )
+    except Exception as exc:
+        logger.error("Failed to store uploaded image", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to store uploaded image: {exc}") from exc
+
+    if not image_id:
+        raise HTTPException(status_code=500, detail="Failed to store uploaded image.")
 
     logger.info(
         "Image uploaded by user %s: mime=%s size=%d bytes (crop=%s)",
@@ -245,7 +258,7 @@ async def upload_image(
         all(crop_provided),
     )
 
-    return ImageUploadResponse(url=data_url)
+    return ImageUploadResponse(image_id=image_id)
 
 
 @router.get("/{image_id}")
