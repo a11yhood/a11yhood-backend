@@ -26,7 +26,12 @@ def test_image_upload_admin_success(client, test_admin, auth_headers):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["url"].startswith("data:image/png;base64,")
+    assert payload["image_id"]
+
+    image_response = client.get(f"/api/images/{payload['image_id']}")
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"].startswith("image/png")
+    assert image_response.content == _PNG_1PX
 
 
 def test_image_upload_regular_user_forbidden(client, test_user, auth_headers):
