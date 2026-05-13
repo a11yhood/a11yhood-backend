@@ -10,7 +10,7 @@ import logging
 import os
 import uuid
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 from config import load_settings_from_env
 from services.database import get_db, verify_token
@@ -31,9 +31,7 @@ DEV_USER_IDS = {
 VALID_DEV_ROLES = {"admin", "moderator", "manager", "user"}
 
 
-async def parse_dev_token(
-    authorization: str = Header(None), x_dev_role: str = Header(None)
-) -> dict:
+async def parse_dev_token(authorization: str | None, x_dev_role: str | None, db) -> dict:
     """
     Parse dev mode authentication: UUID-based, role-based, or X-Dev-Role header.
 
@@ -63,8 +61,6 @@ async def parse_dev_token(
     settings_fresh = load_settings_from_env()
     if not settings_fresh.TEST_MODE:
         raise HTTPException(status_code=401, detail="Dev tokens only in TEST_MODE")
-
-    db = get_db()
 
     # Mode 1: X-Dev-Role header takes priority for dynamic user creation
     if x_dev_role:
@@ -213,7 +209,11 @@ async def parse_dev_token(
         raise HTTPException(status_code=500, detail=f"Failed to create test user for role {role}")
 
 
-async def get_current_user(authorization: str = Header(None), x_dev_role: str = Header(None)):
+async def get_current_user(
+    authorization: str = Header(None),
+    x_dev_role: str = Header(None),
+    db=Depends(get_db),
+):
     """
     Get current user from Authorization header.
 
@@ -258,7 +258,7 @@ async def get_current_user(authorization: str = Header(None), x_dev_role: str = 
     if (settings_fresh.TEST_MODE or is_test_context) and (
         x_dev_role or is_dev_token
     ):
-        user_dict = await parse_dev_token(authorization, x_dev_role)
+        user_dict = await parse_dev_token(authorization, x_dev_role, db)
         logger.debug(f"Successfully parsed dev token/role: user={user_dict.get('id')}, role={user_dict.get('role')}")
         return user_dict
 
@@ -267,7 +267,7 @@ async def get_current_user(authorization: str = Header(None), x_dev_role: str = 
         raise HTTPException(status_code=401, detail="No authorization header")
 
     token = authorization.replace("Bearer ", "").strip()
-    db_adapter = get_db()
+    db_adapter = db
     user = verify_token(token, db_adapter)
 
     # Normalize user to dict shape expected by routers
@@ -314,7 +314,7 @@ async def get_current_user(authorization: str = Header(None), x_dev_role: str = 
 
 
 async def get_current_user_optional(
-    authorization: str = Header(None), x_dev_role: str = Header(None)
+    authorization: str = Header(None), x_dev_role: str = Header(None), db=Depends(get_db)
 ):
     """
     Variant of get_current_user that returns None when no Authorization header is provided.
@@ -327,7 +327,7 @@ async def get_current_user_optional(
     if not authorization and not x_dev_role:
         return None
     try:
-        return await get_current_user(authorization, x_dev_role)
+        return await get_current_user(authorization, x_dev_role, db)
     except HTTPException as e:
         # In test mode, if dev user doesn't exist yet, return None (allows user creation)
         settings_fresh = load_settings_from_env()

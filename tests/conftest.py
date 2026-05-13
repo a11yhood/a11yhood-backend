@@ -283,7 +283,9 @@ def _table_row_count(db, table_name: str) -> int:
             )
             time.sleep(0.25 * attempt)
 
-    raise last_exc
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Test DB reset failed without a captured exception")
 
 
 def _reset_and_assert_clean(db):
@@ -465,19 +467,43 @@ def _seed_test_data(db):
 @pytest.fixture
 def test_user(clean_database):
     """Return the seeded regular test user."""
-    result = clean_database.table("users").select("*").eq("username", "regular_user").execute()
-    if not result.data:
-        raise ValueError("Test user not found - _seed_test_data may have failed")
-    return result.data[0]
+    last_data = None
+    for attempt in range(1, 4):
+        result = clean_database.table("users").select("*").eq("username", "regular_user").execute()
+        if result.data:
+            return result.data[0]
+        last_data = result.data
+        if attempt < 3:
+            logger.warning(
+                "Seeded regular_user not visible yet (attempt %d/3); retrying",
+                attempt,
+            )
+            time.sleep(0.25 * attempt)
+
+    raise ValueError(
+        f"Test user not found after retries - _seed_test_data may have failed (last_data={last_data})"
+    )
 
 
 @pytest.fixture
 def test_admin(clean_database):
     """Return the seeded admin test user."""
-    result = clean_database.table("users").select("*").eq("username", "admin_user").execute()
-    if not result.data:
-        raise ValueError("Test admin not found - _seed_test_data may have failed")
-    return result.data[0]
+    last_data = None
+    for attempt in range(1, 4):
+        result = clean_database.table("users").select("*").eq("username", "admin_user").execute()
+        if result.data:
+            return result.data[0]
+        last_data = result.data
+        if attempt < 3:
+            logger.warning(
+                "Seeded admin_user not visible yet (attempt %d/3); retrying",
+                attempt,
+            )
+            time.sleep(0.25 * attempt)
+
+    raise ValueError(
+        f"Test admin not found after retries - _seed_test_data may have failed (last_data={last_data})"
+    )
 
 
 @pytest.fixture
