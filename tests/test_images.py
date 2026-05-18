@@ -4,9 +4,8 @@ These tests override the ``get_current_user`` and ``get_db`` FastAPI dependencie
 directly so that no real database calls or Supabase credentials are needed.
 """
 
-import base64
 import io
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -100,27 +99,39 @@ _REGULAR_USER = {"id": "user-id", "role": "user", "username": "reg_user"}
 @pytest.fixture
 def upload_client(unit_client):
     """unit_client with get_current_user overridden to a moderator."""
+    db_mock = MagicMock()
     app.dependency_overrides[get_current_user] = lambda: _MODERATOR_USER
-    yield unit_client
+    app.dependency_overrides[get_db] = lambda: db_mock
+    with patch("routers.images.get_or_create_image_id", return_value="img-upload-1"):
+        yield unit_client
     # Restore – unit_client's own teardown will call app.dependency_overrides.clear(),
     # but we reset the specific override here so other tests aren't affected.
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture
 def admin_upload_client(unit_client):
     """unit_client with get_current_user overridden to an admin."""
+    db_mock = MagicMock()
     app.dependency_overrides[get_current_user] = lambda: _ADMIN_USER
-    yield unit_client
+    app.dependency_overrides[get_db] = lambda: db_mock
+    with patch("routers.images.get_or_create_image_id", return_value="img-upload-2"):
+        yield unit_client
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture
 def user_upload_client(unit_client):
     """unit_client with get_current_user overridden to a regular (non-mod) user."""
+    db_mock = MagicMock()
     app.dependency_overrides[get_current_user] = lambda: _REGULAR_USER
-    yield unit_client
+    app.dependency_overrides[get_db] = lambda: db_mock
+    with patch("routers.images.get_or_create_image_id", return_value="img-upload-3"):
+        yield unit_client
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_db, None)
 
 
 # ---------------------------------------------------------------------------
@@ -157,8 +168,9 @@ def test_moderator_can_upload(upload_client):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert "url" in data
-    assert data["url"].startswith("data:image/png;base64,")
+    assert "image_id" in data
+    assert isinstance(data["image_id"], str)
+    assert data["image_id"]
 
 
 def test_admin_can_upload(admin_upload_client):
@@ -181,7 +193,7 @@ def test_jpeg_accepted(upload_client):
         files={"file": ("photo.jpg", io.BytesIO(_JPEG_1PX), "image/jpeg")},
     )
     assert resp.status_code == 200
-    assert resp.json()["url"].startswith("data:image/jpeg;base64,")
+    assert resp.json()["image_id"]
 
 
 def test_png_accepted(upload_client):
@@ -190,7 +202,7 @@ def test_png_accepted(upload_client):
         files={"file": ("img.png", io.BytesIO(_PNG_2PX), "image/png")},
     )
     assert resp.status_code == 200
-    assert resp.json()["url"].startswith("data:image/png;base64,")
+    assert resp.json()["image_id"]
 
 
 def test_gif_rejected_with_415(upload_client):
@@ -250,18 +262,16 @@ def test_empty_file_rejected_with_400(upload_client):
 # ---------------------------------------------------------------------------
 
 
-def test_response_url_is_valid_base64(upload_client):
-    """Returned data URL must decode to the original file bytes."""
+def test_response_contains_image_id(upload_client):
+    """Upload response returns normalized image_id."""
     resp = upload_client.post(
         "/api/images/upload",
         files={"file": ("img.png", io.BytesIO(_PNG_2PX), "image/png")},
     )
     assert resp.status_code == 200
-    data_url = resp.json()["url"]
-    # Strip "data:image/png;base64," prefix
-    _, b64_part = data_url.split(",", 1)
-    decoded = base64.b64decode(b64_part)
-    assert decoded == _PNG_2PX
+    image_id = resp.json()["image_id"]
+    assert isinstance(image_id, str)
+    assert image_id
 
 
 # ---------------------------------------------------------------------------
@@ -270,14 +280,14 @@ def test_response_url_is_valid_base64(upload_client):
 
 
 def test_valid_crop_applied(upload_client):
-    """Providing all four crop params should succeed and return a data URL."""
+    """Providing all four crop params should succeed and return image_id."""
     resp = upload_client.post(
         "/api/images/upload",
         files={"file": ("big.png", io.BytesIO(_PNG_10PX), "image/png")},
         data={"crop_x": "0", "crop_y": "0", "crop_width": "5", "crop_height": "5"},
     )
     assert resp.status_code == 200
-    assert resp.json()["url"].startswith("data:image/png;base64,")
+    assert resp.json()["image_id"]
 
 
 def test_partial_crop_params_rejected(upload_client):

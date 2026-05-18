@@ -313,7 +313,7 @@ GET /api/products
     "source": "Thingiverse",
     "sourceUrl": "https://...",
     "description": "...",
-    "imageUrl": "data:image/png;base64,...",
+    "imageId": "8be8bb31-8f3d-4f53-8bd1-c167a0c5f184",
     "imageAlt": "Keyboard with large keys",
     "tags": ["keyboard", "typing", "accessibility"],
     "createdAt": 1704067200000,
@@ -326,6 +326,9 @@ GET /api/products
   }
 ]
 ```
+
+Use `GET /api/images/{imageId}` to render image bytes for uploaded images or follow
+redirects for external image sources.
 
 ### Get Single Product
 
@@ -875,7 +878,7 @@ GET /api/blog-posts?includeUnpublished=true
     "slug": "welcome-to-a11yhood",
     "content": "# Welcome\n\nContent in markdown...",
     "excerpt": "Short preview text",
-    "headerImage": "data:image/png;base64,...",
+    "headerImageId": "5e130167-b63e-4b4a-a758-5fce1f6c1804",
     "headerImageAlt": "Blog header",
     "authorId": "12345",
     "authorName": "John Doe",

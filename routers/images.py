@@ -1,8 +1,8 @@
 """Image upload and delete endpoints.
 
-Moderator/admin-only image management that converts files to base64 data URLs for
-storage in the database as text strings. This avoids the need for a separate
-object-storage backend while still supporting rich product images.
+Moderator/admin-only image management for normalized image references.
+Uploads are stored in the shared ``images`` table and return an ``image_id``
+that can be used anywhere an image reference is needed.
 
 Supported formats: image/jpeg, image/png, image/webp
 Max size: 5 MB
@@ -23,6 +23,7 @@ from starlette.responses import RedirectResponse
 
 from services.auth import ensure_moderator_or_admin, get_current_user
 from services.database import get_db
+from services.image_references import get_or_create_image_id
 from services.limiter import limiter
 
 logger = logging.getLogger(__name__)
@@ -43,8 +44,8 @@ MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024  # 5 MB
 
 
 class ImageUploadResponse(BaseModel):
-    url: str
-    """Base-64 data URL (data:<mime>;base64,...) ready for use in img src or DB storage."""
+    image_id: str
+    """Normalized image row ID for /api/images/{image_id} retrieval."""
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +65,54 @@ def _validate_mime_type(content_type: str | None) -> str:
             ),
         )
     return mime
+
+
+def _validate_image_decoding(image_bytes: bytes, declared_mime: str) -> tuple[int, int, str]:
+    """Validate image bytes can be decoded and match the declared MIME type."""
+    try:
+        from PIL import Image, UnidentifiedImageError
+    except ImportError as exc:  # pragma: no cover
+        raise HTTPException(
+            status_code=500,
+            detail="Server-side image processing is unavailable (Pillow not installed).",
+        ) from exc
+
+    format_to_mime = {
+        "JPEG": "image/jpeg",
+        "PNG": "image/png",
+        "WEBP": "image/webp",
+    }
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            width, height = img.size
+            detected_format = (img.format or "").upper()
+            img.verify()
+    except UnidentifiedImageError as exc:
+        raise HTTPException(status_code=422, detail=f"Image decode failed: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Image validation failed: {exc}") from exc
+
+    detected_mime = format_to_mime.get(detected_format)
+    if not detected_mime:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unsupported decoded image format '{detected_format}'. "
+                "Allowed formats are JPEG, PNG, and WEBP."
+            ),
+        )
+
+    if detected_mime != declared_mime:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Declared content type '{declared_mime}' does not match decoded image type "
+                f"'{detected_mime}'."
+            ),
+        )
+
+    return width, height, detected_mime
 
 
 def _apply_crop(
@@ -154,14 +203,14 @@ async def upload_image(
     crop_width: Annotated[int | None, Form(description="Width of crop region in pixels")] = None,
     crop_height: Annotated[int | None, Form(description="Height of crop region in pixels")] = None,
     current_user: dict = Depends(get_current_user),
+    db=Depends(get_db),
 ) -> ImageUploadResponse:
-    """Upload an image and receive a base-64 data URL.
+    """Upload an image and receive a normalized image ID.
 
     **Permissions:** Moderator or Admin only.
 
-    The returned ``url`` value is a ``data:<mime>;base64,...`` string that can
-    be stored directly in the database ``image`` column of a product or used as
-    an ``<img src>`` attribute.
+    The returned ``image_id`` can be attached to products/blog posts and later
+    rendered via ``/api/images/{image_id}``.
 
     **Crop parameters** (all four must be supplied together if any are given):
 
@@ -183,20 +232,62 @@ async def upload_image(
     | 415    | Unsupported image type |
     | 429    | Rate limit exceeded (20 uploads/minute) |
     """
-    ensure_moderator_or_admin(current_user)
+    request_id = getattr(request.state, "request_id", "unknown")
+    user_id = current_user.get("id") if current_user else None
+    user_role = current_user.get("role") if current_user else None
+
+    logger.info(
+        "Image upload request received: request_id=%s user_id=%s role=%s path=%s",
+        request_id,
+        user_id,
+        user_role,
+        request.url.path,
+    )
+
+    try:
+        ensure_moderator_or_admin(current_user)
+    except HTTPException as exc:
+        logger.warning(
+            "Image upload authorization rejected: request_id=%s user_id=%s role=%s status=%s reason=%s",
+            request_id,
+            user_id,
+            user_role,
+            exc.status_code,
+            exc.detail,
+        )
+        raise
 
     # Validate MIME type from the declared content type
+    logger.info(
+        "Image upload multipart parsed: request_id=%s filename=%s declared_content_type=%s",
+        request_id,
+        file.filename,
+        file.content_type,
+    )
+
     mime = _validate_mime_type(file.content_type)
 
     # Read file bytes
     try:
         image_bytes = await file.read()
     except Exception as exc:
-        logger.error("Failed to read uploaded file: %s", exc)
+        logger.error(
+            "Failed to read uploaded file: request_id=%s filename=%s error=%s",
+            request_id,
+            file.filename,
+            exc,
+        )
         raise HTTPException(status_code=400, detail="Failed to read uploaded file.") from exc
 
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    logger.info(
+        "Image upload bytes read: request_id=%s filename=%s byte_length=%d",
+        request_id,
+        file.filename,
+        len(image_bytes),
+    )
 
     # Enforce size limit (413)
     if len(image_bytes) > MAX_UPLOAD_BYTES:
@@ -204,6 +295,27 @@ async def upload_image(
             status_code=413,
             detail=f"File size {len(image_bytes):,} bytes exceeds the 5 MB limit.",
         )
+
+    try:
+        image_width, image_height, detected_mime = _validate_image_decoding(image_bytes, mime)
+    except HTTPException as exc:
+        logger.warning(
+            "Image upload decode/validation failed: request_id=%s filename=%s declared_mime=%s status=%s reason=%s",
+            request_id,
+            file.filename,
+            mime,
+            exc.status_code,
+            exc.detail,
+        )
+        raise
+
+    logger.info(
+        "Image decode validated: request_id=%s detected_mime=%s width=%d height=%d",
+        request_id,
+        detected_mime,
+        image_width,
+        image_height,
+    )
 
     # Validate crop parameters — all four must be present if any are given
     crop_params = (crop_x, crop_y, crop_width, crop_height)
@@ -233,19 +345,32 @@ async def upload_image(
             crop_height,  # type: ignore[arg-type]
         )
 
-    # Encode to base64 data URL
+    # Persist uploaded bytes in images table via canonical helper used across product/blog flows.
     b64 = base64.b64encode(image_bytes).decode("ascii")
     data_url = f"data:{mime};base64,{b64}"
+    try:
+        image_id = get_or_create_image_id(
+            db,
+            data_url,
+            created_by=current_user.get("id"),
+        )
+    except Exception as exc:
+        logger.error("Failed to store uploaded image", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to store uploaded image: {exc}") from exc
+
+    if not image_id:
+        raise HTTPException(status_code=500, detail="Failed to store uploaded image.")
 
     logger.info(
-        "Image uploaded by user %s: mime=%s size=%d bytes (crop=%s)",
+        "Image uploaded by user %s: request_id=%s mime=%s size=%d bytes (crop=%s)",
         current_user.get("id"),
+        request_id,
         mime,
         len(image_bytes),
         all(crop_provided),
     )
 
-    return ImageUploadResponse(url=data_url)
+    return ImageUploadResponse(image_id=image_id)
 
 
 @router.get("/{image_id}")

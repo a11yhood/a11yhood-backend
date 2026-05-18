@@ -2,6 +2,7 @@
 User activity tracking routes.
 """
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -15,27 +16,66 @@ from services.timestamps import normalize_timestamp_fields
 router = APIRouter(prefix="/api/activities", tags=["activities"])
 
 
+def _looks_like_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(str(value))
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_product_id(db, product_identifier: str | None) -> str | None:
+    """Resolve a product UUID or slug to canonical products.id for FK-safe inserts."""
+    if not product_identifier:
+        return None
+
+    identifier = str(product_identifier).strip()
+    if not identifier:
+        return None
+
+    if _looks_like_uuid(identifier):
+        by_id = db.table("products").select("id").eq("id", identifier).limit(1).execute()
+        if by_id.data:
+            return by_id.data[0]["id"]
+
+    by_slug = db.table("products").select("id").eq("slug", identifier).limit(1).execute()
+    if by_slug.data:
+        return by_slug.data[0]["id"]
+
+    raise HTTPException(status_code=400, detail="Invalid product_id: product not found")
+
+
 @router.post("", response_model=UserActivityResponse, status_code=201)
 async def log_user_activity(
     activity: UserActivityCreate,
     db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """Log a user activity event"""
     activity_id = str(uuid.uuid4())
     now = datetime.now(UTC)
     timestamp_iso = activity.timestamp.astimezone(UTC).isoformat()
 
+    resolved_product_id = _resolve_product_id(db, activity.product_id)
+
     activity_data = {
         "id": activity_id,
-        "user_id": activity.user_id,
+        "user_id": current_user["id"],
         "type": activity.type,
-        "product_id": activity.product_id,
+        "product_id": resolved_product_id,
         "timestamp": timestamp_iso,
         "activity_metadata": activity.metadata,  # Use activity_metadata column name
         "created_at": now.isoformat(),
     }
 
-    response = db.table("user_activities").insert(activity_data).execute()
+    try:
+        response = db.table("user_activities").insert(activity_data).execute()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger = logging.getLogger(__name__)
+        logger.error("Failed to log activity", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Failed to log activity: {exc}")
 
     if not response.data:
         raise HTTPException(status_code=400, detail="Failed to log activity")
