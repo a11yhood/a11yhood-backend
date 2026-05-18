@@ -21,6 +21,14 @@ def test_seed_image_upserts_image_and_links_product(monkeypatch):
 
     images_table = MagicMock()
     products_table = MagicMock()
+    users_table = MagicMock()
+
+    users_table.upsert.return_value.execute.return_value = _response([
+        {"id": seed_test_image.ADMIN_USER_ID}
+    ])
+    users_table.select.return_value.eq.return_value.limit.return_value.execute.return_value = _response([
+        {"id": seed_test_image.ADMIN_USER_ID}
+    ])
 
     # Image upsert returns seeded image id
     images_table.upsert.return_value.execute.return_value = _response(
@@ -38,6 +46,8 @@ def test_seed_image_upserts_image_and_links_product(monkeypatch):
     )
 
     def table_side_effect(name):
+        if name == "users":
+            return users_table
         if name == "images":
             return images_table
         if name == "products":
@@ -52,6 +62,7 @@ def test_seed_image_upserts_image_and_links_product(monkeypatch):
     seed_test_image.seed_image()
 
     images_table.upsert.assert_called_once()
+    users_table.upsert.assert_called_once()
     upsert_args = images_table.upsert.call_args.args[0]
     assert upsert_args["canonical_key"] == seed_test_image.TEST_IMAGE_KEY
     assert upsert_args["canonical_url"] == seed_test_image.TEST_IMAGE_URL
@@ -70,6 +81,14 @@ def test_seed_image_handles_missing_product(monkeypatch):
 
     images_table = MagicMock()
     products_table = MagicMock()
+    users_table = MagicMock()
+
+    users_table.upsert.return_value.execute.return_value = _response([
+        {"id": seed_test_image.ADMIN_USER_ID}
+    ])
+    users_table.select.return_value.eq.return_value.limit.return_value.execute.return_value = _response([
+        {"id": seed_test_image.ADMIN_USER_ID}
+    ])
 
     images_table.upsert.return_value.execute.return_value = _response(
         [{"id": seed_test_image.TEST_IMAGE_ID}]
@@ -77,6 +96,8 @@ def test_seed_image_handles_missing_product(monkeypatch):
     products_table.select.return_value.eq.return_value.limit.return_value.execute.return_value = _response([])
 
     def table_side_effect(name):
+        if name == "users":
+            return users_table
         if name == "images":
             return images_table
         if name == "products":
