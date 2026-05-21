@@ -359,14 +359,30 @@ async def handle_request_validation_error(request: Request, exc: RequestValidati
 allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0", "testserver"]
 # Keep TestClient stable even when shell env vars temporarily override TEST_MODE.
 
+
+def _extract_host(raw_value: str) -> str:
+    """Normalize configured host values for TrustedHostMiddleware."""
+    value = raw_value.strip()
+    if not value:
+        return ""
+    return value.replace("https://", "").replace("http://", "").split("/")[0]
+
 if settings.PRODUCTION_URL:
-    host = settings.PRODUCTION_URL.replace("https://", "").replace("http://", "").split("/")[0]
+    host = _extract_host(settings.PRODUCTION_URL)
     if host:
         allowed_hosts.append(host)
 if settings.FRONTEND_URL:
-    host = settings.FRONTEND_URL.replace("https://", "").replace("http://", "").split("/")[0]
+    host = _extract_host(settings.FRONTEND_URL)
     if host and host not in allowed_hosts:
         allowed_hosts.append(host)
+
+# Optional explicit allowlist from environment/config.
+# Example: ALLOWED_HOSTS=api.example.com,staging.example.com,*.vercel.app
+if settings.ALLOWED_HOSTS:
+    for raw_host in settings.ALLOWED_HOSTS.split(","):
+        host = _extract_host(raw_host)
+        if host and host not in allowed_hosts:
+            allowed_hosts.append(host)
 
 app.add_middleware(
     TrustedHostMiddleware,
