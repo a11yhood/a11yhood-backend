@@ -1,7 +1,7 @@
 """Blog post management endpoints.
 
 Admin-only blog posts with markdown content, header images, and multi-author support.
-Security: All mutations require admin role; image uploads size-limited to ~5MB.
+Security: All mutations require admin role; image uploads size-limited to ~2MB.
 Markdown content should be sanitized before rendering to prevent XSS.
 """
 
@@ -21,6 +21,8 @@ from services.sanitizer import sanitize_html
 from services.timestamps import normalize_timestamp_value
 
 router = APIRouter(prefix="/api/blog-posts", tags=["blog"])
+
+MAX_IMAGE_DATA_URL_BYTES: int = 2 * 1024 * 1024
 
 
 def _to_iso_utc(value: object | None) -> str | None:
@@ -70,6 +72,8 @@ def _normalize_image_string(value: str | None) -> str | None:
         return None
     if src.lower().startswith("http://") or src.lower().startswith("https://"):
         return src
+    if src.startswith("/api/images/"):
+        return src
     if src.lower().startswith("data:"):
         return src
     head = src[:10]
@@ -86,23 +90,46 @@ def _normalize_image_string(value: str | None) -> str | None:
 
 
 def _validate_image_size(data_url: str | None, field_name: str = "header_image"):
-    """Enforce a ~5MB maximum payload for images.
+    """Enforce a hard 2MB maximum payload for data-URL images.
 
     We estimate byte size from the base64 payload length: bytes ~= len * 3 / 4.
     """
     if not data_url or not data_url.startswith("data:"):
         return
-    try:
-        comma = data_url.find(",")
-        if comma == -1:
-            return
-        b64 = data_url[comma + 1 :]
-        approx_bytes = int(len(b64) * 3 / 4)
-        if approx_bytes > 5 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail=f"{field_name} exceeds 5MB limit")
-    except Exception:
-        # On parsing errors, do not block; validation is best-effort
-        return
+    comma = data_url.find(",")
+    if comma == -1:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_data_url",
+                "field": field_name,
+                "message": f"{field_name} must include a comma separating metadata and base64 payload.",
+            },
+        )
+
+    b64 = data_url[comma + 1 :].strip()
+    if not b64:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "empty_image_payload",
+                "field": field_name,
+                "message": f"{field_name} contains an empty base64 payload.",
+            },
+        )
+
+    approx_bytes = int(len(b64) * 3 / 4)
+    if approx_bytes > MAX_IMAGE_DATA_URL_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "image_too_large",
+                "field": field_name,
+                "message": f"{field_name} exceeds the 2MB limit.",
+                "max_bytes": MAX_IMAGE_DATA_URL_BYTES,
+                "actual_bytes": approx_bytes,
+            },
+        )
 
 
 _MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
@@ -113,7 +140,7 @@ def _normalize_content_images(content: str | None) -> str | None:
     """Normalize and validate inline images embedded in markdown/HTML content.
 
     - Converts raw base64 URLs to data URLs with a mime prefix
-    - Validates each data URL is <= 5MB
+    - Validates each data URL is <= 2MB
     - Leaves http(s) and already-normalized data URLs untouched
     """
     if not content:

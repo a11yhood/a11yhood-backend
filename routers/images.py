@@ -5,7 +5,7 @@ Uploads are stored in the shared ``images`` table and return an ``image_id``
 that can be used anywhere an image reference is needed.
 
 Supported formats: image/jpeg, image/png, image/webp
-Max size: 5 MB
+Max size: 2 MB
 
 An optional crop region (x, y, width, height in pixels) may be provided to
 trim the image before encoding. If no crop is specified the image is stored as
@@ -35,7 +35,7 @@ router = APIRouter(prefix="/api/images", tags=["images"])
 # ---------------------------------------------------------------------------
 
 ALLOWED_MIME_TYPES: set[str] = {"image/jpeg", "image/png", "image/webp"}
-MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024  # 5 MB
+MAX_UPLOAD_BYTES: int = 2 * 1024 * 1024  # 2 MB
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ async def upload_image(
     | 400    | Malformed request or crop region invalid |
     | 401    | Not authenticated |
     | 403    | Authenticated but not moderator/admin |
-    | 413    | File exceeds 5 MB limit |
+    | 413    | File exceeds 2 MB limit |
     | 415    | Unsupported image type |
     | 429    | Rate limit exceeded (20 uploads/minute) |
     """
@@ -293,7 +293,13 @@ async def upload_image(
     if len(image_bytes) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"File size {len(image_bytes):,} bytes exceeds the 5 MB limit.",
+            detail={
+                "code": "image_too_large",
+                "field": "file",
+                "message": "Uploaded image exceeds the 2MB limit.",
+                "max_bytes": MAX_UPLOAD_BYTES,
+                "actual_bytes": len(image_bytes),
+            },
         )
 
     try:
@@ -344,6 +350,19 @@ async def upload_image(
             crop_width,  # type: ignore[arg-type]
             crop_height,  # type: ignore[arg-type]
         )
+
+        # Enforce size limit again after processing to hard-stop oversized output.
+        if len(image_bytes) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "code": "processed_image_too_large",
+                    "field": "file",
+                    "message": "Processed image exceeds the 2MB limit.",
+                    "max_bytes": MAX_UPLOAD_BYTES,
+                    "actual_bytes": len(image_bytes),
+                },
+            )
 
     # Persist uploaded bytes in images table via canonical helper used across product/blog flows.
     b64 = base64.b64encode(image_bytes).decode("ascii")
