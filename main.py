@@ -197,7 +197,7 @@ def get_cors_origins():
 
     Security: Never use wildcard origins with credentials.
     Dev uses Vite proxy, so only HTTPS localhost needs direct CORS access.
-    Production must explicitly set FRONTEND_URL and PRODUCTION_URL.
+    Production must explicitly set CORS_ORIGINS.
     """
     # Use only CORS_ORIGINS (comma-separated)
     origins = set()
@@ -395,10 +395,6 @@ async def health_check():
         current_settings.SUPABASE_URL and
         "supabase.co" in current_settings.SUPABASE_URL and
         "dummy" not in current_settings.SUPABASE_URL,
-
-        current_settings.PRODUCTION_URL and
-        "localhost" not in current_settings.PRODUCTION_URL and
-        current_settings.PRODUCTION_URL.strip(),
 
         os.getenv("ENVIRONMENT") == "production",
         os.getenv("ENV") == "production",
