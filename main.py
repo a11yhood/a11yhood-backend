@@ -90,12 +90,10 @@ async def validate_security_configuration():
     logger.info(f"CORS origins configured: {cors_origins}")
 
 
-    # Detect production environment by checking ENVIRONMENT or CORS_ORIGINS for non-localhost
-    cors_origins = get_cors_origins()
+    # Detect production environment from explicit environment flags.
     is_production = (
-        os.getenv("ENVIRONMENT") == "production"
-        or os.getenv("ENV") == "production"
-        or any(origin for origin in cors_origins if "localhost" not in origin and "127.0.0.1" not in origin)
+        os.getenv("ENVIRONMENT", "").strip().lower() == "production"
+        or os.getenv("ENV", "").strip().lower() == "production"
     )
 
     # CRITICAL: Prevent TEST_MODE in production
