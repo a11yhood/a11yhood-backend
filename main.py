@@ -89,18 +89,14 @@ async def validate_security_configuration():
     cors_origins = get_cors_origins()
     logger.info(f"CORS origins configured: {cors_origins}")
 
-    # Detect production environment by checking for production indicators
-    # We only consider it "production" if PRODUCTION_URL is configured.
-    is_production = any([
-        # Production domain in CORS
-        local_settings.PRODUCTION_URL and
-        "localhost" not in local_settings.PRODUCTION_URL and
-        local_settings.PRODUCTION_URL.strip(),
 
-        # Explicit production environment variable
-        os.getenv("ENVIRONMENT") == "production",
-        os.getenv("ENV") == "production",
-    ])
+    # Detect production environment by checking ENVIRONMENT or CORS_ORIGINS for non-localhost
+    cors_origins = get_cors_origins()
+    is_production = (
+        os.getenv("ENVIRONMENT") == "production"
+        or os.getenv("ENV") == "production"
+        or any(origin for origin in cors_origins if "localhost" not in origin and "127.0.0.1" not in origin)
+    )
 
     # CRITICAL: Prevent TEST_MODE in production
     if local_settings.TEST_MODE and is_production:
@@ -115,7 +111,7 @@ async def validate_security_configuration():
             "\n"
             "Production detected due to:\n"
             f"  - SUPABASE_URL: {local_settings.SUPABASE_URL}\n"
-            f"  - PRODUCTION_URL: {local_settings.PRODUCTION_URL}\n"
+            f"  - CORS_ORIGINS: {cors_origins}\n"
         )
 
     # CRITICAL: Validate SECRET_KEY in production
