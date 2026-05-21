@@ -132,7 +132,7 @@ When adding new features, ensure:
 ## Known Security Measures
 
 ✅ **Implemented**
-- Role-based dev tokens (dev-token-admin, dev-token-moderator, dev-token-user) in test mode
+- Dev auth hardening: role-based shortcuts are local-only, and non-local dev auth requires `DEV_TEST_AUTH_SECRET` with HMAC-signed UUID tokens
 - Role-based access control (admin, moderator, user)
 - Ownership validation on mutations
 - Pydantic input validation with strict types

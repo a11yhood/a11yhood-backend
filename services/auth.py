@@ -9,6 +9,8 @@ Security: All authorization checks enforce server-side validation; never trust c
 import logging
 import os
 import uuid
+import hmac
+import hashlib
 
 from fastapi import Depends, Header, HTTPException
 
@@ -57,18 +59,46 @@ DEV_USER_SEEDS = {
 VALID_DEV_ROLES = {"admin", "moderator", "manager", "user"}
 
 
+def _is_local_test_context(settings) -> bool:
+    """Return True when running local/pytest test flows."""
+    env_file = os.getenv("ENV_FILE", "")
+    return bool(
+        settings.ENVIRONMENT == "development"
+        or env_file.endswith(".env.test")
+        or os.getenv("PYTEST_CURRENT_TEST")
+    )
+
+
+def _dev_token_signature(user_id: str, secret: str) -> str:
+    """Build a deterministic HMAC signature for a UUID-based dev token."""
+    digest = hmac.new(secret.encode("utf-8"), user_id.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest[:32]
+
+
+def build_dev_user_token(user_id: str) -> str:
+    """Build a UUID-based dev token; sign it when DEV_TEST_AUTH_SECRET is configured."""
+    settings = load_settings_from_env()
+    secret = (settings.DEV_TEST_AUTH_SECRET or "").strip()
+    if not secret:
+        return f"dev-token-{user_id}"
+    return f"dev-token-{user_id}.{_dev_token_signature(user_id, secret)}"
+
+
 async def parse_dev_token(authorization: str | None, x_dev_role: str | None, db) -> dict:
     """
     Parse dev mode authentication: UUID-based, role-based, or X-Dev-Role header.
 
     Supports three modes (evaluated in this order):
-    1. X-Dev-Role: <role>  - Create/fetch test user with given role (frontend/manual dev use).
-    2. Bearer dev-token-<uuid>  - Resolve exact user by UUID (deterministic test identity).
-    3. Bearer dev-token-<role>  - Create/fetch test user with given role (role-behaviour tests).
+    1. X-Dev-Role: <role>  - Create/fetch test user with given role (local-only).
+    2. Bearer dev-token-<uuid>[.<sig>]  - Resolve exact user by UUID.
+    3. Bearer dev-token-<role>  - Create/fetch test user with given role (local-only).
 
     UUID tokens are preferred for identity-sensitive tests because they map 1:1 to a seeded
-    user row.  Role tokens are preferred for role-behaviour tests because they do not depend
-    on a specific pre-seeded ID.
+    user row. Role tokens are restricted to local test contexts to reduce accidental exposure
+    in public preview environments.
+
+    When DEV_TEST_AUTH_SECRET is configured, UUID tokens must include a signature suffix:
+    dev-token-<uuid>.<hmac>. Unsigned UUID and role tokens are rejected.
 
     Valid roles: admin, moderator, manager, user
 
@@ -88,8 +118,23 @@ async def parse_dev_token(authorization: str | None, x_dev_role: str | None, db)
     if not settings_fresh.TEST_MODE:
         raise HTTPException(status_code=401, detail="Dev tokens only in TEST_MODE")
 
+    local_test_context = _is_local_test_context(settings_fresh)
+    secret = (settings_fresh.DEV_TEST_AUTH_SECRET or "").strip()
+
+    if not local_test_context and not secret:
+        raise HTTPException(
+            status_code=401,
+            detail="DEV_TEST_AUTH_SECRET is required for dev auth outside local test contexts",
+        )
+
     # Mode 1: X-Dev-Role header takes priority for dynamic user creation
     if x_dev_role:
+        if not local_test_context:
+            raise HTTPException(
+                status_code=401,
+                detail="X-Dev-Role is only allowed in local test contexts",
+            )
+
         role = x_dev_role.strip().lower()
         if role not in VALID_DEV_ROLES:
             raise HTTPException(
@@ -158,27 +203,43 @@ async def parse_dev_token(authorization: str | None, x_dev_role: str | None, db)
 
     suffix = token[len("dev-token-") :].strip()
 
+    uuid_candidate, has_signature, signature = suffix, False, ""
+    if "." in suffix:
+        uuid_candidate, signature = suffix.split(".", 1)
+        has_signature = True
+
     # Mode 2a: UUID-based token — resolve exact user by ID (deterministic test identity)
     try:
-        uuid.UUID(suffix)
+        uuid.UUID(uuid_candidate)
+
+        if secret:
+            if not has_signature:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Signed dev token required when DEV_TEST_AUTH_SECRET is configured",
+                )
+            expected_sig = _dev_token_signature(uuid_candidate, secret)
+            if not hmac.compare_digest(signature, expected_sig):
+                raise HTTPException(status_code=401, detail="Invalid signed dev token")
+
         # Suffix is a valid UUID; look up the user by ID.
-        resp = db.table("users").select("*").eq("id", suffix).execute()
+        resp = db.table("users").select("*").eq("id", uuid_candidate).execute()
         if not resp.data:
             # Self-heal known deterministic test identities to reduce suite flakiness
             # when test cleanup temporarily drops seeded users.
-            seed = DEV_USER_SEEDS.get(suffix)
+            seed = DEV_USER_SEEDS.get(uuid_candidate)
             if seed is None:
-                raise HTTPException(status_code=404, detail=f"Dev user not found: {suffix}")
+                raise HTTPException(status_code=404, detail=f"Dev user not found: {uuid_candidate}")
 
             try:
-                db.table("users").upsert({"id": suffix, **seed}, on_conflict="id").execute()
-                resp = db.table("users").select("*").eq("id", suffix).execute()
+                db.table("users").upsert({"id": uuid_candidate, **seed}, on_conflict="id").execute()
+                resp = db.table("users").select("*").eq("id", uuid_candidate).execute()
             except Exception as exc:
-                logger.error("Failed to recreate deterministic dev user %s: %s", suffix, exc)
-                raise HTTPException(status_code=500, detail=f"Failed to recreate dev user: {suffix}")
+                logger.error("Failed to recreate deterministic dev user %s: %s", uuid_candidate, exc)
+                raise HTTPException(status_code=500, detail=f"Failed to recreate dev user: {uuid_candidate}")
 
             if not resp.data:
-                raise HTTPException(status_code=404, detail=f"Dev user not found: {suffix}")
+                raise HTTPException(status_code=404, detail=f"Dev user not found: {uuid_candidate}")
 
         user = resp.data[0]
         logger.debug(f"Resolved dev user by UUID: {user['id']} (role: {user.get('role')})")
@@ -195,6 +256,18 @@ async def parse_dev_token(authorization: str | None, x_dev_role: str | None, db)
         pass  # Not a UUID; fall through to role-based lookup.
 
     # Mode 2b: Role-based dev token (dev-token-admin, dev-token-user, etc.)
+    if secret:
+        raise HTTPException(
+            status_code=401,
+            detail="Role-based dev tokens are disabled when DEV_TEST_AUTH_SECRET is configured",
+        )
+
+    if not local_test_context:
+        raise HTTPException(
+            status_code=401,
+            detail="Role-based dev tokens are only allowed in local test contexts",
+        )
+
     role = suffix.lower()
     if role not in VALID_DEV_ROLES:
         raise HTTPException(

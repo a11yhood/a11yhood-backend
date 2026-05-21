@@ -9,12 +9,13 @@ Provides:
 """
 
 import uuid
+import os
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from config import load_settings_from_env
-from services.auth import VALID_DEV_ROLES, ensure_admin, get_current_user
+from services.auth import VALID_DEV_ROLES, build_dev_user_token, ensure_admin, get_current_user
 from services.database import get_db
 from services.dev_mode import (
     enforce_dev_row_limits,
@@ -56,7 +57,21 @@ def _require_dev_mode():
 
 def _require_dev_test_auth_secret(x_test_auth_secret: str | None):
     """Require optional shared secret when configured for test-auth endpoint."""
-    configured_secret = load_settings_from_env().DEV_TEST_AUTH_SECRET
+    settings = load_settings_from_env()
+    configured_secret = settings.DEV_TEST_AUTH_SECRET
+    env_file = os.getenv("ENV_FILE", "")
+    is_local_test_context = bool(
+        settings.ENVIRONMENT == "development"
+        or env_file.endswith(".env.test")
+        or os.getenv("PYTEST_CURRENT_TEST")
+    )
+
+    if not is_local_test_context and not configured_secret:
+        raise HTTPException(
+            status_code=403,
+            detail="DEV_TEST_AUTH_SECRET must be configured for non-local test auth",
+        )
+
     if configured_secret and x_test_auth_secret != configured_secret:
         raise HTTPException(status_code=403, detail="Invalid test auth secret")
 
@@ -232,7 +247,7 @@ async def test_auth_login(
         user = _create_test_auth_user(db, payload)
         created = True
 
-    token = f"dev-token-{user['id']}"
+    token = build_dev_user_token(user["id"])
     return DevTestAuthLoginResponse(
         access_token=token,
         user={
