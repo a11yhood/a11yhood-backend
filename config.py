@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     SUPABASE_POSTGREST_TIMEOUT: int = 180
 
     # CORS - strict allowlist for security
-    # Set CORS_ORIGINS to a comma-separated list of allowed 
-    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS")
+    # Set CORS_ORIGINS to a comma-separated list of allowed
+    CORS_ORIGINS: str = ""
     ALLOWED_HOSTS: str = ""  # Comma-separated host allowlist for TrustedHostMiddleware
 
     # Environment mode (development, staging, production)
