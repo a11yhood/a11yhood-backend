@@ -83,8 +83,8 @@ _PNG_2PX = _make_png_bytes(2, 2)
 # A larger PNG (10×10 pixels) for crop tests
 _PNG_10PX = _make_png_bytes(10, 10)
 
-# A fake "large" file just over the 5MB limit
-_OVER_LIMIT_BYTES = b"X" * (5 * 1024 * 1024 + 1)
+# A fake "large" file just over the 2MB limit
+_OVER_LIMIT_BYTES = b"X" * (2 * 1024 * 1024 + 1)
 
 
 # ---------------------------------------------------------------------------
@@ -237,8 +237,8 @@ def test_octet_stream_rejected_with_415(upload_client):
 # ---------------------------------------------------------------------------
 
 
-def test_file_over_5mb_rejected_with_413(upload_client):
-    """Files exceeding 5MB must be rejected with 413."""
+def test_file_over_2mb_rejected_with_413(upload_client):
+    """Files exceeding 2MB must be rejected with 413."""
     resp = upload_client.post(
         "/api/images/upload",
         files={"file": ("big.png", io.BytesIO(_OVER_LIMIT_BYTES), "image/png")},
@@ -246,6 +246,10 @@ def test_file_over_5mb_rejected_with_413(upload_client):
     assert resp.status_code == 413
     body = resp.json()
     assert "detail" in body
+    assert body["detail"]["code"] == "image_too_large"
+    assert body["detail"]["field"] == "file"
+    assert body["detail"]["max_bytes"] == 2 * 1024 * 1024
+    assert body["detail"]["actual_bytes"] == len(_OVER_LIMIT_BYTES)
 
 
 def test_empty_file_rejected_with_400(upload_client):
@@ -364,7 +368,8 @@ def test_413_has_detail_field(upload_client):
     assert resp.status_code == 413
     body = resp.json()
     assert "detail" in body
-    assert isinstance(body["detail"], str)
+    assert isinstance(body["detail"], dict)
+    assert body["detail"]["code"] == "image_too_large"
 
 
 # ---------------------------------------------------------------------------
