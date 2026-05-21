@@ -68,6 +68,8 @@ async def handle_exception(request: Request, exc: Exception) -> JSONResponse:
             response.headers["Access-Control-Allow-Methods"] = (
                 "GET, POST, PUT, DELETE, PATCH, OPTIONS"
             )
-            response.headers["Access-Control-Allow-Headers"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = (
+                "authorization, content-type, x-forwarded-authorization"
+            )
 
     return response
