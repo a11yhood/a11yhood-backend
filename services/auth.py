@@ -6,11 +6,11 @@ Also supports X-Dev-Role header for dynamic test user creation (frontend role sw
 Security: All authorization checks enforce server-side validation; never trust client roles.
 """
 
+import hashlib
+import hmac
 import logging
 import os
 import uuid
-import hmac
-import hashlib
 
 from fastapi import Depends, Header, HTTPException
 
@@ -256,12 +256,6 @@ async def parse_dev_token(authorization: str | None, x_dev_role: str | None, db)
         pass  # Not a UUID; fall through to role-based lookup.
 
     # Mode 2b: Role-based dev token (dev-token-admin, dev-token-user, etc.)
-    if secret:
-        raise HTTPException(
-            status_code=401,
-            detail="Role-based dev tokens are disabled when DEV_TEST_AUTH_SECRET is configured",
-        )
-
     if not local_test_context:
         raise HTTPException(
             status_code=401,

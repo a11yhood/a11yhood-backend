@@ -8,8 +8,8 @@ Provides:
 - GET /api/test/seed-manifest - stable seeded IDs for frontend integration tests
 """
 
-import uuid
 import os
+import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel

@@ -71,6 +71,12 @@ def _enable_test_mode(monkeypatch, *, environment: str = "development", dev_test
     )
 
 
+def _force_non_local_context(monkeypatch):
+    """Ensure auth context does not look like local/pytest mode."""
+    monkeypatch.setenv("ENV_FILE", ".env")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+
 def test_rejects_dev_tokens_when_not_in_test_mode(monkeypatch):
     monkeypatch.setattr(auth, "load_settings_from_env", lambda: _FakeSettings(False))
     db = _FakeDB(_FakeUsersTable())
@@ -173,7 +179,12 @@ def test_role_token_creates_dev_user_when_missing(monkeypatch):
 
 
 def test_role_token_rejected_outside_local_context(monkeypatch):
-    _enable_test_mode(monkeypatch, environment="production")
+    _enable_test_mode(
+        monkeypatch,
+        environment="production",
+        dev_test_auth_secret="preview-secret",
+    )
+    _force_non_local_context(monkeypatch)
     db = _FakeDB(_FakeUsersTable())
 
     with pytest.raises(HTTPException, match="Role-based dev tokens are only allowed in local test contexts") as exc:
@@ -220,6 +231,7 @@ def test_uuid_token_rejected_without_secret_outside_local_context(monkeypatch):
         environment="production",
         dev_test_auth_secret=None,
     )
+    _force_non_local_context(monkeypatch)
     seeded_user = {
         "id": user_id,
         "username": "regular_user",
@@ -274,7 +286,12 @@ def test_signed_uuid_token_resolves_when_signature_valid(monkeypatch):
 
 
 def test_x_dev_role_rejected_outside_local_context(monkeypatch):
-    _enable_test_mode(monkeypatch, environment="production")
+    _enable_test_mode(
+        monkeypatch,
+        environment="production",
+        dev_test_auth_secret="preview-secret",
+    )
+    _force_non_local_context(monkeypatch)
     db = _FakeDB(_FakeUsersTable())
 
     with pytest.raises(HTTPException, match="X-Dev-Role is only allowed in local test contexts") as exc:
