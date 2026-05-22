@@ -303,7 +303,7 @@ run_dev_container() {
   local key_file="${7:-}"
 
   local scheme="http"
-  local uvicorn_args="uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+  local uvicorn_args="uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
   local mount_args=()
 
   if [ "$use_https" = "true" ]; then
@@ -360,7 +360,7 @@ run_prod_container() {
   local cert_file="${6:-}"
   local key_file="${7:-}"
   
-  local uvicorn_args="uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4"
+  local uvicorn_args="uv run uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4"
   local mount_args=()
   local scheme="http"
   if [ "$use_https" = "true" ]; then
