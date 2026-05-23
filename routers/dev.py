@@ -2,22 +2,31 @@
 
 Provides:
 - GET /api/dev/stats - Table statistics
-- POST /api/dev/reset - Clear all data
+- POST /api/dev/reset - Clear and reseed test data
 - Health check specific to dev
 - POST /api/dev/test-auth/login - deterministic test auth for exact user identity
+- GET /api/test/seed-manifest - stable seeded IDs for frontend integration tests
 """
 
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
 
 from config import load_settings_from_env
 from services.auth import VALID_DEV_ROLES, ensure_admin, get_current_user
 from services.database import get_db
-from services.dev_mode import enforce_dev_row_limits, get_dev_stats, reset_database, _assert_safe_test_environment, verify_test_token
+from services.dev_mode import (
+    _assert_safe_test_environment,
+    enforce_dev_row_limits,
+    get_dev_stats,
+    get_seed_manifest,
+    reset_and_reseed_database,
+    verify_test_token,
+)
 
 router = APIRouter(prefix="/api/dev", tags=["dev"], dependencies=[Depends(verify_test_token)])
+test_router = APIRouter(prefix="/api/test", tags=["dev"], dependencies=[Depends(verify_test_token)])
 
 
 class DevTestAuthLoginRequest(BaseModel):
@@ -126,11 +135,11 @@ async def get_stats(current_user: dict = Depends(get_current_user)):
 @router.post("/reset")
 async def reset_db(current_user: dict = Depends(get_current_user)):
     """
-    ⚠️ DANGEROUS: Reset database to clean state.
+    ⚠️ DANGEROUS: Reset database and reseed to known test baseline.
 
     - Clears ALL user-created data
+    - Re-seeds deterministic test data before returning
     - Only available in dev mode + admin role
-    - Does NOT reseed (manually run seed script after)
 
     Use cases:
     - Cleanup after messy testing
@@ -143,11 +152,23 @@ async def reset_db(current_user: dict = Depends(get_current_user)):
         - status: "reset"
         - cleared_tables: dict of {table_name: rows_deleted}
         - total_rows_deleted: int
+        - seeded: true
+        - seed_version: str
+        - seed_manifest: stable seeded IDs for frontend tests
     """
     _require_dev_mode()
     ensure_admin(current_user)
 
-    return await reset_database()
+    return await reset_and_reseed_database()
+
+
+@test_router.get("/seed-manifest")
+async def seed_manifest(current_user: dict = Depends(get_current_user)):
+    """Return stable seeded IDs in TEST_MODE for frontend integration tests."""
+    _require_dev_mode()
+    # Any authenticated test user can read this manifest.
+    _ = current_user
+    return get_seed_manifest()
 
 
 @router.get("/check-limits")

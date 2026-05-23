@@ -29,11 +29,9 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = ""  # anon/public key
 
     # CORS - strict allowlist for security
-    # Dev: Uses Vite proxy (https://localhost:5173 -> http://localhost:8000)
-    # Prod: Set to actual frontend domain (e.g., https://a11yhood.com)
-    FRONTEND_URL: str = "https://localhost:4173"
-    PRODUCTION_URL: str = ""
-    CORS_EXTRA_ORIGINS: str = ""  # Comma-separated additional origins
+    # Set CORS_ORIGINS to a comma-separated list of allowed
+    CORS_ORIGINS: str = ""
+    ALLOWED_HOSTS: str = ""  # Comma-separated host allowlist for TrustedHostMiddleware
 
     # Environment mode (development, staging, production)
     ENVIRONMENT: str | None = None  # 'production', 'staging', 'development'
