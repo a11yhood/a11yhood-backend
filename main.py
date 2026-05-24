@@ -206,8 +206,29 @@ def get_cors_origins():
     # Use only CORS_ORIGINS (comma-separated)
     origins = set()
     if settings.CORS_ORIGINS:
-        origins.update(o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip())
+        origins.update(_normalize_origin(o) for o in settings.CORS_ORIGINS.split(",") if o.strip())
     return list(origins)
+
+
+def _normalize_origin(value: str) -> str:
+    """Normalize origin values for reliable matching.
+
+    Example: https://a11yhood.org/ -> https://a11yhood.org
+    """
+    return value.strip().rstrip("/")
+
+
+def _request_origin_if_allowed(request: Request) -> str | None:
+    """Return request Origin when it is explicitly allowlisted."""
+    raw_origin = request.headers.get("origin")
+    if not raw_origin:
+        return None
+
+    normalized_origin = _normalize_origin(raw_origin)
+    allowed_origins = set(get_cors_origins())
+    if normalized_origin in allowed_origins:
+        return normalized_origin
+    return None
 
 # ============================================================================
 # Security Middleware
@@ -228,6 +249,7 @@ if not any(isinstance(m, type) and issubclass(m, type) and
         allow_headers=[
             "authorization",
             "content-type",
+            "x-forwarded-authorization",
             "accept",
             "origin",
             "x-requested-with",
@@ -243,6 +265,26 @@ async def add_security_headers(request: Request, call_next):
     request.state.request_id = request_id
 
     response = await call_next(request)
+
+    # Ensure allowed origins always receive CORS headers, including error responses.
+    # This complements CORSMiddleware and prevents opaque browser failures on 401/403/500.
+    allowed_origin = _request_origin_if_allowed(request)
+    if allowed_origin:
+        response.headers.setdefault("Access-Control-Allow-Origin", allowed_origin)
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+        vary_value = response.headers.get("Vary", "")
+        if "Origin" not in vary_value:
+            response.headers["Vary"] = "Origin" if not vary_value else f"{vary_value}, Origin"
+        if request.method == "OPTIONS":
+            response.headers.setdefault(
+                "Access-Control-Allow-Methods",
+                "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            )
+            response.headers.setdefault(
+                "Access-Control-Allow-Headers",
+                "authorization, content-type, x-forwarded-authorization",
+            )
+            response.headers.setdefault("Access-Control-Max-Age", "86400")
 
     response.headers["X-Request-ID"] = request_id
 

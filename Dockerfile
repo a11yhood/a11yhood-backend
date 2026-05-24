@@ -23,7 +23,7 @@ RUN groupadd -g 1000 appuser \
     && useradd -m -u 1000 -g appuser appuser
 
 # Copy dependency files first for layer caching
-COPY pyproject.toml uv.lock .
+COPY pyproject.toml uv.lock ./
 
 # Install Python dependencies from lockfile
 RUN uv sync --frozen --no-dev
