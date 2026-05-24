@@ -148,7 +148,7 @@ async def validate_security_configuration():
             "   - Mock user accounts will be available\n"
             "   - NEVER enable TEST_MODE in production!\n"
         )
-    
+
     if local_settings.TEST_MODE and local_settings.ALLOW_TEST_DATA_MUTATION:
         from services.dev_mode import assert_test_environment_on_startup
         assert_test_environment_on_startup(local_settings)

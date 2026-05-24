@@ -8,9 +8,10 @@ Handles:
 
 import logging
 
+from fastapi import Header, HTTPException, status
+
 from config import load_settings_from_env
 from services.database import get_db
-from fastapi import Header, HTTPException, status
 
 logger = logging.getLogger(__name__)
 

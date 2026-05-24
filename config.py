@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""  # service_role key for backend
     SUPABASE_ANON_KEY: str = ""  # anon/public key
+    SUPABASE_POSTGREST_TIMEOUT: int = 180
 
     # CORS - strict allowlist for security
     # Set CORS_ORIGINS to a comma-separated list of allowed

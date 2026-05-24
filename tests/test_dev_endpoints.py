@@ -22,13 +22,31 @@ pytestmark = pytest.mark.integration
 # Helpers
 # ---------------------------------------------------------------------------
 
+TEST_RUN_TOKEN = "test-run-token"
+
+
+@pytest.fixture(autouse=True)
+def _set_test_run_token(monkeypatch):
+    """Ensure dev/test router token dependency is configured for integration tests."""
+    monkeypatch.setenv("DEV_TEST_AUTH_SECRET", TEST_RUN_TOKEN)
+
+
+def _test_run_headers() -> dict:
+    return {"X-Test-Run-Token": TEST_RUN_TOKEN}
+
 
 def _admin_headers(test_admin):
-    return {"Authorization": f"Bearer dev-token-{test_admin['id']}"}
+    return {
+        "Authorization": f"Bearer dev-token-{test_admin['id']}",
+        "X-Test-Run-Token": TEST_RUN_TOKEN,
+    }
 
 
 def _user_headers(test_user):
-    return {"Authorization": f"Bearer dev-token-{test_user['id']}"}
+    return {
+        "Authorization": f"Bearer dev-token-{test_user['id']}",
+        "X-Test-Run-Token": TEST_RUN_TOKEN,
+    }
 
 
 class _TestModeOffSettings:
@@ -42,7 +60,7 @@ class _TestModeOffSettings:
 
 def test_health_dev_available_in_test_mode(client):
     """health-dev returns 200 when TEST_MODE is active."""
-    response = client.get("/api/dev/health-dev")
+    response = client.get("/api/dev/health-dev", headers=_test_run_headers())
     assert response.status_code == 200
     data = response.json()
     assert data["mode"] == "dev"
@@ -57,7 +75,7 @@ def test_health_dev_unavailable_outside_test_mode(clean_database, monkeypatch):
     test_client = TestClient(app)
 
     monkeypatch.setenv("TEST_MODE", "false")
-    response = test_client.get("/api/dev/health-dev")
+    response = test_client.get("/api/dev/health-dev", headers=_test_run_headers())
     app.dependency_overrides.clear()
     assert response.status_code == 404
 
@@ -243,7 +261,7 @@ def test_seed_manifest_endpoint_available_in_test_mode(client, test_user):
 def test_test_auth_login_resolves_exact_user_identity(client, test_user):
     """test-auth/login returns a UUID dev token bound to the requested user."""
     payload = {"user_id": test_user["id"]}
-    response = client.post("/api/dev/test-auth/login", json=payload)
+    response = client.post("/api/dev/test-auth/login", json=payload, headers=_test_run_headers())
     assert response.status_code == 200
     data = response.json()
     assert data["access_token"] == f"dev-token-{test_user['id']}"
@@ -267,7 +285,7 @@ def test_test_auth_login_creates_user_when_requested(client):
         "create_if_missing": True,
         "role": "user",
     }
-    response = client.post("/api/dev/test-auth/login", json=payload)
+    response = client.post("/api/dev/test-auth/login", json=payload, headers=_test_run_headers())
     assert response.status_code == 200
     data = response.json()
     assert data["created"] is True
@@ -286,6 +304,6 @@ def test_test_auth_login_creates_user_when_requested(client):
 
 def test_test_auth_login_requires_identifier(client):
     """test-auth/login requires at least one user identifier."""
-    response = client.post("/api/dev/test-auth/login", json={})
+    response = client.post("/api/dev/test-auth/login", json={}, headers=_test_run_headers())
     assert response.status_code == 400
     assert "One of user_id, username, or email is required" in response.json()["detail"]
