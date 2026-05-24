@@ -9,11 +9,13 @@ Covers:
 - /api/dev/check-limits: reports over-limit tables
 """
 
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
+from config import load_settings_from_env
 from routers import dev as dev_router
 from services.auth import build_dev_user_token
 
@@ -30,6 +32,14 @@ TEST_RUN_TOKEN = "test-run-token"
 def _set_test_run_token(monkeypatch):
     """Ensure dev/test router token dependency is configured for integration tests."""
     monkeypatch.setenv("DEV_TEST_AUTH_SECRET", TEST_RUN_TOKEN)
+    monkeypatch.setenv("ALLOW_TEST_DATA_MUTATION", "true")
+
+    settings = load_settings_from_env()
+    project_ref = urlparse(settings.SUPABASE_URL).hostname
+    if project_ref:
+        project_ref = project_ref.split(".")[0]
+    if project_ref:
+        monkeypatch.setenv("ALLOWED_TEST_PROJECT_REFS", project_ref)
 
 
 def _test_run_headers() -> dict:
@@ -270,7 +280,7 @@ def test_test_auth_login_resolves_exact_user_identity(client, test_user):
     response = client.post("/api/dev/test-auth/login", json=payload, headers=_test_run_headers())
     assert response.status_code == 200
     data = response.json()
-    assert data["access_token"] == f"dev-token-{test_user['id']}"
+    assert data["access_token"] == build_dev_user_token(test_user["id"])
     assert data["token_type"] == "Bearer"
     assert data["created"] is False
     assert data["user"]["id"] == test_user["id"]
