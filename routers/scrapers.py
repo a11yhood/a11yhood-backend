@@ -73,6 +73,16 @@ async def _run_scraper_and_log(
                 "duration_seconds": 0,
             }
 
+        logger.info(
+            "Scraper run finished source=%s status=%s harness=%s found=%s added=%s updated=%s",
+            source,
+            result.get("status"),
+            result.get("harness", "unknown"),
+            result.get("products_found", 0),
+            result.get("products_added", 0),
+            result.get("products_updated", 0),
+        )
+
         ScraperUtilities.set_last_scrape_time(database, result["source"], result, user_id=user_id)
 
     except Exception as e:

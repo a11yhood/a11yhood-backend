@@ -147,7 +147,8 @@ class ScheduledScraperService:
                 f"found={result['products_found']}, "
                 f"added={result['products_added']}, "
                 f"updated={result['products_updated']}, "
-                f"duration={result['duration_seconds']:.2f}s"
+                f"duration={result['duration_seconds']:.2f}s, "
+                f"harness={result.get('harness', 'unknown')}"
             )
 
             # Record in scraping logs via ScraperUtilities
