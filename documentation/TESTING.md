@@ -43,8 +43,8 @@ Use only when validating against a running backend or real external services.
 - Must be opt-in (env-gated) and safe to skip by default.
 
 Current examples:
-- `tests/test_scrapers_integration.py`
-- `tests/test_scrapers_live_api.py`
+- `tests/test_integration_scrapers.py`
+- `tests/test_live_api_scrapers.py`
 
 ## Choosing a layer
 
@@ -105,7 +105,7 @@ pixi run pytest -m "not slow"
 Run live scrapers explicitly:
 
 ```bash
-RUN_LIVE_SCRAPERS=1 RUN_AGAINST_SERVER=1 BACKEND_BASE_URL=http://localhost:8000 pixi run pytest tests/test_scrapers_live_api.py -v
+RUN_LIVE_SCRAPERS=1 RUN_AGAINST_SERVER=1 BACKEND_BASE_URL=http://localhost:8000 pixi run pytest tests/test_live_api_scrapers.py -v
 ```
 
 ## Performance note
