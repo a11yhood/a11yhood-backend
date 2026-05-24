@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from routers import dev as dev_router
+from services.auth import build_dev_user_token
 
 pytestmark = pytest.mark.integration
 
@@ -32,20 +33,25 @@ def _set_test_run_token(monkeypatch):
 
 
 def _test_run_headers() -> dict:
-    return {"X-Test-Run-Token": TEST_RUN_TOKEN}
+    return {
+        "X-Test-Run-Token": TEST_RUN_TOKEN,
+        "X-Test-Auth-Secret": TEST_RUN_TOKEN,
+    }
 
 
 def _admin_headers(test_admin):
     return {
-        "Authorization": f"Bearer dev-token-{test_admin['id']}",
+        "Authorization": f"Bearer {build_dev_user_token(test_admin['id'])}",
         "X-Test-Run-Token": TEST_RUN_TOKEN,
+        "X-Test-Auth-Secret": TEST_RUN_TOKEN,
     }
 
 
 def _user_headers(test_user):
     return {
-        "Authorization": f"Bearer dev-token-{test_user['id']}",
+        "Authorization": f"Bearer {build_dev_user_token(test_user['id'])}",
         "X-Test-Run-Token": TEST_RUN_TOKEN,
+        "X-Test-Auth-Secret": TEST_RUN_TOKEN,
     }
 
 
@@ -271,7 +277,10 @@ def test_test_auth_login_resolves_exact_user_identity(client, test_user):
 
     me_resp = client.get(
         "/api/users/me",
-        headers={"Authorization": f"Bearer {data['access_token']}"},
+        headers={
+            "Authorization": f"Bearer {data['access_token']}",
+            "X-Test-Run-Token": TEST_RUN_TOKEN,
+        },
     )
     assert me_resp.status_code == 200
     assert me_resp.json()["id"] == test_user["id"]
@@ -294,7 +303,10 @@ def test_test_auth_login_creates_user_when_requested(client):
 
     me_resp = client.get(
         "/api/users/me",
-        headers={"Authorization": f"Bearer {data['access_token']}"},
+        headers={
+            "Authorization": f"Bearer {data['access_token']}",
+            "X-Test-Run-Token": TEST_RUN_TOKEN,
+        },
     )
     assert me_resp.status_code == 200
     me_data = me_resp.json()
