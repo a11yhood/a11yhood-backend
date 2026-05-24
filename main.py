@@ -21,6 +21,7 @@ from routers import (
     collections,
     dev,
     discussions,
+    images,
     product_urls,
     products,
     ratings,
@@ -510,6 +511,7 @@ app.include_router(scrapers.router)
 app.include_router(requests.router)
 app.include_router(users.router)
 app.include_router(product_urls.router)
+app.include_router(images.router)
 app.include_router(collections.router)
 app.include_router(blog_posts.router)
 app.include_router(sources.router)
