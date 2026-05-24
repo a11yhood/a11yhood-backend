@@ -17,6 +17,7 @@ import time
 import uuid
 
 import pytest
+from postgrest.exceptions import APIError
 
 pytestmark = pytest.mark.integration
 
@@ -35,7 +36,6 @@ def _sample_product_payload():
         "name": "Secure Test Product",
         "description": "Security negative-path test product",
         "source_url": "https://github.com/user/secure-product",
-        "image_url": None,
         "source": "github",
         "type": "Other",
         "tags": [],
@@ -300,7 +300,16 @@ def test_sql_injection_prevention_in_search(client):
     ]
 
     for query in malicious_queries:
-        response = client.get(f"/api/products?search={query}")
+        try:
+            response = client.get(f"/api/products?search={query}")
+        except APIError as exc:
+            # In some CI/network paths, Supabase is protected by Cloudflare and
+            # malicious probe strings are blocked before reaching PostgREST.
+            # That is still a secure outcome for this test.
+            details = str(exc).lower()
+            assert "cloudflare" in details or "blocked" in details or "'code': 403" in details
+            continue
+
         # Should return safe results (no SQL executed)
         assert response.status_code == 200
         # Should return empty or filtered results, not error

@@ -30,6 +30,7 @@ BEGIN
     public.scraping_logs,
     -- Parent tables
     public.tags,
+    public.images,
     public.blog_posts,
     public.collections,
     public.products,

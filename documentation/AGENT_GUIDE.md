@@ -15,12 +15,18 @@ Read this first when operating on the repo. It summarizes conventions, helper ut
 - **Deploy (external server):** Runs the same production settings on the external host; use Supabase service role keys and real OAuth. Do not seed here.
 
 ## Git Workflow
-- **NEVER run `git commit` commands** - the user will handle all commits themselves
+- **NEVER run `git commit` or `git push`, create PRs, or perform history-rewrite git actions** unless the user explicitly asks in that turn
+- Explicit permission required: wait for a direct user instruction like "commit now" or "push now" before running either command
 - You may suggest commit messages or explain what should be committed
 - You may run `git add` to stage files when appropriate
 - You may run `git status` or `git diff` to check changes
 - Focus on making changes and letting the user review and commit them
 - Final fixes merge into the main branch; open PRs targeting main unless told otherwise.
+
+### Pre-commit / Pre-push Safety Checklist (Agent)
+- Before any `git commit`: show staged files and ask for explicit confirmation
+- Before any `git push`: show target remote/branch and ask for explicit confirmation
+- If a commit/push happens accidentally: stop, notify the user immediately, and ask whether they prefer revert commit or reset+force-push
 
 ## Code Commenting Guidelines
 Keep code readable first through clear names and small functions. Use comments to clarify intent or context that code alone cannot convey.
@@ -94,10 +100,19 @@ naive_timestamp = datetime.now(UTC).replace(tzinfo=None)
 - **Fixtures**: use pytest fixtures for test data setup; tests should use the FastAPI TestClient to make API calls (not direct database operations). Fixtures may insert directly into the database for setup, but test assertions should verify API responses.
 - **No direct database operations in tests**: All test operations (create, read, update, delete) should go through the API layer. This ensures tests verify the complete request/response cycle including validation, authorization, and data transformation.
 
+### Adding New Tests (Agent Checklist)
+- Choose the correct layer and marker (`unit` vs `integration`).
+- Prefer existing fixtures from `tests/conftest.py` (`client`, `auth_headers`, `clean_database`, seeded users).
+- Keep identity-sensitive tests deterministic (seeded UUID tokens/users).
+- Run targeted file-level tests first, then broader suites.
+- When behavior/contracts change, update testing/docs references.
+- See [TESTING.md](TESTING.md) and [QUICK_TEST_GUIDE.md](QUICK_TEST_GUIDE.md) for commands and conventions.
+
 
 ## Required Docs to Read
 - [README.md](../README.md) — repo overview and commands.
 - [documentation/README.md](README.md) — documentation index.
+- [TESTING.md](TESTING.md) & [QUICK_TEST_GUIDE.md](QUICK_TEST_GUIDE.md) — test layers, commands, and new-test checklist.
 - [TESTING_STRATEGY.md](TESTING_STRATEGY.md) & [TEST_COVERAGE_MATRIX.md](TEST_COVERAGE_MATRIX.md) — how tests map to features.
 - [USER_STORIES_AND_TESTS.md](USER_STORIES_AND_TESTS.md) — expected outcomes per story; update when features change.
 - [LOCAL_TESTING.md](LOCAL_TESTING.md) & [QUICK_START.md](QUICK_START.md) — environment and startup.

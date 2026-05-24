@@ -26,6 +26,7 @@ class _Settings:
         self.SECRET_KEY = secret_key
         self.TEST_SCRAPER_LIMIT = 20
         self.DEV_MODE_MAX_ROWS_PER_TABLE = 40
+        self.ALLOW_TEST_DATA_MUTATION = False
 
 
 class _NoopScheduler:
@@ -54,7 +55,7 @@ def test_has_production_indicators_true_when_environment_is_production(monkeypat
         asyncio.run(main.validate_security_configuration())
 
 
-def test_has_production_indicators_true_with_non_local_production_url(monkeypatch):
+def test_has_production_indicators_true_when_env_var_is_production(monkeypatch):
     settings = _Settings(
         environment="development",
         production_url="https://a11yhood.org",
@@ -62,6 +63,7 @@ def test_has_production_indicators_true_with_non_local_production_url(monkeypatc
         test_mode=False,
         secret_key="dev-secret-key-change-in-production",
     )
+    monkeypatch.setenv("ENV", "production")
     monkeypatch.setattr(main, "load_settings_from_env", lambda: settings)
     monkeypatch.setattr(main, "get_cors_origins", lambda: ["http://localhost:5173"])
     monkeypatch.setattr(main, "get_scheduled_scraper_service", _NoopScheduler)

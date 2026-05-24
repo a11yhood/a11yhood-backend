@@ -8,6 +8,11 @@ Configure SUPABASE_URL/SUPABASE_KEY in .env (production) or .env.test (test inst
 import logging
 from contextvars import ContextVar
 
+from supabase.lib.client_options import SyncClientOptions
+
+from config import get_settings
+from supabase import create_client
+
 logger = logging.getLogger(__name__)
 
 # Per-request Supabase JWT for RLS-aware queries
@@ -97,6 +102,7 @@ class DatabaseAdapter:
         "scraping_logs",
         # Parent tables
         "tags",
+        "images",
         "blog_posts",
         "collections",
         "products",
@@ -109,13 +115,13 @@ class DatabaseAdapter:
     _TEST_TABLE_FILTERS = {
         # Composite PK; no standalone id column.
         "collection_products": ("collection_id", "00000000-0000-0000-0000-000000000000"),
-        # Normalized search-term rows keep a bigint id in the live schema.
-        "scraper_search_terms": ("id", 0),
+        # Some schemas keep scraper_search_terms without a stable id column.
+        "scraper_search_terms": ("search_term", ""),
+        # supported_sources is keyed by domain in test and production schemas.
+        "supported_sources": ("domain", ""),
     }
 
     def __init__(self, settings=None):
-        from config import get_settings
-
         self.settings = settings or get_settings()
         self._request_auth_token = None
         self.backend = "supabase"  # Always Supabase
@@ -126,11 +132,12 @@ class DatabaseAdapter:
                 "Set it in .env (production) or .env.test (test instance)."
             )
 
-        from supabase import create_client
-
         self.supabase = create_client(
             self.settings.SUPABASE_URL,
             self.settings.SUPABASE_KEY,
+            options=SyncClientOptions(
+                postgrest_client_timeout=self.settings.SUPABASE_POSTGREST_TIMEOUT,
+            ),
         )
 
     def init(self):
@@ -149,14 +156,40 @@ class DatabaseAdapter:
 
         Uses the service-role key, which bypasses RLS.
         """
+        def _get_leftovers() -> dict[str, int]:
+            leftovers: dict[str, int] = {}
+            for table in self._TEST_TABLES_ORDER:
+                try:
+                    resp = self.supabase.table(table).select("*", count="exact").limit(1).execute()
+                    count = resp.count or 0
+                    if count:
+                        leftovers[table] = count
+                except Exception as exc:
+                    logger.warning("Failed to count rows for table '%s' during cleanup: %s", table, exc)
+            return leftovers
+
+        used_rpc = False
         try:
             self.supabase.rpc("truncate_test_tables").execute()
-            return
+            used_rpc = True
         except Exception as exc:
             logger.debug(
                 "truncate_test_tables RPC unavailable, falling back to per-table DELETE: %s",
                 exc,
             )
+
+        leftovers_after_rpc = _get_leftovers()
+        if not leftovers_after_rpc:
+            return
+
+        if used_rpc:
+            detail = ", ".join(f"{name}={count}" for name, count in leftovers_after_rpc.items())
+            logger.warning(
+                "truncate_test_tables RPC completed but left residual rows; "
+                "falling back to per-table DELETE: %s",
+                detail,
+            )
+
         for table in self._TEST_TABLES_ORDER:
             try:
                 column, lower_bound = self._TEST_TABLE_FILTERS.get(
@@ -166,6 +199,11 @@ class DatabaseAdapter:
                 self.supabase.table(table).delete().gte(column, lower_bound).execute()
             except Exception as exc:
                 logger.warning("Failed to cleanup table '%s': %s", table, exc)
+
+        leftovers_after_delete = _get_leftovers()
+        if leftovers_after_delete:
+            detail = ", ".join(f"{name}={count}" for name, count in leftovers_after_delete.items())
+            logger.warning("Cleanup completed with remaining rows: %s", detail)
 
     def table(self, table_name: str):
         """Return the Supabase table query builder for *table_name*.

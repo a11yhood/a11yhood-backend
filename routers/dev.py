@@ -2,22 +2,32 @@
 
 Provides:
 - GET /api/dev/stats - Table statistics
-- POST /api/dev/reset - Clear all data
+- POST /api/dev/reset - Clear and reseed test data
 - Health check specific to dev
 - POST /api/dev/test-auth/login - deterministic test auth for exact user identity
+- GET /api/test/seed-manifest - stable seeded IDs for frontend integration tests
 """
 
+import os
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
 
 from config import load_settings_from_env
-from services.auth import VALID_DEV_ROLES, ensure_admin, get_current_user
+from services.auth import VALID_DEV_ROLES, build_dev_user_token, ensure_admin, get_current_user
 from services.database import get_db
-from services.dev_mode import enforce_dev_row_limits, get_dev_stats, reset_database
+from services.dev_mode import (
+    _assert_safe_test_environment,
+    enforce_dev_row_limits,
+    get_dev_stats,
+    get_seed_manifest,
+    reset_and_reseed_database,
+    verify_test_token,
+)
 
-router = APIRouter(prefix="/api/dev", tags=["dev"])
+router = APIRouter(prefix="/api/dev", tags=["dev"], dependencies=[Depends(verify_test_token)])
+test_router = APIRouter(prefix="/api/test", tags=["dev"], dependencies=[Depends(verify_test_token)])
 
 
 class DevTestAuthLoginRequest(BaseModel):
@@ -49,7 +59,21 @@ def _require_dev_mode():
 
 def _require_dev_test_auth_secret(x_test_auth_secret: str | None):
     """Require optional shared secret when configured for test-auth endpoint."""
-    configured_secret = load_settings_from_env().DEV_TEST_AUTH_SECRET
+    settings = load_settings_from_env()
+    configured_secret = settings.DEV_TEST_AUTH_SECRET
+    env_file = os.getenv("ENV_FILE", "")
+    is_local_test_context = bool(
+        settings.ENVIRONMENT == "development"
+        or env_file.endswith(".env.test")
+        or os.getenv("PYTEST_CURRENT_TEST")
+    )
+
+    if not is_local_test_context and not configured_secret:
+        raise HTTPException(
+            status_code=403,
+            detail="DEV_TEST_AUTH_SECRET must be configured for non-local test auth",
+        )
+
     if configured_secret and x_test_auth_secret != configured_secret:
         raise HTTPException(status_code=403, detail="Invalid test auth secret")
 
@@ -126,11 +150,11 @@ async def get_stats(current_user: dict = Depends(get_current_user)):
 @router.post("/reset")
 async def reset_db(current_user: dict = Depends(get_current_user)):
     """
-    ⚠️ DANGEROUS: Reset database to clean state.
+    ⚠️ DANGEROUS: Reset database and reseed to known test baseline.
 
     - Clears ALL user-created data
+    - Re-seeds deterministic test data before returning
     - Only available in dev mode + admin role
-    - Does NOT reseed (manually run seed script after)
 
     Use cases:
     - Cleanup after messy testing
@@ -143,11 +167,23 @@ async def reset_db(current_user: dict = Depends(get_current_user)):
         - status: "reset"
         - cleared_tables: dict of {table_name: rows_deleted}
         - total_rows_deleted: int
+        - seeded: true
+        - seed_version: str
+        - seed_manifest: stable seeded IDs for frontend tests
     """
     _require_dev_mode()
     ensure_admin(current_user)
 
-    return await reset_database()
+    return await reset_and_reseed_database()
+
+
+@test_router.get("/seed-manifest")
+async def seed_manifest(current_user: dict = Depends(get_current_user)):
+    """Return stable seeded IDs in TEST_MODE for frontend integration tests."""
+    _require_dev_mode()
+    # Any authenticated test user can read this manifest.
+    _ = current_user
+    return get_seed_manifest()
 
 
 @router.get("/check-limits")
@@ -213,7 +249,7 @@ async def test_auth_login(
         user = _create_test_auth_user(db, payload)
         created = True
 
-    token = f"dev-token-{user['id']}"
+    token = build_dev_user_token(user["id"])
     return DevTestAuthLoginResponse(
         access_token=token,
         user={
@@ -224,3 +260,28 @@ async def test_auth_login(
         },
         created=created,
     )
+
+@router.get("/assert-test-environment")
+async def assert_test_environment():
+    """
+    Returns confirmation that this server is a verified test environment.
+    The frontend test harness calls this before running any destructive
+    operations. If this returns anything other than a 200, the test
+    suite should abort immediately.
+    """
+    settings = load_settings_from_env()
+
+    try:
+        _assert_safe_test_environment(settings)
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
+
+    return {
+        "environment": settings.ENVIRONMENT or "development",
+        "test_mode": settings.TEST_MODE,
+        "allow_test_data_mutation": settings.ALLOW_TEST_DATA_MUTATION,
+        "safe_to_reset": True
+    }

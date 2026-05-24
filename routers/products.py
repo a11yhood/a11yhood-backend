@@ -21,9 +21,55 @@ from models.products import ProductCreate, ProductResponse, ProductUpdate
 from services.auth import get_current_user, get_current_user_optional
 from services.database import get_db
 from services.id_generator import generate_id_with_uniqueness_check
+from services.image_references import (
+    get_or_create_image_id,
+    resolve_image_metadata,
+    sync_image_alt_if_missing,
+)
 from services.sources import extract_domain, find_source_for_domain
 
 router = APIRouter(prefix="/api/products", tags=["products"])
+
+
+def _attach_product_image_url(product: dict, db) -> None:
+    """Populate image_id and image_alt from images table via FK."""
+    image_id = product.get("image_id")
+    product["image_id"] = image_id
+    if not product.get("image_alt") and image_id:
+        image_metadata = resolve_image_metadata(db, image_id)
+        product["image_alt"] = image_metadata["image_alt"]
+
+
+def _resolve_requested_image_id(db, product_data: dict, created_by: str | None = None) -> str | None:
+    """Resolve a product request's nested image object or explicit image_id into an image FK."""
+    image_payload = product_data.get("image")
+    if isinstance(image_payload, dict):
+        image_alt = image_payload.get("alt")
+        image_id = image_payload.get("id")
+        image_url = image_payload.get("url")
+
+        if image_id:
+            resolved_id = str(image_id).strip()
+            if resolved_id and image_alt is not None:
+                sync_image_alt_if_missing(db, resolved_id, image_alt)
+            return resolved_id or None
+
+        if image_url:
+            return get_or_create_image_id(
+                db,
+                str(image_url),
+                created_by=created_by,
+                alt_text=image_alt,
+            )
+
+    image_id = product_data.get("image_id")
+    if image_id:
+        resolved_id = str(image_id).strip()
+        if resolved_id and isinstance(image_payload, dict) and image_payload.get("alt") is not None:
+            sync_image_alt_if_missing(db, resolved_id, image_payload.get("alt"))
+        return resolved_id or None
+
+    return None
 
 
 def _normalize_list(values: Iterable[str] | str | None) -> list[str]:
@@ -223,8 +269,12 @@ async def _enrich_manual_product_metadata(
             db_data["image_alt"] = scraped_data["image_alt"]
         if not product.description and scraped_data.get("description"):
             db_data["description"] = scraped_data["description"]
-        if not product.image_url and scraped_data.get("image"):
-            db_data["image"] = scraped_data["image"]
+        if not db_data.get("image_id") and scraped_data.get("image"):
+            db_data["image_id"] = get_or_create_image_id(
+                db,
+                scraped_data["image"],
+                alt_text=scraped_data.get("image_alt"),
+            )
         if scraped_data.get("external_id"):
             db_data["external_id"] = scraped_data["external_id"]
         if scraped_data.get("source_rating"):
@@ -955,8 +1005,7 @@ async def get_products(
             item["rating_count"] = 0
 
         # Normalize fields for API clients
-        if "image" in item:
-            item["image_url"] = item.get("image")
+        _attach_product_image_url(item, db)
         # Ensure canonical source display names using supported_sources (use pre-fetched map)
         if "source" in item and item.get("source"):
             source_key = str(item.get("source")).strip().lower()
@@ -1063,8 +1112,7 @@ async def product_exists(
         # Normalize fields
         item["tags"] = item.get("tags") or []
         item["stars"] = item.get("source_rating_count") or 0
-        if "image" in item:
-            item["image_url"] = item.get("image")
+        _attach_product_image_url(item, db)
         # Add editor_ids from relationship table
         owners_response = (
             db.table("product_editors").select("user_id").eq("product_id", item["id"]).execute()
@@ -1104,8 +1152,7 @@ async def get_product(
     # Add top-level stars derived from source_rating_count
     result["stars"] = result.get("source_rating_count") or 0
     # Normalize fields for API clients
-    if "image" in result:
-        result["image_url"] = result.get("image")
+    _attach_product_image_url(result, db)
     attach_rating_fields(db, result)
 
     return result
@@ -1134,8 +1181,7 @@ async def get_product_by_slug(
     tags_map = get_tags_map(db, tag_ids) if tag_ids else {}
     result["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
     result["stars"] = result.get("source_rating_count") or 0
-    if "image" in result:
-        result["image_url"] = result.get("image")
+    _attach_product_image_url(result, db)
     attach_rating_fields(db, result)
 
     return result
@@ -1212,10 +1258,7 @@ def _normalize_product(product: dict, db) -> dict:
     product["tags"] = [tags_map[tid] for tid in tag_ids if tid in tags_map]
 
     product["stars"] = product.get("source_rating_count") or 0
-    if "image" in product:
-        product["image_url"] = product.get("image")
-    if "image_alt" in product:
-        product["image_alt"] = product.get("image_alt")
+    _attach_product_image_url(product, db)
     attach_rating_fields(db, product)
     return product
 
@@ -1256,20 +1299,28 @@ async def create_product(
         )
 
     # Map Pydantic model fields to database columns (use attributes to avoid alias issues)
+    product_data = product.model_dump(exclude_unset=True)
+    image_id = _resolve_requested_image_id(db, product_data, created_by=current_user.get("id"))
     db_data = {
         "name": product.name,
         "description": product.description,
         "source_url": source_url,
-        "image": str(product.image_url) if product.image_url else None,
-        "image_alt": product.image_alt,
         "source": determined_source,  # Auto-assigned, not from user input
         "type": product.type or "Other",
         "external_id": product.external_id,
         "created_by": current_user["id"],
     }
 
+    image_payload = product_data.get("image") if isinstance(product_data.get("image"), dict) else None
+    if image_payload and image_payload.get("alt") is not None:
+        db_data["image_alt"] = image_payload.get("alt")
+
     # Enrich metadata from source scrapers (best-effort)
     await _enrich_manual_product_metadata(db, determined_source, source_url, product, db_data)
+
+    # Maintain normalized image reference without changing API payload shape.
+    if image_id is not None:
+        db_data["image_id"] = image_id
 
     # Upsert behavior: resolve existing product by external_id first, then source_url.
     # This prevents duplicate products from scrapers while allowing manual updates.
@@ -1318,7 +1369,7 @@ async def create_product(
                 "name",
                 "description",
                 "source_url",
-                "image",
+                "image_id",
                 "image_alt",
                 "source",
                 "type",
@@ -1339,7 +1390,7 @@ async def create_product(
         result = updated.data[0] if updated.data else existing_product
         product_id = result["id"]
         # Normalize fields for API response
-        result["image_url"] = result.get("image")
+        _attach_product_image_url(result, db)
         result["external_id"] = result.get("external_id")
 
         # Add current user as owner if not already one
@@ -1407,7 +1458,7 @@ async def create_product(
     # Map database response back to API response format
     result = response.data[0]
     product_id = result["id"]
-    result["image_url"] = result.get("image")
+    _attach_product_image_url(result, db)
     result["external_id"] = result.get("external_id")
 
     # Add creator as product manager
@@ -1500,10 +1551,12 @@ async def update_product(
         db_data["description"] = product_data["description"]
     if "source_url" in product_data and product.source_url is not None:
         db_data["source_url"] = str(product.source_url)
-    if "image_url" in product_data and product.image_url is not None:
-        db_data["image"] = str(product.image_url)
-    if "image_alt" in product_data:
-        db_data["image_alt"] = product.image_alt
+    image_id = _resolve_requested_image_id(db, product_data, created_by=current_user.get("id"))
+    if image_id is not None:
+        db_data["image_id"] = image_id
+    image_payload = product_data.get("image") if isinstance(product_data.get("image"), dict) else None
+    if image_payload and image_payload.get("alt") is not None:
+        db_data["image_alt"] = image_payload.get("alt")
     if "source" in product_data:
         db_data["source"] = (
             _canonicalize_source_value_db(db, product_data["source"]) or product_data["source"]
@@ -1536,7 +1589,7 @@ async def update_product(
 
     # Map database response back to API format
     result = response.data[0]
-    result["image_url"] = result.get("image")
+    _attach_product_image_url(result, db)
     result["external_id"] = result.get("external_id")
 
     # Attach editor_ids
@@ -1614,10 +1667,12 @@ async def patch_product(
         db_data["description"] = product_data["description"]
     if "source_url" in product_data and product.source_url is not None:
         db_data["source_url"] = str(product.source_url)
-    if "image_url" in product_data and product.image_url is not None:
-        db_data["image"] = str(product.image_url)
-    if "image_alt" in product_data:
-        db_data["image_alt"] = product.image_alt
+    image_id = _resolve_requested_image_id(db, product_data, created_by=current_user.get("id"))
+    if image_id is not None:
+        db_data["image_id"] = image_id
+    image_payload = product_data.get("image") if isinstance(product_data.get("image"), dict) else None
+    if image_payload and image_payload.get("alt") is not None:
+        db_data["image_alt"] = image_payload.get("alt")
     if "source" in product_data:
         db_data["source"] = (
             _canonicalize_source_value_db(db, product_data["source"]) or product_data["source"]
@@ -1643,6 +1698,7 @@ async def patch_product(
             if not response.data:
                 raise HTTPException(status_code=404, detail="Product not found")
             result = response.data[0]
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1660,7 +1716,7 @@ async def patch_product(
             raise HTTPException(status_code=500, detail=f"Failed to update product tags: {str(e)}")
 
     # Map database response back to API format
-    result["image_url"] = result.get("image")
+    _attach_product_image_url(result, db)
     result["external_id"] = result.get("external_id")
 
     # Attach editor_ids

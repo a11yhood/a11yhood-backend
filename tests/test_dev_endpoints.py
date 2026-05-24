@@ -9,12 +9,15 @@ Covers:
 - /api/dev/check-limits: reports over-limit tables
 """
 
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
+from config import load_settings_from_env
 from routers import dev as dev_router
+from services.auth import build_dev_user_token
 
 pytestmark = pytest.mark.integration
 
@@ -22,13 +25,44 @@ pytestmark = pytest.mark.integration
 # Helpers
 # ---------------------------------------------------------------------------
 
+TEST_RUN_TOKEN = "test-run-token"
+
+
+@pytest.fixture(autouse=True)
+def _set_test_run_token(monkeypatch):
+    """Ensure dev/test router token dependency is configured for integration tests."""
+    monkeypatch.setenv("DEV_TEST_AUTH_SECRET", TEST_RUN_TOKEN)
+    monkeypatch.setenv("ALLOW_TEST_DATA_MUTATION", "true")
+
+    settings = load_settings_from_env()
+    project_ref = urlparse(settings.SUPABASE_URL).hostname
+    if project_ref:
+        project_ref = project_ref.split(".")[0]
+    if project_ref:
+        monkeypatch.setenv("ALLOWED_TEST_PROJECT_REFS", project_ref)
+
+
+def _test_run_headers() -> dict:
+    return {
+        "X-Test-Run-Token": TEST_RUN_TOKEN,
+        "X-Test-Auth-Secret": TEST_RUN_TOKEN,
+    }
+
 
 def _admin_headers(test_admin):
-    return {"Authorization": f"Bearer dev-token-{test_admin['id']}"}
+    return {
+        "Authorization": f"Bearer {build_dev_user_token(test_admin['id'])}",
+        "X-Test-Run-Token": TEST_RUN_TOKEN,
+        "X-Test-Auth-Secret": TEST_RUN_TOKEN,
+    }
 
 
 def _user_headers(test_user):
-    return {"Authorization": f"Bearer dev-token-{test_user['id']}"}
+    return {
+        "Authorization": f"Bearer {build_dev_user_token(test_user['id'])}",
+        "X-Test-Run-Token": TEST_RUN_TOKEN,
+        "X-Test-Auth-Secret": TEST_RUN_TOKEN,
+    }
 
 
 class _TestModeOffSettings:
@@ -42,7 +76,7 @@ class _TestModeOffSettings:
 
 def test_health_dev_available_in_test_mode(client):
     """health-dev returns 200 when TEST_MODE is active."""
-    response = client.get("/api/dev/health-dev")
+    response = client.get("/api/dev/health-dev", headers=_test_run_headers())
     assert response.status_code == 200
     data = response.json()
     assert data["mode"] == "dev"
@@ -57,7 +91,7 @@ def test_health_dev_unavailable_outside_test_mode(clean_database, monkeypatch):
     test_client = TestClient(app)
 
     monkeypatch.setenv("TEST_MODE", "false")
-    response = test_client.get("/api/dev/health-dev")
+    response = test_client.get("/api/dev/health-dev", headers=_test_run_headers())
     app.dependency_overrides.clear()
     assert response.status_code == 404
 
@@ -138,17 +172,44 @@ def test_stats_returns_dev_config(client, test_admin):
 
 
 def test_reset_clears_tables(client, test_admin, test_product):
-    """reset returns status='reset' with non-zero deleted row counts."""
+    """reset returns status='reset' with deleted counts and seeded manifest data."""
     response = client.post("/api/dev/reset", headers=_admin_headers(test_admin))
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "reset"
     assert "cleared_tables" in data
     assert "total_rows_deleted" in data
+    assert data["seeded"] is True
+    assert "seed_version" in data
+    assert "seed_manifest" in data
+    assert data["seed_manifest"]["seeded_image_id"]
+    assert data["seed_manifest"]["seeded_product_with_image_id"]
+    assert data["seed_manifest"]["seeded_product_image_id"]
+    assert data["seed_manifest"]["seeded_product_visible"] is True
+    assert data["seed_manifest"]["seeded_user_id"]
     assert isinstance(data["total_rows_deleted"], int)
     assert data["total_rows_deleted"] > 0
     assert data["cleared_tables"]["products"] >= 1
     assert data["cleared_tables"]["users"] >= 1
+
+
+def test_reset_seeded_product_visible_to_regular_user(client, test_admin, test_user):
+    """After reset, seeded product with image should be visible to a regular dev token user."""
+    reset_response = client.post("/api/dev/reset", headers=_admin_headers(test_admin))
+    assert reset_response.status_code == 200
+    manifest = reset_response.json()["seed_manifest"]
+
+    products_response = client.get("/api/products", headers=_user_headers(test_user))
+    assert products_response.status_code == 200
+    products = products_response.json()
+    assert isinstance(products, list)
+
+    matching = [
+        p
+        for p in products
+        if p.get("id") == manifest["seeded_product_with_image_id"] and p.get("image_id")
+    ]
+    assert matching, "Expected seeded product with image_id to be visible to regular user"
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +257,18 @@ def test_check_limits_returns_400_when_exceeded(client, test_admin, clean_databa
     assert "products:" in response.json()["detail"]
 
 
+def test_seed_manifest_endpoint_available_in_test_mode(client, test_user):
+    """/api/test/seed-manifest returns stable seeded IDs for authenticated test users."""
+    response = client.get("/api/test/seed-manifest", headers=_user_headers(test_user))
+    assert response.status_code == 200
+    data = response.json()
+    assert "seed_version" in data
+    assert "seeded_image_id" in data
+    assert "seeded_product_with_image_id" in data
+    assert "seeded_product_image_id" in data
+    assert "seeded_user_id" in data
+
+
 # ---------------------------------------------------------------------------
 # /api/dev/test-auth/login
 # ---------------------------------------------------------------------------
@@ -204,17 +277,20 @@ def test_check_limits_returns_400_when_exceeded(client, test_admin, clean_databa
 def test_test_auth_login_resolves_exact_user_identity(client, test_user):
     """test-auth/login returns a UUID dev token bound to the requested user."""
     payload = {"user_id": test_user["id"]}
-    response = client.post("/api/dev/test-auth/login", json=payload)
+    response = client.post("/api/dev/test-auth/login", json=payload, headers=_test_run_headers())
     assert response.status_code == 200
     data = response.json()
-    assert data["access_token"] == f"dev-token-{test_user['id']}"
+    assert data["access_token"] == build_dev_user_token(test_user["id"])
     assert data["token_type"] == "Bearer"
     assert data["created"] is False
     assert data["user"]["id"] == test_user["id"]
 
     me_resp = client.get(
         "/api/users/me",
-        headers={"Authorization": f"Bearer {data['access_token']}"},
+        headers={
+            "Authorization": f"Bearer {data['access_token']}",
+            "X-Test-Run-Token": TEST_RUN_TOKEN,
+        },
     )
     assert me_resp.status_code == 200
     assert me_resp.json()["id"] == test_user["id"]
@@ -228,7 +304,7 @@ def test_test_auth_login_creates_user_when_requested(client):
         "create_if_missing": True,
         "role": "user",
     }
-    response = client.post("/api/dev/test-auth/login", json=payload)
+    response = client.post("/api/dev/test-auth/login", json=payload, headers=_test_run_headers())
     assert response.status_code == 200
     data = response.json()
     assert data["created"] is True
@@ -237,7 +313,10 @@ def test_test_auth_login_creates_user_when_requested(client):
 
     me_resp = client.get(
         "/api/users/me",
-        headers={"Authorization": f"Bearer {data['access_token']}"},
+        headers={
+            "Authorization": f"Bearer {data['access_token']}",
+            "X-Test-Run-Token": TEST_RUN_TOKEN,
+        },
     )
     assert me_resp.status_code == 200
     me_data = me_resp.json()
@@ -247,6 +326,6 @@ def test_test_auth_login_creates_user_when_requested(client):
 
 def test_test_auth_login_requires_identifier(client):
     """test-auth/login requires at least one user identifier."""
-    response = client.post("/api/dev/test-auth/login", json={})
+    response = client.post("/api/dev/test-auth/login", json={}, headers=_test_run_headers())
     assert response.status_code == 400
     assert "One of user_id, username, or email is required" in response.json()["detail"]

@@ -41,6 +41,13 @@ cmd = "./scripts/reset-test-db.sh --env-file .env.test && pixi run test"
 [tasks.test-fresh.env]
 ENV_FILE = ".env.test"
 
+[tasks.test-fresh-split]
+description = "Reset DB, then run unit and integration tests in separate processes (avoids HTTP/2 stream exhaustion)"
+cmd = "./scripts/reset-test-db.sh --env-file .env.test && pixi run test-unit && pixi run test-integration"
+
+[tasks.test-fresh-split.env]
+ENV_FILE = ".env.test"
+
 [tasks.dev]
 description = "Start dev backend in Docker using Supabase test env on port 8002"
 cmd = "./scripts/start-dev.sh --port 8002"
@@ -111,11 +118,11 @@ cmd = "python scripts/db-export/export_full_database.py --mode test --output sup
 
 [tasks.lint-python]
 description = "Lint Python code with ruff (whole project)"
-cmd = "ruff check ."
+cmd = "ruff check . --exclude '*.ipynb'"
 
 [tasks.lint-python-fix]
 description = "Lint Python code with ruff and auto-fix (whole project)"
-cmd = "ruff check . --fix"
+cmd = "ruff check . --fix --exclude '*.ipynb'"
 
 [tasks.format-python]
 description = "Format Python code with ruff (whole project)"
@@ -180,6 +187,7 @@ mmh3 = ">=5.2.0, <6"
 multidict = ">=6.7.1, <7"
 oauthlib = ">=3.3.1, <4"
 packaging = ">=26.0, <27"
+pillow = ">=10.0.0"
 postgrest = ">=2.28.0, <3"
 propcache = ">=0.4.1, <0.5"
 pycparser = ">=3.0, <4"

@@ -9,8 +9,10 @@ pytestmark = pytest.mark.unit
 
 
 class _FakeSettings:
-    def __init__(self, test_mode: bool):
+    def __init__(self, test_mode: bool, environment: str = "development", dev_test_auth_secret=None):
         self.TEST_MODE = test_mode
+        self.ENVIRONMENT = environment
+        self.DEV_TEST_AUTH_SECRET = dev_test_auth_secret
 
 
 class _FakeResponse:
@@ -57,41 +59,58 @@ class _FakeDB:
         return self.users_table
 
 
-def _enable_test_mode(monkeypatch):
-    monkeypatch.setattr(auth, "load_settings_from_env", lambda: _FakeSettings(True))
+def _enable_test_mode(monkeypatch, *, environment: str = "development", dev_test_auth_secret=None):
+    monkeypatch.setattr(
+        auth,
+        "load_settings_from_env",
+        lambda: _FakeSettings(
+            True,
+            environment=environment,
+            dev_test_auth_secret=dev_test_auth_secret,
+        ),
+    )
+
+
+def _force_non_local_context(monkeypatch):
+    """Ensure auth context does not look like local/pytest mode."""
+    monkeypatch.setenv("ENV_FILE", ".env")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
 
 def test_rejects_dev_tokens_when_not_in_test_mode(monkeypatch):
     monkeypatch.setattr(auth, "load_settings_from_env", lambda: _FakeSettings(False))
+    db = _FakeDB(_FakeUsersTable())
 
     with pytest.raises(HTTPException, match="Dev tokens only in TEST_MODE") as exc:
         import asyncio
 
-        asyncio.run(auth.parse_dev_token(authorization="Bearer dev-token-user", x_dev_role=None))
+        asyncio.run(auth.parse_dev_token(authorization="Bearer dev-token-user", x_dev_role=None, db=db))
 
     assert exc.value.status_code == 401
 
 
 def test_rejects_when_headers_missing(monkeypatch):
     _enable_test_mode(monkeypatch)
-    monkeypatch.setattr(auth, "get_db", lambda: _FakeDB(_FakeUsersTable()))
+    db = _FakeDB(_FakeUsersTable())
+    monkeypatch.setattr(auth, "get_db", lambda: db)
 
     with pytest.raises(HTTPException, match="No authorization header") as exc:
         import asyncio
 
-        asyncio.run(auth.parse_dev_token(authorization=None, x_dev_role=None))
+        asyncio.run(auth.parse_dev_token(authorization=None, x_dev_role=None, db=db))
 
     assert exc.value.status_code == 401
 
 
 def test_rejects_invalid_token_format(monkeypatch):
     _enable_test_mode(monkeypatch)
-    monkeypatch.setattr(auth, "get_db", lambda: _FakeDB(_FakeUsersTable()))
+    db = _FakeDB(_FakeUsersTable())
+    monkeypatch.setattr(auth, "get_db", lambda: db)
 
     with pytest.raises(HTTPException, match="Invalid dev token format") as exc:
         import asyncio
 
-        asyncio.run(auth.parse_dev_token(authorization="Bearer not-a-dev-token", x_dev_role=None))
+        asyncio.run(auth.parse_dev_token(authorization="Bearer not-a-dev-token", x_dev_role=None, db=db))
 
     assert exc.value.status_code == 401
 
@@ -105,16 +124,17 @@ def test_uuid_token_resolves_exact_seeded_user(monkeypatch):
         "email": "user@example.com",
         "role": "user",
     }
+    db = _FakeDB(_FakeUsersTable(users_by_id={user_id: seeded_user}))
     monkeypatch.setattr(
         auth,
         "get_db",
-        lambda: _FakeDB(_FakeUsersTable(users_by_id={user_id: seeded_user})),
+        lambda: db,
     )
 
     import asyncio
 
     result = asyncio.run(
-        auth.parse_dev_token(authorization=f"Bearer dev-token-{user_id}", x_dev_role=None)
+        auth.parse_dev_token(authorization=f"Bearer dev-token-{user_id}", x_dev_role=None, db=db)
     )
 
     assert result["id"] == user_id
@@ -126,13 +146,14 @@ def test_uuid_token_resolves_exact_seeded_user(monkeypatch):
 def test_uuid_token_returns_404_when_user_missing(monkeypatch):
     _enable_test_mode(monkeypatch)
     missing_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-    monkeypatch.setattr(auth, "get_db", lambda: _FakeDB(_FakeUsersTable()))
+    db = _FakeDB(_FakeUsersTable())
+    monkeypatch.setattr(auth, "get_db", lambda: db)
 
     with pytest.raises(HTTPException, match="Dev user not found") as exc:
         import asyncio
 
         asyncio.run(
-            auth.parse_dev_token(authorization=f"Bearer dev-token-{missing_id}", x_dev_role=None)
+            auth.parse_dev_token(authorization=f"Bearer dev-token-{missing_id}", x_dev_role=None, db=db)
         )
 
     assert exc.value.status_code == 404
@@ -141,12 +162,13 @@ def test_uuid_token_returns_404_when_user_missing(monkeypatch):
 def test_role_token_creates_dev_user_when_missing(monkeypatch):
     _enable_test_mode(monkeypatch)
     users_table = _FakeUsersTable(users_by_username={})
-    monkeypatch.setattr(auth, "get_db", lambda: _FakeDB(users_table))
+    db = _FakeDB(users_table)
+    monkeypatch.setattr(auth, "get_db", lambda: db)
 
     import asyncio
 
     result = asyncio.run(
-        auth.parse_dev_token(authorization="Bearer dev-token-admin", x_dev_role=None)
+        auth.parse_dev_token(authorization="Bearer dev-token-admin", x_dev_role=None, db=db)
     )
 
     assert result["username"] == "dev_admin"
@@ -154,6 +176,136 @@ def test_role_token_creates_dev_user_when_missing(monkeypatch):
     assert result["is_dev_user"] is True
     assert len(users_table.inserted_rows) == 1
     assert users_table.inserted_rows[0]["username"] == "dev_admin"
+
+
+def test_role_token_rejected_outside_local_context(monkeypatch):
+    _enable_test_mode(
+        monkeypatch,
+        environment="production",
+        dev_test_auth_secret="preview-secret",
+    )
+    _force_non_local_context(monkeypatch)
+    db = _FakeDB(_FakeUsersTable())
+
+    with pytest.raises(HTTPException, match="Role-based dev tokens are only allowed in local test contexts") as exc:
+        import asyncio
+
+        asyncio.run(auth.parse_dev_token(authorization="Bearer dev-token-admin", x_dev_role=None, db=db))
+
+    assert exc.value.status_code == 401
+
+
+def test_signed_uuid_token_required_when_secret_configured(monkeypatch):
+    user_id = "2a3b7c3e-971b-4b42-9c8c-0f1843486c50"
+    _enable_test_mode(
+        monkeypatch,
+        environment="production",
+        dev_test_auth_secret="preview-secret",
+    )
+    seeded_user = {
+        "id": user_id,
+        "username": "regular_user",
+        "email": "user@example.com",
+        "role": "user",
+    }
+    db = _FakeDB(_FakeUsersTable(users_by_id={user_id: seeded_user}))
+
+    with pytest.raises(HTTPException, match="Signed dev token required") as exc:
+        import asyncio
+
+        asyncio.run(
+            auth.parse_dev_token(
+                authorization=f"Bearer dev-token-{user_id}",
+                x_dev_role=None,
+                db=db,
+            )
+        )
+
+    assert exc.value.status_code == 401
+
+
+def test_uuid_token_rejected_without_secret_outside_local_context(monkeypatch):
+    user_id = "2a3b7c3e-971b-4b42-9c8c-0f1843486c50"
+    _enable_test_mode(
+        monkeypatch,
+        environment="production",
+        dev_test_auth_secret=None,
+    )
+    _force_non_local_context(monkeypatch)
+    seeded_user = {
+        "id": user_id,
+        "username": "regular_user",
+        "email": "user@example.com",
+        "role": "user",
+    }
+    db = _FakeDB(_FakeUsersTable(users_by_id={user_id: seeded_user}))
+
+    with pytest.raises(HTTPException, match="DEV_TEST_AUTH_SECRET is required") as exc:
+        import asyncio
+
+        asyncio.run(
+            auth.parse_dev_token(
+                authorization=f"Bearer dev-token-{user_id}",
+                x_dev_role=None,
+                db=db,
+            )
+        )
+
+    assert exc.value.status_code == 401
+
+
+def test_signed_uuid_token_resolves_when_signature_valid(monkeypatch):
+    user_id = "2a3b7c3e-971b-4b42-9c8c-0f1843486c50"
+    secret = "preview-secret"
+    _enable_test_mode(
+        monkeypatch,
+        environment="production",
+        dev_test_auth_secret=secret,
+    )
+    seeded_user = {
+        "id": user_id,
+        "username": "regular_user",
+        "email": "user@example.com",
+        "role": "user",
+    }
+    db = _FakeDB(_FakeUsersTable(users_by_id={user_id: seeded_user}))
+
+    import asyncio
+
+    signed_token = auth.build_dev_user_token(user_id)
+    result = asyncio.run(
+        auth.parse_dev_token(
+            authorization=f"Bearer {signed_token}",
+            x_dev_role=None,
+            db=db,
+        )
+    )
+
+    assert result["id"] == user_id
+    assert result["role"] == "user"
+
+
+def test_x_dev_role_rejected_outside_local_context(monkeypatch):
+    _enable_test_mode(
+        monkeypatch,
+        environment="production",
+        dev_test_auth_secret="preview-secret",
+    )
+    _force_non_local_context(monkeypatch)
+    db = _FakeDB(_FakeUsersTable())
+
+    with pytest.raises(HTTPException, match="X-Dev-Role is only allowed in local test contexts") as exc:
+        import asyncio
+
+        asyncio.run(
+            auth.parse_dev_token(
+                authorization=None,
+                x_dev_role="admin",
+                db=db,
+            )
+        )
+
+    assert exc.value.status_code == 401
 
 
 def test_x_dev_role_takes_priority_over_authorization_header(monkeypatch):
@@ -165,7 +317,8 @@ def test_x_dev_role_takes_priority_over_authorization_header(monkeypatch):
         "role": "moderator",
     }
     users_table = _FakeUsersTable(users_by_username={"dev_moderator": existing})
-    monkeypatch.setattr(auth, "get_db", lambda: _FakeDB(users_table))
+    db = _FakeDB(users_table)
+    monkeypatch.setattr(auth, "get_db", lambda: db)
 
     import asyncio
 
@@ -173,6 +326,7 @@ def test_x_dev_role_takes_priority_over_authorization_header(monkeypatch):
         auth.parse_dev_token(
             authorization="Bearer dev-token-admin",
             x_dev_role="moderator",
+            db=db,
         )
     )
 

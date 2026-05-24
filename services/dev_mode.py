@@ -8,10 +8,17 @@ Handles:
 
 import logging
 
+from fastapi import Header, HTTPException, status
+
 from config import load_settings_from_env
 from services.database import get_db
 
 logger = logging.getLogger(__name__)
+
+SEED_VERSION = "2026-05-15-seed-image-contract-v1"
+SEEDED_PRODUCT_SLUG = "test-product"
+SEEDED_IMAGE_KEY = "seed:test-product:image:1"
+SEEDED_USER_USERNAME = "regular_user"
 
 # Tables that shouldn't have row limits (system tables, join tables)
 UNLIMITED_TABLES = {
@@ -75,9 +82,12 @@ async def reset_database():
     Returns:
         Dict with reset status and cleared row counts
     """
+
     settings = load_settings_from_env()
+    #Check if Test Data Mutation is properly enable
     if not settings.TEST_MODE:
         raise PermissionError("Database reset only available in dev mode")
+    _assert_safe_test_environment(settings)
 
     db = get_db()
 
@@ -142,6 +152,68 @@ async def reset_database():
     return result
 
 
+def get_seed_manifest() -> dict:
+    """Return stable seeded IDs used by frontend integration tests."""
+    db = get_db()
+
+    image_resp = (
+        db.table("images")
+        .select("id")
+        .eq("canonical_key", SEEDED_IMAGE_KEY)
+        .limit(1)
+        .execute()
+    )
+    product_resp = (
+        db.table("products")
+        .select("id,image_id,banned")
+        .eq("slug", SEEDED_PRODUCT_SLUG)
+        .limit(1)
+        .execute()
+    )
+    user_resp = (
+        db.table("users")
+        .select("id")
+        .eq("username", SEEDED_USER_USERNAME)
+        .limit(1)
+        .execute()
+    )
+
+    seeded_image_id = image_resp.data[0]["id"] if image_resp.data else None
+    seeded_product_id = product_resp.data[0]["id"] if product_resp.data else None
+    seeded_product_image_id = product_resp.data[0].get("image_id") if product_resp.data else None
+    seeded_product_visible = bool(product_resp.data and not product_resp.data[0].get("banned", False))
+    seeded_user_id = user_resp.data[0]["id"] if user_resp.data else None
+
+    return {
+        "seed_version": SEED_VERSION,
+        "seeded_image_id": seeded_image_id,
+        "seeded_product_with_image_id": seeded_product_id,
+        "seeded_product_image_id": seeded_product_image_id,
+        "seeded_product_visible": seeded_product_visible,
+        "seeded_user_id": seeded_user_id,
+    }
+
+
+async def reset_and_reseed_database() -> dict:
+    """Reset then reseed test data before returning success."""
+    reset_result = await reset_database()
+
+    from seed_scripts.seed_all import main as run_seed_all
+
+    seed_exit_code = run_seed_all()
+    if seed_exit_code != 0:
+        raise RuntimeError(f"Seed process failed with exit code {seed_exit_code}")
+
+    manifest = get_seed_manifest()
+    return {
+        **reset_result,
+        "status": "reset",
+        "seeded": True,
+        "seed_version": manifest["seed_version"],
+        "seed_manifest": manifest,
+    }
+
+
 async def get_dev_stats():
     """Get current dev mode statistics.
 
@@ -182,3 +254,106 @@ async def get_dev_stats():
             stats["tables"][table] = {"error": str(e)}
 
     return stats
+
+def verify_test_token(
+    x_test_run_token: str | None = Header(default=None, alias="X-Test-Run-Token")
+) -> None:
+    """
+    FastAPI dependency that verifies the X-Test-Run-Token header.
+    Applied to every endpoint in the dev router.
+    """
+    settings = load_settings_from_env()
+    expected_token = settings.DEV_TEST_AUTH_SECRET
+
+    if not expected_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="DEV_TEST_AUTH_SECRET is not configured. Set it in your .env file."
+        )
+
+    if x_test_run_token != expected_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid X-Test-Run-Token header."
+        )
+
+def _assert_safe_test_environment(settings) -> None:
+    """
+    Accepts settings as a parameter so the caller controls
+    which settings instance is used. Never reassigns settings
+    inside this function.
+    """
+    if not settings.ALLOW_TEST_DATA_MUTATION:
+        raise PermissionError(
+            "Destructive test operations are disabled.\n"
+            "Set ALLOW_TEST_DATA_MUTATION=true in your .env file."
+        )
+
+    allowed_refs = [
+        r.strip()
+        for r in settings.ALLOWED_TEST_PROJECT_REFS.split(",")
+        if r.strip()
+    ]
+    live_ref = _get_live_project_ref()
+
+    if live_ref not in allowed_refs:
+        raise PermissionError(
+            f"Connected Supabase project '{live_ref}' is not on the test allowlist.\n"
+            f"Allowed refs: {allowed_refs}\n"
+            "Add this project ref to ALLOWED_TEST_PROJECT_REFS in your .env file."
+        )
+
+
+def assert_test_environment_on_startup(settings) -> None:
+    """
+    Called once at startup when TEST_MODE is true.
+    Crashes the process if the connected database is not a verified
+    test database, preventing the server from ever accepting requests
+    in a dangerous state.
+    """
+    try:
+        _assert_safe_test_environment(settings)
+        logger.info(
+            "Test environment verified. Destructive dev routes are active.\n"
+            f"  ALLOW_TEST_DATA_MUTATION : true\n"
+            f"  Connected project ref    : {_get_live_project_ref()}\n"
+        )
+    except PermissionError as e:
+        raise RuntimeError(
+            f"\n{'='*60}\n"
+            f"STARTUP BLOCKED: Dev routes are enabled but the database\n"
+            f"identity check failed.\n\n"
+            f"{e}\n"
+            f"{'='*60}\n"
+        )
+def _get_live_project_ref() -> str:
+    """
+    Extract the Supabase project ref from the live connection URL.
+    The project ref is the subdomain of the Supabase URL.
+
+    Example:
+        https://abcdefghijklmnop.supabase.co -> abcdefghijklmnop
+    """
+    settings = load_settings_from_env()
+    url = settings.SUPABASE_URL
+
+    if not url:
+        raise RuntimeError(
+            "SUPABASE_URL is not configured. Cannot verify project identity."
+        )
+
+    try:
+        # Strip protocol, take the subdomain before the first dot
+        host = url.replace("https://", "").replace("http://", "")
+        project_ref = host.split(".")[0]
+
+        if not project_ref:
+            raise ValueError("Could not parse project ref from URL")
+
+        return project_ref
+
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to extract project ref from SUPABASE_URL '{url}': {e}\n"
+            "Expected format: https://your-project-ref.supabase.co"
+        )

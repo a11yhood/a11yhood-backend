@@ -166,6 +166,43 @@
   -- Note: The trigger enforces admin-only role changes regardless of policies.
 
   -- ============================================================================
+  -- IMAGES TABLE
+  -- ============================================================================
+  CREATE TABLE images (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    canonical_url TEXT,
+    canonical_key TEXT UNIQUE NOT NULL,
+    image_data_base64 TEXT,
+    source_kind TEXT NOT NULL DEFAULT 'external' CHECK (source_kind IN ('external', 'uploaded')),
+    mime_type TEXT,
+    byte_size INTEGER,
+    width INTEGER,
+    height INTEGER,
+    default_alt TEXT,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  ALTER TABLE IF EXISTS public.images ENABLE ROW LEVEL SECURITY;
+
+  DROP POLICY IF EXISTS images_select_all ON public.images;
+  CREATE POLICY images_select_all
+  ON public.images FOR SELECT
+  TO authenticated, anon
+  USING (true);
+
+  DROP POLICY IF EXISTS images_admin_write ON public.images;
+  CREATE POLICY images_admin_write
+  ON public.images FOR ALL
+  TO authenticated
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+
+  CREATE INDEX IF NOT EXISTS idx_images_source_kind
+      ON public.images (source_kind);
+
+  -- ============================================================================
   -- PRODUCTS TABLE
   -- ============================================================================
   CREATE TABLE products (
@@ -178,7 +215,7 @@
     external_id TEXT,
     external_data JSONB,
     description TEXT DEFAULT '',
-    image TEXT,
+    image_id UUID REFERENCES images(id) ON DELETE SET NULL,
     image_alt TEXT,
     source_rating NUMERIC(3,2),
     source_rating_count INTEGER,
@@ -211,6 +248,9 @@
   -- General lookup index on source_url
   CREATE INDEX IF NOT EXISTS idx_products_source_url_lookup
       ON public.products (source_url);
+
+    CREATE INDEX IF NOT EXISTS idx_products_image_id
+      ON public.products (image_id);
 
   -- PRODUCT MANAGERS TABLE (for legacy ownership tracking)
   -- Table for product editors/managers who can modify products.
@@ -273,7 +313,7 @@
     slug TEXT UNIQUE NOT NULL,
     content TEXT NOT NULL,
     excerpt TEXT,
-    header_image TEXT,
+    header_image_id UUID REFERENCES images(id) ON DELETE SET NULL,
     header_image_alt TEXT,
     author_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
     author_name TEXT NOT NULL,
@@ -287,6 +327,9 @@
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   );
+
+  CREATE INDEX IF NOT EXISTS idx_blog_posts_header_image_id
+      ON public.blog_posts (header_image_id);
 
   -- ============================================================================
   -- COLLECTIONS TABLE

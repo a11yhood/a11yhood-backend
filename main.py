@@ -3,9 +3,13 @@
 Sets up FastAPI app with CORS middleware and routes for the accessible product community.
 All endpoints are organized by domain in routers/ and use database_adapter for dual DB support.
 """
+import uuid
+
 from fastapi import Depends, FastAPI, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -17,6 +21,7 @@ from routers import (
     collections,
     dev,
     discussions,
+    images,
     product_urls,
     products,
     ratings,
@@ -57,6 +62,17 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 logger = logging.getLogger(__name__)
 
 
+def _should_run_scheduler() -> bool:
+    """Return whether background scheduler should run in this process.
+
+    Vercel serverless functions are ephemeral and not suitable for persistent
+    background jobs. Allow explicit override via ENABLE_SCHEDULER=true.
+    """
+    if os.getenv("ENABLE_SCHEDULER", "").lower() in {"1", "true", "yes"}:
+        return True
+    return os.getenv("VERCEL") != "1"
+
+
 @app.on_event("startup")
 async def validate_security_configuration():
     """Validate critical security settings on startup.
@@ -74,18 +90,12 @@ async def validate_security_configuration():
     cors_origins = get_cors_origins()
     logger.info(f"CORS origins configured: {cors_origins}")
 
-    # Detect production environment by checking for production indicators
-    # We only consider it "production" if PRODUCTION_URL is configured.
-    is_production = any([
-        # Production domain in CORS
-        local_settings.PRODUCTION_URL and
-        "localhost" not in local_settings.PRODUCTION_URL and
-        local_settings.PRODUCTION_URL.strip(),
 
-        # Explicit production environment variable
-        os.getenv("ENVIRONMENT") == "production",
-        os.getenv("ENV") == "production",
-    ])
+    # Detect production environment from explicit environment flags.
+    is_production = (
+        os.getenv("ENVIRONMENT", "").strip().lower() == "production"
+        or os.getenv("ENV", "").strip().lower() == "production"
+    )
 
     # CRITICAL: Prevent TEST_MODE in production
     if local_settings.TEST_MODE and is_production:
@@ -100,7 +110,7 @@ async def validate_security_configuration():
             "\n"
             "Production detected due to:\n"
             f"  - SUPABASE_URL: {local_settings.SUPABASE_URL}\n"
-            f"  - PRODUCTION_URL: {local_settings.PRODUCTION_URL}\n"
+            f"  - CORS_ORIGINS: {cors_origins}\n"
         )
 
     # CRITICAL: Validate SECRET_KEY in production
@@ -140,6 +150,10 @@ async def validate_security_configuration():
             "   - NEVER enable TEST_MODE in production!\n"
         )
 
+    if local_settings.TEST_MODE and local_settings.ALLOW_TEST_DATA_MUTATION:
+        from services.dev_mode import assert_test_environment_on_startup
+        assert_test_environment_on_startup(local_settings)
+
     if local_settings.SECRET_KEY == "dev-secret-key-change-in-production" and not is_production:
         logger.warning(
             "⚠️  Using default SECRET_KEY in development\n"
@@ -155,8 +169,8 @@ async def validate_security_configuration():
         f"  - CORS origins: {len(get_cors_origins())} configured\n"
     )
 
-    # Initialize scheduled scrapers (if not in test mode)
-    if not local_settings.TEST_MODE:
+    # Initialize scheduled scrapers only in long-running process environments.
+    if not local_settings.TEST_MODE and _should_run_scheduler():
         try:
             scheduler_service = get_scheduled_scraper_service()
             db = get_db()
@@ -167,12 +181,15 @@ async def validate_security_configuration():
             logger.error(f"Failed to initialize scheduled scrapers: {e}")
             # Don't fail startup if scheduler fails, just log the error
     else:
-        logger.info("Scheduled scrapers disabled in TEST_MODE")
+        logger.info("Scheduled scrapers disabled for this environment")
 
 
 @app.on_event("shutdown")
 async def shutdown_scheduled_scrapers():
     """Stop scheduled scrapers on shutdown"""
+    if not _should_run_scheduler():
+        return
+
     try:
         scheduler_service = get_scheduled_scraper_service()
         scheduler_service.stop()
@@ -185,30 +202,34 @@ def get_cors_origins():
 
     Security: Never use wildcard origins with credentials.
     Dev uses Vite proxy, so only HTTPS localhost needs direct CORS access.
-    Production must explicitly set FRONTEND_URL and PRODUCTION_URL.
+    Production must explicitly set CORS_ORIGINS.
     """
+    # Use only CORS_ORIGINS (comma-separated)
     origins = set()
-
-    # Add configured frontend URLs
-    if settings.FRONTEND_URL:
-        origins.add(settings.FRONTEND_URL)
-    if settings.PRODUCTION_URL:
-        origins.add(settings.PRODUCTION_URL)
-
-    # Dev mode: Allow HTTPS localhost (Vite dev server uses proxy for API calls)
-    # HTTP variants not needed - Vite proxy handles the HTTPS->HTTP translation
-    if settings.TEST_MODE:
-        origins.update({
-            "https://localhost:5173",
-            "https://127.0.0.1:5173",
-        })
-
-    # Support additional origins via env var (comma-separated)
-    extra = os.getenv("CORS_EXTRA_ORIGINS", "")
-    if extra:
-        origins.update(o.strip() for o in extra.split(",") if o.strip())
-
+    if settings.CORS_ORIGINS:
+        origins.update(_normalize_origin(o) for o in settings.CORS_ORIGINS.split(",") if o.strip())
     return list(origins)
+
+
+def _normalize_origin(value: str) -> str:
+    """Normalize origin values for reliable matching.
+
+    Example: https://a11yhood.org/ -> https://a11yhood.org
+    """
+    return value.strip().rstrip("/")
+
+
+def _request_origin_if_allowed(request: Request) -> str | None:
+    """Return request Origin when it is explicitly allowlisted."""
+    raw_origin = request.headers.get("origin")
+    if not raw_origin:
+        return None
+
+    normalized_origin = _normalize_origin(raw_origin)
+    allowed_origins = set(get_cors_origins())
+    if normalized_origin in allowed_origins:
+        return normalized_origin
+    return None
 
 # ============================================================================
 # Security Middleware
@@ -225,15 +246,48 @@ if not any(isinstance(m, type) and issubclass(m, type) and
         CORSMiddleware,
         allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["*"],
+        allow_methods=["POST", "OPTIONS", "GET", "PUT", "DELETE", "PATCH"],
+        allow_headers=[
+            "authorization",
+            "content-type",
+            "x-forwarded-authorization",
+            "accept",
+            "origin",
+            "x-requested-with",
+        ],
+        max_age=86400,
     )
 
 # Security headers middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Add security headers to all responses."""
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
     response = await call_next(request)
+
+    # Ensure allowed origins always receive CORS headers, including error responses.
+    # This complements CORSMiddleware and prevents opaque browser failures on 401/403/500.
+    allowed_origin = _request_origin_if_allowed(request)
+    if allowed_origin:
+        response.headers.setdefault("Access-Control-Allow-Origin", allowed_origin)
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+        vary_value = response.headers.get("Vary", "")
+        if "Origin" not in vary_value:
+            response.headers["Vary"] = "Origin" if not vary_value else f"{vary_value}, Origin"
+        if request.method == "OPTIONS":
+            response.headers.setdefault(
+                "Access-Control-Allow-Methods",
+                "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            )
+            response.headers.setdefault(
+                "Access-Control-Allow-Headers",
+                "authorization, content-type, x-forwarded-authorization",
+            )
+            response.headers.setdefault("Access-Control-Max-Age", "86400")
+
+    response.headers["X-Request-ID"] = request_id
 
     # Prevent MIME type sniffing
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -284,18 +338,80 @@ async def add_security_headers(request: Request, call_next):
 
     return response
 
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(request: Request, exc: RequestValidationError):
+    """Log and return structured request validation failures (HTTP 422)."""
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    errors = exc.errors()
+
+    first_error = errors[0] if errors else {}
+    first_loc = ".".join(str(part) for part in first_error.get("loc", []))
+    first_msg = first_error.get("msg", "Validation error")
+    detail_message = (
+        f"{first_loc}: {first_msg}" if first_loc else str(first_msg or "Validation error")
+    )
+
+    # For multipart uploads, capture actual form field names to diagnose field-name mismatches.
+    form_field_names: list[str] | None = None
+    content_type_header = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type_header or "application/x-www-form-urlencoded" in content_type_header:
+        try:
+            form = await request.form()
+            form_field_names = list(form.keys())
+        except Exception:
+            form_field_names = ["<error reading form>"]
+
+    logger.warning(
+        "Request validation failed: %s %s request_id=%s content_type=%s content_length=%s"
+        " form_fields=%s errors=%s",
+        request.method,
+        request.url.path,
+        request_id,
+        request.headers.get("content-type"),
+        request.headers.get("content-length"),
+        form_field_names,
+        errors,
+    )
+
+    response = JSONResponse(
+        status_code=422,
+        content={
+            "detail": detail_message,
+            "message": detail_message,
+            "errors": errors,
+            "request_id": request_id,
+        },
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
+
 # Trusted hosts (prevent host header injection)
 allowed_hosts = ["localhost", "127.0.0.1", "0.0.0.0", "testserver"]
 # Keep TestClient stable even when shell env vars temporarily override TEST_MODE.
 
-if settings.PRODUCTION_URL:
-    host = settings.PRODUCTION_URL.replace("https://", "").replace("http://", "").split("/")[0]
-    if host:
-        allowed_hosts.append(host)
-if settings.FRONTEND_URL:
-    host = settings.FRONTEND_URL.replace("https://", "").replace("http://", "").split("/")[0]
-    if host and host not in allowed_hosts:
-        allowed_hosts.append(host)
+
+def _extract_host(raw_value: str) -> str:
+    """Normalize configured host values for TrustedHostMiddleware."""
+    value = raw_value.strip()
+    if not value:
+        return ""
+    return value.replace("https://", "").replace("http://", "").split("/")[0]
+
+# Add hosts derived from CORS origins.
+if settings.CORS_ORIGINS:
+    for raw_origin in settings.CORS_ORIGINS.split(","):
+        host = _extract_host(raw_origin)
+        if host and host not in allowed_hosts:
+            allowed_hosts.append(host)
+
+# Optional explicit allowlist from environment/config.
+# Example: ALLOWED_HOSTS=api.example.com,staging.example.com,*.vercel.app
+if settings.ALLOWED_HOSTS:
+    for raw_host in settings.ALLOWED_HOSTS.split(","):
+        host = _extract_host(raw_host)
+        if host and host not in allowed_hosts:
+            allowed_hosts.append(host)
 
 app.add_middleware(
     TrustedHostMiddleware,
@@ -333,10 +449,6 @@ async def health_check():
         current_settings.SUPABASE_URL and
         "supabase.co" in current_settings.SUPABASE_URL and
         "dummy" not in current_settings.SUPABASE_URL,
-
-        current_settings.PRODUCTION_URL and
-        "localhost" not in current_settings.PRODUCTION_URL and
-        current_settings.PRODUCTION_URL.strip(),
 
         os.getenv("ENVIRONMENT") == "production",
         os.getenv("ENV") == "production",
@@ -399,11 +511,13 @@ app.include_router(scrapers.router)
 app.include_router(requests.router)
 app.include_router(users.router)
 app.include_router(product_urls.router)
+app.include_router(images.router)
 app.include_router(collections.router)
 app.include_router(blog_posts.router)
 app.include_router(sources.router)
 if settings.TEST_MODE:
     app.include_router(dev.router)
+    app.include_router(dev.test_router)
 
 
 if __name__ == "__main__":

@@ -6,11 +6,13 @@ Also supports X-Dev-Role header for dynamic test user creation (frontend role sw
 Security: All authorization checks enforce server-side validation; never trust client roles.
 """
 
+import hashlib
+import hmac
 import logging
 import os
 import uuid
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 from config import load_settings_from_env
 from services.database import get_db, verify_token
@@ -27,24 +29,76 @@ DEV_USER_IDS = {
     "2a3b7c3e-971b-4b42-9c8c-0f1843486c50": "regular_user",
 }
 
+# Deterministic seed payloads for UUID-based dev users used in tests.
+# If these rows are missing (e.g., after a flaky reset), auth can recreate them.
+DEV_USER_SEEDS = {
+    "49366adb-2d13-412f-9ae5-4c35dbffab10": {
+        "github_id": "admin-test-001",
+        "username": "admin_user",
+        "display_name": "Admin User",
+        "email": "admin@example.com",
+        "role": "admin",
+    },
+    "94e116f7-885d-4d32-87ae-697c5dc09b9e": {
+        "github_id": "mod-test-002",
+        "username": "moderator_user",
+        "display_name": "Moderator User",
+        "email": "moderator@example.com",
+        "role": "moderator",
+    },
+    "2a3b7c3e-971b-4b42-9c8c-0f1843486c50": {
+        "github_id": "user-test-003",
+        "username": "regular_user",
+        "display_name": "Regular User",
+        "email": "user@example.com",
+        "role": "user",
+    },
+}
+
 # Valid roles that can be created via X-Dev-Role header
 VALID_DEV_ROLES = {"admin", "moderator", "manager", "user"}
 
 
-async def parse_dev_token(
-    authorization: str = Header(None), x_dev_role: str = Header(None)
-) -> dict:
+def _is_local_test_context(settings) -> bool:
+    """Return True when running local/pytest test flows."""
+    env_file = os.getenv("ENV_FILE", "")
+    return bool(
+        settings.ENVIRONMENT == "development"
+        or env_file.endswith(".env.test")
+        or os.getenv("PYTEST_CURRENT_TEST")
+    )
+
+
+def _dev_token_signature(user_id: str, secret: str) -> str:
+    """Build a deterministic HMAC signature for a UUID-based dev token."""
+    digest = hmac.new(secret.encode("utf-8"), user_id.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest[:32]
+
+
+def build_dev_user_token(user_id: str) -> str:
+    """Build a UUID-based dev token; sign it when DEV_TEST_AUTH_SECRET is configured."""
+    settings = load_settings_from_env()
+    secret = (settings.DEV_TEST_AUTH_SECRET or "").strip()
+    if not secret:
+        return f"dev-token-{user_id}"
+    return f"dev-token-{user_id}.{_dev_token_signature(user_id, secret)}"
+
+
+async def parse_dev_token(authorization: str | None, x_dev_role: str | None, db) -> dict:
     """
     Parse dev mode authentication: UUID-based, role-based, or X-Dev-Role header.
 
     Supports three modes (evaluated in this order):
-    1. X-Dev-Role: <role>  - Create/fetch test user with given role (frontend/manual dev use).
-    2. Bearer dev-token-<uuid>  - Resolve exact user by UUID (deterministic test identity).
-    3. Bearer dev-token-<role>  - Create/fetch test user with given role (role-behaviour tests).
+    1. X-Dev-Role: <role>  - Create/fetch test user with given role (local-only).
+    2. Bearer dev-token-<uuid>[.<sig>]  - Resolve exact user by UUID.
+    3. Bearer dev-token-<role>  - Create/fetch test user with given role (local-only).
 
     UUID tokens are preferred for identity-sensitive tests because they map 1:1 to a seeded
-    user row.  Role tokens are preferred for role-behaviour tests because they do not depend
-    on a specific pre-seeded ID.
+    user row. Role tokens are restricted to local test contexts to reduce accidental exposure
+    in public preview environments.
+
+    When DEV_TEST_AUTH_SECRET is configured, UUID tokens must include a signature suffix:
+    dev-token-<uuid>.<hmac>. Unsigned UUID and role tokens are rejected.
 
     Valid roles: admin, moderator, manager, user
 
@@ -64,10 +118,23 @@ async def parse_dev_token(
     if not settings_fresh.TEST_MODE:
         raise HTTPException(status_code=401, detail="Dev tokens only in TEST_MODE")
 
-    db = get_db()
+    local_test_context = _is_local_test_context(settings_fresh)
+    secret = (settings_fresh.DEV_TEST_AUTH_SECRET or "").strip()
+
+    if not local_test_context and not secret:
+        raise HTTPException(
+            status_code=401,
+            detail="DEV_TEST_AUTH_SECRET is required for dev auth outside local test contexts",
+        )
 
     # Mode 1: X-Dev-Role header takes priority for dynamic user creation
     if x_dev_role:
+        if not local_test_context:
+            raise HTTPException(
+                status_code=401,
+                detail="X-Dev-Role is only allowed in local test contexts",
+            )
+
         role = x_dev_role.strip().lower()
         if role not in VALID_DEV_ROLES:
             raise HTTPException(
@@ -136,13 +203,44 @@ async def parse_dev_token(
 
     suffix = token[len("dev-token-") :].strip()
 
+    uuid_candidate, has_signature, signature = suffix, False, ""
+    if "." in suffix:
+        uuid_candidate, signature = suffix.split(".", 1)
+        has_signature = True
+
     # Mode 2a: UUID-based token — resolve exact user by ID (deterministic test identity)
     try:
-        uuid.UUID(suffix)
+        uuid.UUID(uuid_candidate)
+
+        if secret:
+            if not has_signature:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Signed dev token required when DEV_TEST_AUTH_SECRET is configured",
+                )
+            expected_sig = _dev_token_signature(uuid_candidate, secret)
+            if not hmac.compare_digest(signature, expected_sig):
+                raise HTTPException(status_code=401, detail="Invalid signed dev token")
+
         # Suffix is a valid UUID; look up the user by ID.
-        resp = db.table("users").select("*").eq("id", suffix).execute()
+        resp = db.table("users").select("*").eq("id", uuid_candidate).execute()
         if not resp.data:
-            raise HTTPException(status_code=404, detail=f"Dev user not found: {suffix}")
+            # Self-heal known deterministic test identities to reduce suite flakiness
+            # when test cleanup temporarily drops seeded users.
+            seed = DEV_USER_SEEDS.get(uuid_candidate)
+            if seed is None:
+                raise HTTPException(status_code=404, detail=f"Dev user not found: {uuid_candidate}")
+
+            try:
+                db.table("users").upsert({"id": uuid_candidate, **seed}, on_conflict="id").execute()
+                resp = db.table("users").select("*").eq("id", uuid_candidate).execute()
+            except Exception as exc:
+                logger.error("Failed to recreate deterministic dev user %s: %s", uuid_candidate, exc)
+                raise HTTPException(status_code=500, detail=f"Failed to recreate dev user: {uuid_candidate}")
+
+            if not resp.data:
+                raise HTTPException(status_code=404, detail=f"Dev user not found: {uuid_candidate}")
+
         user = resp.data[0]
         logger.debug(f"Resolved dev user by UUID: {user['id']} (role: {user.get('role')})")
         return {
@@ -158,6 +256,12 @@ async def parse_dev_token(
         pass  # Not a UUID; fall through to role-based lookup.
 
     # Mode 2b: Role-based dev token (dev-token-admin, dev-token-user, etc.)
+    if not local_test_context:
+        raise HTTPException(
+            status_code=401,
+            detail="Role-based dev tokens are only allowed in local test contexts",
+        )
+
     role = suffix.lower()
     if role not in VALID_DEV_ROLES:
         raise HTTPException(
@@ -213,7 +317,11 @@ async def parse_dev_token(
         raise HTTPException(status_code=500, detail=f"Failed to create test user for role {role}")
 
 
-async def get_current_user(authorization: str = Header(None), x_dev_role: str = Header(None)):
+async def get_current_user(
+    authorization: str = Header(None),
+    x_dev_role: str = Header(None),
+    db=Depends(get_db),
+):
     """
     Get current user from Authorization header.
 
@@ -258,7 +366,7 @@ async def get_current_user(authorization: str = Header(None), x_dev_role: str = 
     if (settings_fresh.TEST_MODE or is_test_context) and (
         x_dev_role or is_dev_token
     ):
-        user_dict = await parse_dev_token(authorization, x_dev_role)
+        user_dict = await parse_dev_token(authorization, x_dev_role, db)
         logger.debug(f"Successfully parsed dev token/role: user={user_dict.get('id')}, role={user_dict.get('role')}")
         return user_dict
 
@@ -267,7 +375,7 @@ async def get_current_user(authorization: str = Header(None), x_dev_role: str = 
         raise HTTPException(status_code=401, detail="No authorization header")
 
     token = authorization.replace("Bearer ", "").strip()
-    db_adapter = get_db()
+    db_adapter = db
     user = verify_token(token, db_adapter)
 
     # Normalize user to dict shape expected by routers
@@ -314,7 +422,7 @@ async def get_current_user(authorization: str = Header(None), x_dev_role: str = 
 
 
 async def get_current_user_optional(
-    authorization: str = Header(None), x_dev_role: str = Header(None)
+    authorization: str = Header(None), x_dev_role: str = Header(None), db=Depends(get_db)
 ):
     """
     Variant of get_current_user that returns None when no Authorization header is provided.
@@ -327,7 +435,7 @@ async def get_current_user_optional(
     if not authorization and not x_dev_role:
         return None
     try:
-        return await get_current_user(authorization, x_dev_role)
+        return await get_current_user(authorization, x_dev_role, db)
     except HTTPException as e:
         # In test mode, if dev user doesn't exist yet, return None (allows user creation)
         settings_fresh = load_settings_from_env()
@@ -353,6 +461,24 @@ def ensure_admin(current_user: dict):
             f"Attempted admin action with role: {current_user.get('role') if current_user else 'none'}",
         )
         raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def ensure_moderator_or_admin(current_user: dict):
+    """
+    Enforce moderator or admin access.
+
+    Security: Server-side role check prevents privilege escalation.
+    Raises 403 Forbidden if current_user lacks moderator or admin role.
+    """
+    from services.security_logger import log_unauthorized_access
+
+    if not current_user or current_user.get("role") not in ("moderator", "admin"):
+        log_unauthorized_access(
+            current_user.get("id") if current_user else None,
+            "moderator",
+            f"Attempted moderator action with role: {current_user.get('role') if current_user else 'none'}",
+        )
+        raise HTTPException(status_code=403, detail="Moderator or admin access required")
 
 
 def ensure_self_or_admin(current_user: dict, user_id: str):

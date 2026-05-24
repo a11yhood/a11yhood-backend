@@ -1,7 +1,7 @@
 """Blog post management endpoints.
 
 Admin-only blog posts with markdown content, header images, and multi-author support.
-Security: All mutations require admin role; image uploads size-limited to ~5MB.
+Security: All mutations require admin role; image uploads size-limited to ~2MB.
 Markdown content should be sanitized before rendering to prevent XSS.
 """
 
@@ -13,10 +13,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from models.blog_posts import BlogPostCreate, BlogPostResponse, BlogPostUpdate
 from services.auth import ensure_admin, get_current_user, get_current_user_optional
 from services.database import get_db
+from services.image_references import (
+    get_or_create_image_id,
+    resolve_image_metadata,
+)
 from services.sanitizer import sanitize_html
 from services.timestamps import normalize_timestamp_value
 
 router = APIRouter(prefix="/api/blog-posts", tags=["blog"])
+
+MAX_IMAGE_DATA_URL_BYTES: int = 2 * 1024 * 1024
 
 
 def _to_iso_utc(value: object | None) -> str | None:
@@ -66,6 +72,8 @@ def _normalize_image_string(value: str | None) -> str | None:
         return None
     if src.lower().startswith("http://") or src.lower().startswith("https://"):
         return src
+    if src.startswith("/api/images/"):
+        return src
     if src.lower().startswith("data:"):
         return src
     head = src[:10]
@@ -82,23 +90,46 @@ def _normalize_image_string(value: str | None) -> str | None:
 
 
 def _validate_image_size(data_url: str | None, field_name: str = "header_image"):
-    """Enforce a ~5MB maximum payload for images.
+    """Enforce a hard 2MB maximum payload for data-URL images.
 
     We estimate byte size from the base64 payload length: bytes ~= len * 3 / 4.
     """
     if not data_url or not data_url.startswith("data:"):
         return
-    try:
-        comma = data_url.find(",")
-        if comma == -1:
-            return
-        b64 = data_url[comma + 1 :]
-        approx_bytes = int(len(b64) * 3 / 4)
-        if approx_bytes > 5 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail=f"{field_name} exceeds 5MB limit")
-    except Exception:
-        # On parsing errors, do not block; validation is best-effort
-        return
+    comma = data_url.find(",")
+    if comma == -1:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_data_url",
+                "field": field_name,
+                "message": f"{field_name} must include a comma separating metadata and base64 payload.",
+            },
+        )
+
+    b64 = data_url[comma + 1 :].strip()
+    if not b64:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "empty_image_payload",
+                "field": field_name,
+                "message": f"{field_name} contains an empty base64 payload.",
+            },
+        )
+
+    approx_bytes = int(len(b64) * 3 / 4)
+    if approx_bytes > MAX_IMAGE_DATA_URL_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "image_too_large",
+                "field": field_name,
+                "message": f"{field_name} exceeds the 2MB limit.",
+                "max_bytes": MAX_IMAGE_DATA_URL_BYTES,
+                "actual_bytes": approx_bytes,
+            },
+        )
 
 
 _MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
@@ -109,7 +140,7 @@ def _normalize_content_images(content: str | None) -> str | None:
     """Normalize and validate inline images embedded in markdown/HTML content.
 
     - Converts raw base64 URLs to data URLs with a mime prefix
-    - Validates each data URL is <= 5MB
+    - Validates each data URL is <= 2MB
     - Leaves http(s) and already-normalized data URLs untouched
     """
     if not content:
@@ -157,7 +188,7 @@ def _normalize_content_images(content: str | None) -> str | None:
     return html_normalized
 
 
-def _normalize_post(record: dict) -> dict:
+def _normalize_post(record: dict, db=None) -> dict:
     if not record:
         return record
 
@@ -173,8 +204,15 @@ def _normalize_post(record: dict) -> dict:
     for field in ["created_at", "updated_at", "published_at", "publish_date"]:
         post[field] = _to_iso_utc(post.get(field))
 
-    # Ensure header_image is always a valid src for clients
-    post["header_image"] = _normalize_image_string(post.get("header_image"))
+    # Ensure header_image is always a valid src for clients.
+    if db is not None:
+        image_metadata = resolve_image_metadata(db, post.get("header_image_id"))
+        resolved_header = image_metadata["image_url"]
+        if not post.get("header_image_alt"):
+            post["header_image_alt"] = image_metadata["image_alt"]
+    else:
+        resolved_header = post.get("header_image")
+    post["header_image"] = _normalize_image_string(resolved_header)
 
     return post
 
@@ -214,7 +252,7 @@ async def list_blog_posts(
     query = query.range(offset, offset + limit - 1)
 
     db_resp = query.execute()
-    posts = [_normalize_post(p) for p in (db_resp.data or [])]
+    posts = [_normalize_post(p, db) for p in (db_resp.data or [])]
     # Cache for 5 minutes for public listing
     if response is not None and not include_unpublished:
         response.headers["Cache-Control"] = "public, max-age=300"
@@ -231,7 +269,7 @@ async def get_blog_post(
     if not response.data:
         raise HTTPException(status_code=404, detail="Blog post not found")
 
-    post = _normalize_post(response.data[0])
+    post = _normalize_post(response.data[0], db)
     if not post.get("published") and not (current_user and current_user.get("role") == "admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
 
@@ -248,7 +286,7 @@ async def get_blog_post_by_slug(
     if not response.data:
         raise HTTPException(status_code=404, detail="Blog post not found")
 
-    post = _normalize_post(response.data[0])
+    post = _normalize_post(response.data[0], db)
     if not post.get("published") and not (current_user and current_user.get("role") == "admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
 
@@ -276,6 +314,9 @@ async def create_blog_post(
 
     normalized_image = _normalize_image_string(payload.header_image)
     _validate_image_size(normalized_image)
+    header_image_id = get_or_create_image_id(
+        db, normalized_image, created_by=current_user.get("id"), alt_text=payload.header_image_alt
+    )
 
     normalized_content = _normalize_content_images(payload.content)
 
@@ -287,8 +328,8 @@ async def create_blog_post(
         "slug": slug,
         "content": sanitized_content,
         "excerpt": payload.excerpt,
-        "header_image": normalized_image,
         "header_image_alt": payload.header_image_alt,
+        "header_image_id": header_image_id,
         "author_id": payload.author_id,
         "author_name": payload.author_name,
         "author_ids": author_ids,
@@ -306,7 +347,7 @@ async def create_blog_post(
     if not response.data:
         raise HTTPException(status_code=400, detail="Failed to create blog post")
 
-    return _normalize_post(response.data[0])
+    return _normalize_post(response.data[0], db)
 
 
 @router.patch("/{post_id}", response_model=BlogPostResponse)
@@ -337,12 +378,14 @@ async def update_blog_post(
         update_data["content"] = sanitize_html(normalized)
     if updates.excerpt is not None:
         update_data["excerpt"] = updates.excerpt
+    if updates.header_image_alt is not None:
+        update_data["header_image_alt"] = updates.header_image_alt
     if updates.header_image is not None:
         normalized_image = _normalize_image_string(updates.header_image)
         _validate_image_size(normalized_image)
-        update_data["header_image"] = normalized_image
-    if updates.header_image_alt is not None:
-        update_data["header_image_alt"] = updates.header_image_alt
+        update_data["header_image_id"] = get_or_create_image_id(
+            db, normalized_image, created_by=current_user.get("id"), alt_text=updates.header_image_alt
+        )
     if updates.tags is not None:
         update_data["tags"] = updates.tags
     if updates.featured is not None:
@@ -373,7 +416,7 @@ async def update_blog_post(
     if not updated.data:
         raise HTTPException(status_code=400, detail="Failed to update blog post")
 
-    return _normalize_post(updated.data[0])
+    return _normalize_post(updated.data[0], db)
 
 
 @router.delete("/{post_id}")
