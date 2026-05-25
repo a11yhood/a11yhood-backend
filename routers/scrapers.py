@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import UTC, datetime
 
 import httpx
@@ -14,8 +15,11 @@ from models.scrapers import (
 )
 from routers.products import get_product_tag_rows, get_tags_map, set_product_tags
 from scrapers import ScraperUtilities
+from scrapers.core.contracts import ScrapeMode, ScrapeRunContext
+from scrapers.core.github_adapter import GitHubSourceAdapter
+from scrapers.core.ravelry_adapter import RavelrySourceAdapter
+from scrapers.core.thingiverse_adapter import ThingiverseSourceAdapter
 from scrapers.github import GitHubScraper
-from scrapers.goat import GOATScraper
 from scrapers.ravelry import RavelryScraper
 from scrapers.thingiverse import ThingiverseScraper
 from services.auth import get_current_user
@@ -221,8 +225,74 @@ async def load_url(
             return True
         return v.endswith((".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg"))
 
+    async def get_access_token(platform: str) -> str | None:
+        try:
+            response = db.table("oauth_configs").select("access_token").eq("platform", platform).execute()
+            if response.data:
+                return (response.data[0] or {}).get("access_token")
+        except Exception:
+            return None
+        return None
+
+    def parse_minimal_candidate(raw_url: str) -> tuple[str, str, dict] | None:
+        value = raw_url.strip()
+
+        github_match = re.search(r"https?://(?:www\.)?github\.com/([^/]+)/([^/?#]+)", value, re.I)
+        if github_match:
+            owner = github_match.group(1)
+            repo = github_match.group(2).removesuffix(".git")
+            canonical = f"https://github.com/{owner}/{repo}"
+            return "github", canonical, {"source_url": canonical}
+
+        ravelry_match = re.search(
+            r"https?://(?:www\.)?ravelry\.com/patterns/library/([^/?#]+)", value, re.I
+        )
+        if ravelry_match:
+            permalink = ravelry_match.group(1)
+            canonical = f"https://www.ravelry.com/patterns/library/{permalink}"
+            return "ravelry", canonical, {"id": permalink, "source_url": canonical}
+
+        thingiverse_match = re.search(
+            r"https?://(?:www\.)?thingiverse\.com/thing:(\d+)", value, re.I
+        )
+        if thingiverse_match:
+            thing_id = thingiverse_match.group(1)
+            canonical = f"https://www.thingiverse.com/thing:{thing_id}"
+            return "thingiverse", canonical, {"id": thing_id, "source_url": canonical}
+
+        return None
+
+    async def build_adapter(source_key: str):
+        if source_key == "github":
+            token = await get_access_token("github")
+            return GitHubSourceAdapter(db, access_token=token), None
+
+        if source_key == "ravelry":
+            token = await get_access_token("ravelry")
+            if not token:
+                return None, "Ravelry OAuth token not configured"
+            return RavelrySourceAdapter(db, access_token=token), None
+
+        if source_key == "thingiverse":
+            token = await get_access_token("thingiverse")
+            if not token:
+                return None, "Thingiverse OAuth token not configured"
+            return ThingiverseSourceAdapter(db, access_token=token), None
+
+        return None, "Unsupported source for adapter"
+
+    parsed = parse_minimal_candidate(url)
+    if not parsed:
+        return {
+            "success": False,
+            "message": "URL not supported by adapter inquiry flow",
+        }
+
+    source_key, canonical_url, minimal_candidate = parsed
+    url = canonical_url
+
     # First, check if product already exists in database
-    existing = db.table("products").select("*").eq("source_url", url).limit(1).execute()
+    existing = db.table("products").select("*").eq("source_url", canonical_url).limit(1).execute()
     if existing.data:
         product = existing.data[0]
         # Normalize fields for API response
@@ -246,197 +316,64 @@ async def load_url(
 
         # If the stored image is missing or not an image, attempt a light re-scrape to refresh media
         if not is_image_url(resolved_image_url):
-            refreshed = None
-            try:
-                # Try GitHub
-                github_token = None
+            adapter, adapter_error = await build_adapter(source_key)
+            if adapter:
                 try:
-                    config_response = (
-                        db.table("oauth_configs")
-                        .select("access_token")
-                        .eq("platform", "github")
-                        .execute()
-                    )
-                    github_token = (
-                        (config_response.data or [{}])[0].get("access_token")
-                        if config_response.data
-                        else None
-                    )
-                except Exception:
-                    github_token = None
-                github_scraper = GitHubScraper(db, access_token=github_token)
-                if github_scraper.supports_url(url):
-                    refreshed = await github_scraper.scrape_url(url)
-            except Exception as e:
-                print(f"GitHub scraper refresh error: {e}")
-
-            if not refreshed:
-                try:
-                    config_response = (
-                        db.table("oauth_configs")
-                        .select("access_token")
-                        .eq("platform", "ravelry")
-                        .execute()
-                    )
-                    access_token = (
-                        config_response.data[0].get("access_token")
-                        if config_response.data
-                        else None
-                    )
-                    ravelry_scraper = RavelryScraper(db, access_token)
-                    if ravelry_scraper.supports_url(url):
-                        refreshed = await ravelry_scraper.scrape_url(url)
+                    context = ScrapeRunContext(mode=ScrapeMode.SINGLE_PRODUCT)
+                    raw = await adapter.fetch_one(minimal_candidate, context)
+                    if raw:
+                        mapped = adapter.map_to_source_product(raw, context)
+                        if mapped.image_url and is_image_url(mapped.image_url):
+                            image_id = get_or_create_image_id(
+                                db,
+                                mapped.image_url,
+                                alt_text=mapped.image_alt,
+                            )
+                            update_payload = {"image_id": image_id}
+                            if mapped.image_alt:
+                                update_payload["image_alt"] = mapped.image_alt
+                            db.table("products").update(update_payload).eq("id", product["id"]).execute()
                 except Exception as e:
-                    print(f"Ravelry scraper refresh error: {e}")
-
-            if not refreshed:
-                try:
-                    config_response = (
-                        db.table("oauth_configs")
-                        .select("access_token")
-                        .eq("platform", "thingiverse")
-                        .execute()
-                    )
-                    access_token = (
-                        config_response.data[0].get("access_token")
-                        if config_response.data
-                        else None
-                    )
-                    thingiverse_scraper = ThingiverseScraper(db, access_token)
-                    if thingiverse_scraper.supports_url(url):
-                        refreshed = await thingiverse_scraper.scrape_url(url)
-                except Exception as e:
-                    print(f"Thingiverse scraper refresh error: {e}")
-
-            if not refreshed:
-                try:
-                    config_response = (
-                        db.table("oauth_configs")
-                        .select("access_token")
-                        .eq("platform", "goat")
-                        .execute()
-                    )
-                    access_token = (
-                        config_response.data[0].get("access_token")
-                        if config_response.data
-                        else None
-                    )
-                    librarything_scraper = GOATScraper(db, access_token)
-                    if librarything_scraper.supports_url(url):
-                        refreshed = await librarything_scraper.scrape_url(url)
-                except Exception as e:
-                    print(f"GOAT scraper refresh error: {e}")
-
-            if refreshed and is_image_url(
-                refreshed.get("image") or refreshed.get("imageUrl") or refreshed.get("image_url")
-            ):
-                new_image = (
-                    refreshed.get("image")
-                    or refreshed.get("imageUrl")
-                    or refreshed.get("image_url")
-                )
-                image_id = get_or_create_image_id(db, new_image)
-                db.table("products").update({"image_id": image_id}).eq("id", product["id"]).execute()
+                    print(f"Adapter refresh error: {e}")
+                finally:
+                    await adapter.close()
 
         return {"success": True, "product": product, "source": "database"}
 
-    # Product doesn't exist - try to scrape it
-    scraped_data = None
-    scraper_name = None
+    # Product does not exist; perform full adapter fetch now.
+    adapter, adapter_error = await build_adapter(source_key)
+    if not adapter:
+        return {"success": False, "message": adapter_error or "Adapter unavailable for source"}
 
-    # Try each scraper to see if it supports this URL
     try:
-        # Try GitHub
-        github_token = None
-        try:
-            config_response = (
-                db.table("oauth_configs").select("access_token").eq("platform", "github").execute()
-            )
-            github_token = (
-                (config_response.data or [{}])[0].get("access_token")
-                if config_response.data
-                else None
-            )
-        except Exception:
-            github_token = None
-        github_scraper = GitHubScraper(db, access_token=github_token)
-        if github_scraper.supports_url(url):
-            scraped_data = await github_scraper.scrape_url(url)
-            scraper_name = "github"
-    except Exception as e:
-        # Log but continue to next scraper
-        print(f"GitHub scraper error: {e}")
-
-    if not scraped_data:
-        try:
-            # Try Ravelry
-            config_response = (
-                db.table("oauth_configs").select("access_token").eq("platform", "ravelry").execute()
-            )
-            access_token = (
-                config_response.data[0].get("access_token") if config_response.data else None
-            )
-            ravelry_scraper = RavelryScraper(db, access_token)
-            if ravelry_scraper.supports_url(url):
-                scraped_data = await ravelry_scraper.scrape_url(url)
-                scraper_name = "ravelry"
-        except Exception as e:
-            # Log but continue to next scraper
-            print(f"Ravelry scraper error: {e}")
-
-    if not scraped_data:
-        try:
-            # Try Thingiverse
-            config_response = (
-                db.table("oauth_configs")
-                .select("access_token")
-                .eq("platform", "thingiverse")
-                .execute()
-            )
-            access_token = (
-                config_response.data[0].get("access_token") if config_response.data else None
-            )
-            thingiverse_scraper = ThingiverseScraper(db, access_token)
-            if thingiverse_scraper.supports_url(url):
-                scraped_data = await thingiverse_scraper.scrape_url(url)
-                scraper_name = "thingiverse"
-        except Exception as e:
-            # Log but continue
-            print(f"Thingiverse scraper error: {e}")
-
-    if not scraped_data:
-        try:
-            # Try GOAT (LibraryThing)
-            config_response = (
-                db.table("oauth_configs").select("access_token").eq("platform", "goat").execute()
-            )
-            access_token = (
-                config_response.data[0].get("access_token") if config_response.data else None
-            )
-            librarything_scraper = GOATScraper(db, access_token)
-            if librarything_scraper.supports_url(url):
-                scraped_data = await librarything_scraper.scrape_url(url)
-                scraper_name = "librarything"
-        except Exception as e:
-            # Log but continue
-            print(f"GOAT scraper error: {e}")
-
-    if not scraped_data:
-        return {"success": False, "message": "URL not supported by any scraper or scraping failed"}
+        context = ScrapeRunContext(mode=ScrapeMode.SINGLE_PRODUCT)
+        raw = await adapter.fetch_one(minimal_candidate, context)
+        if not raw:
+            return {"success": False, "message": "Adapter could not fetch product details"}
+        mapped = adapter.map_to_source_product(raw, context)
+    finally:
+        await adapter.close()
 
     # Save scraped product to database
     db_data = {
-        "name": scraped_data.get("name"),
-        "description": scraped_data.get("description"),
-        "source_url": url,
+        "name": mapped.name,
+        "description": mapped.description,
+        "source_url": mapped.source_url or canonical_url,
         "image_id": get_or_create_image_id(
             db,
-            scraped_data.get("image") or scraped_data.get("imageUrl") or scraped_data.get("image_url"),
+            mapped.image_url,
+            alt_text=mapped.image_alt,
         ),
-        "image_alt": scraped_data.get("image_alt"),
-        "source": scraped_data.get("source", scraper_name),
-        "type": scraped_data.get("type", "Other"),
-        "external_id": scraped_data.get("external_id"),
+        "image_alt": mapped.image_alt,
+        "source": determined_source or mapped.source,
+        "type": mapped.type or "Other",
+        "external_id": mapped.external_id,
+        "source_rating": mapped.source_rating,
+        "source_rating_count": mapped.source_rating_count,
+        "source_last_updated": mapped.source_last_updated,
+        "external_data": mapped.external_data,
+        "matched_search_terms": mapped.matched_search_terms,
+        "scraped_at": mapped.fetched_at,
         # No created_by since this is a public scrape
     }
 
@@ -458,8 +395,8 @@ async def load_url(
     saved_product["sourceUrl"] = saved_product.get("source_url")
 
     # Create tag relationships if provided
-    if scraped_data.get("tags"):
-        set_product_tags(db, saved_product["id"], scraped_data["tags"])
+    if mapped.tags:
+        set_product_tags(db, saved_product["id"], mapped.tags)
 
     # Attach tags for response
     pt_rows = get_product_tag_rows(db, [saved_product["id"]])
