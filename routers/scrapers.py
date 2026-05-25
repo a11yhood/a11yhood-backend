@@ -1,9 +1,10 @@
 import logging
+import os
 import re
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from models.scrapers import (
@@ -102,6 +103,71 @@ async def _run_scraper_and_log(
         ScraperUtilities.set_last_scrape_time(database, source, error_result, user_id=user_id)
 
 
+def _require_cron_secret(authorization: str | None) -> None:
+    """Authorize scheduler endpoints using CRON_SECRET bearer token."""
+    secret = (os.getenv("CRON_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="CRON_SECRET is not configured for scheduled scraper endpoints",
+        )
+
+    expected = f"Bearer {secret}"
+    if authorization != expected:
+        raise HTTPException(status_code=401, detail="Invalid cron authorization")
+
+
+async def _run_scraper_now(db, source: str) -> dict:
+    """Run one source synchronously for scheduler contexts."""
+    scraper_service = ScraperService(db)
+
+    access_token = None
+    if source in ["thingiverse", "ravelry", "github", "goat"]:
+        config_response = (
+            db.table("oauth_configs").select("access_token").eq("platform", source).execute()
+        )
+
+        if source in ["thingiverse", "ravelry", "goat"]:
+            if not config_response.data:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"OAuth not configured for {source}. Please authorize in admin settings.",
+                )
+
+            access_token = config_response.data[0].get("access_token")
+            if not access_token:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No access token found for {source}. Please authorize in admin settings.",
+                )
+        else:
+            if config_response.data:
+                access_token = config_response.data[0].get("access_token") or None
+
+    if source == "thingiverse":
+        result = await scraper_service.scrape_thingiverse(access_token=access_token)
+    elif source == "ravelry":
+        result = await scraper_service.scrape_ravelry(access_token=access_token)
+    elif source == "github":
+        result = await scraper_service.scrape_github()
+    elif source == "goat":
+        result = await scraper_service.scrape_goat(access_token=access_token)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown source: {source}")
+
+    logger.info(
+        "Scheduled sync scraper run source=%s status=%s harness=%s found=%s added=%s updated=%s",
+        source,
+        result.get("status"),
+        result.get("harness", "unknown"),
+        result.get("products_found", 0),
+        result.get("products_added", 0),
+        result.get("products_updated", 0),
+    )
+    ScraperUtilities.set_last_scrape_time(db, result["source"], result, user_id="scheduled")
+    return result
+
+
 @router.post("/trigger", response_model=dict)
 async def trigger_scraper(
     request: ScraperTriggerRequest,
@@ -162,6 +228,26 @@ async def trigger_scraper(
         "message": f"Scraping started for {request.source.value}",
         "test_mode": request.test_mode,
         "test_limit": request.test_limit if request.test_mode else None,
+    }
+
+
+@router.get("/cron/{source}", response_model=dict)
+async def run_scraper_from_cron(
+    source: str,
+    authorization: str | None = Header(default=None),
+    db=Depends(get_db),
+):
+    """Run one scraper source for Vercel Cron using CRON_SECRET bearer auth."""
+    _require_cron_secret(authorization)
+
+    if source not in {"github", "thingiverse", "ravelry"}:
+        raise HTTPException(status_code=400, detail="Supported cron sources: github, thingiverse, ravelry")
+
+    result = await _run_scraper_now(db, source)
+    return {
+        "success": True,
+        "source": source,
+        "result": result,
     }
 
 

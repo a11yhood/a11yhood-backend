@@ -1,5 +1,19 @@
 {
   "version": 2,
+  "crons": [
+    {
+      "path": "/api/scrapers/cron/github",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/scrapers/cron/thingiverse",
+      "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/scrapers/cron/ravelry",
+      "schedule": "0 3 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
