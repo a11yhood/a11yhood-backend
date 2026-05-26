@@ -6,15 +6,15 @@ stored in your database (oauth_configs). They require a running server.
 
 Enable with:
   RUN_LIVE_SCRAPERS=1 RUN_AGAINST_SERVER=1 BACKEND_BASE_URL=http://localhost:8000 \
-  DEV_USER_ID=<admin_user_id> pytest tests/test_scrapers_live_api.py -v
+    DEV_USER_ID=<admin_user_id> pytest tests/test_live_api_scrapers.py -v
 
 Alternatively, set ADMIN_TOKEN for real auth:
   RUN_LIVE_SCRAPERS=1 RUN_AGAINST_SERVER=1 BACKEND_BASE_URL=http://localhost:8000 \
-  ADMIN_TOKEN=<jwt> pytest tests/test_scrapers_live_api.py -v
+    ADMIN_TOKEN=<jwt> pytest tests/test_live_api_scrapers.py -v
 
 Focused Ravelry auth diagnostics (no full scrape):
     RUN_LIVE_SCRAPERS=1 RUN_AGAINST_SERVER=1 BACKEND_BASE_URL=http://localhost:8000 \
-    ADMIN_TOKEN=<jwt> pytest tests/test_scrapers_live_api.py::test_ravelry_oauth_debug_health -v
+    ADMIN_TOKEN=<jwt> pytest tests/test_live_api_scrapers.py::test_ravelry_oauth_debug_health -v
 
 Notes:
 - Requires backend TEST_MODE for dev-token path, or a valid admin JWT.

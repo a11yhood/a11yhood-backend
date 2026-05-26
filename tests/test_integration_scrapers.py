@@ -11,9 +11,9 @@ Setup required:
 4. (Optional) Configure OAuth tokens for Thingiverse/Ravelry
 
 Run tests:
-    pytest tests/test_scrapers_integration.py -v                    # Run all integration tests
-    pytest tests/test_scrapers_integration.py -v -m "not slow"     # Skip slow tests
-    pytest tests/test_scrapers_integration.py::test_github -v      # Run specific test
+    pytest tests/test_integration_scrapers.py -v                    # Run all integration tests
+    pytest tests/test_integration_scrapers.py -v -m "not slow"     # Skip slow tests
+    pytest tests/test_integration_scrapers.py::test_github -v      # Run specific test
 """
 
 import os
@@ -143,7 +143,7 @@ async def test_thingiverse_scraper_real_data(
     To run this test:
     1. Get a Thingiverse access token
     2. Set environment variable: export THINGIVERSE_ACCESS_TOKEN=your-token
-    3. Run: pytest tests/test_scrapers_integration.py::test_thingiverse -v
+    3. Run: pytest tests/test_integration_scrapers.py::test_thingiverse -v
     """
     access_token = thingiverse_oauth_config["access_token"]
     scraper = ThingiverseScraper(clean_database, access_token)

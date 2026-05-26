@@ -13,6 +13,7 @@ from .contracts import (
     SourceScrapedProduct,
 )
 from .github_adapter import GitHubSourceAdapter
+from .thingiverse_adapter import ThingiverseSourceAdapter
 
 __all__ = [
     "AuthResolution",
@@ -26,4 +27,5 @@ __all__ = [
     "ScrapeMode",
     "ScrapeRunContext",
     "SourceScrapedProduct",
+    "ThingiverseSourceAdapter",
 ]

@@ -72,6 +72,14 @@ def _resolve_requested_image_id(db, product_data: dict, created_by: str | None =
     return None
 
 
+def _build_manual_edit_metadata(current_user_id: str | None) -> dict[str, str]:
+    """Stamp products with the most recent human edit metadata."""
+    metadata = {"last_edited_at": datetime.now(UTC).replace(tzinfo=None).isoformat()}
+    if current_user_id:
+        metadata["last_edited_by"] = current_user_id
+    return metadata
+
+
 def _normalize_list(values: Iterable[str] | str | None) -> list[str]:
     """Flatten query params supporting comma-separated and repeated values."""
     normalized: list[str] = []
@@ -1360,6 +1368,7 @@ async def create_product(
             raise HTTPException(
                 status_code=403, detail="Product is banned and cannot be resubmitted"
             )
+        manual_edit_metadata = _build_manual_edit_metadata(current_user.get("id"))
         # Build update data, excluding immutable fields like created_by
         update_data = {
             k: v
@@ -1375,9 +1384,12 @@ async def create_product(
                 "type",
                 "external_id",
                 "source_last_updated",
+                "last_edited_at",
+                "last_edited_by",
             }
             and v is not None
         }
+        update_data.update(manual_edit_metadata)
 
         # Ensure legacy rows get a slug assigned
         if not existing_product.get("slug"):
@@ -1449,6 +1461,7 @@ async def create_product(
 
     # Add the generated slug to the insert data
     db_insert = {k: v for k, v in db_data.items() if v is not None}
+    db_insert.update(_build_manual_edit_metadata(current_user.get("id")))
     db_insert["slug"] = slug
     response = db.table("products").insert(db_insert).execute()
 
@@ -1565,6 +1578,8 @@ async def update_product(
         db_data["type"] = product.type
     if "external_id" in product_data:
         db_data["external_id"] = product_data["external_id"]
+    if db_data or "tags" in product_data:
+        db_data.update(_build_manual_edit_metadata(current_user.get("id")))
     # Apply basic field updates
 
     if db_data:
@@ -1683,6 +1698,8 @@ async def patch_product(
         db_data["external_id"] = product_data["external_id"]
     if "source_last_updated" in product_data and product.source_last_updated is not None:
         db_data["source_last_updated"] = product.source_last_updated
+    if db_data or "tags" in product_data:
+        db_data.update(_build_manual_edit_metadata(current_user.get("id")))
 
     try:
         # Update the product if there are fields to update (permissions already checked above)

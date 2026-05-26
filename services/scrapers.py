@@ -3,10 +3,15 @@ Backend scraper service - handles OAuth and coordinates scraping
 """
 
 import os
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
+from scrapers.core.contracts import ScrapeMode, ScrapeRunContext
+from scrapers.core.github_adapter import GitHubSourceAdapter
+from scrapers.core.ravelry_adapter import RavelrySourceAdapter
+from scrapers.core.thingiverse_adapter import ThingiverseSourceAdapter
 from scrapers.github import GitHubScraper
 from scrapers.goat import GOATScraper
 from scrapers.ravelry import RavelryScraper
@@ -77,82 +82,47 @@ class ScraperService:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
 
-    async def scrape_thingiverse(
-        self, access_token: str | None, test_mode: bool = False, test_limit: int = 5
-    ) -> dict[str, Any]:
-        """Scrape Thingiverse for accessibility products"""
-        scraper = ThingiverseScraper(self.supabase, access_token)
-        # Load persisted search terms, supporting both array and normalized schemas
+    @staticmethod
+    def _truthy_env(name: str, default: bool) -> bool:
+        value = os.getenv(name)
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _load_platform_terms(self, platform: str) -> list[str] | None:
+        """Load persisted search terms for a platform from either schema variant."""
         try:
             response = (
                 self.supabase.table("scraper_search_terms")
                 .select("search_terms")
-                .eq("platform", "thingiverse")
+                .eq("platform", platform)
                 .limit(1)
                 .execute()
             )
             terms = (response.data or [{}])[0].get("search_terms") if response.data else None
             if not (isinstance(terms, list) and terms):
-                # Fallback to normalized rows
-                resp2 = (
+                normalized = (
                     self.supabase.table("scraper_search_terms")
                     .select("search_term")
-                    .eq("platform", "thingiverse")
+                    .eq("platform", platform)
                     .execute()
                 )
-                terms = [r.get("search_term") for r in (resp2.data or []) if r.get("search_term")]
-            if isinstance(terms, list) and terms:
-                scraper.SEARCH_TERMS = terms
-        except Exception:
-            pass
-        try:
-            result = await scraper.scrape(test_mode=test_mode, test_limit=test_limit)
-            return result
-        finally:
-            await scraper.close()
+                terms = [
+                    row.get("search_term")
+                    for row in (normalized.data or [])
+                    if row.get("search_term")
+                ]
 
-    async def scrape_ravelry(
-        self, access_token: str, test_mode: bool = False, test_limit: int = 5
-    ) -> dict[str, Any]:
-        """Scrape Ravelry for accessibility patterns"""
-        scraper = RavelryScraper(self.supabase, access_token)
-        # Load persisted PA categories, supporting both array and normalized schemas
-        try:
-            response = (
-                self.supabase.table("scraper_search_terms")
-                .select("search_terms")
-                .eq("platform", "ravelry_pa_categories")
-                .limit(1)
-                .execute()
-            )
-            cats = (response.data or [{}])[0].get("search_terms") if response.data else None
-            if not (isinstance(cats, list) and cats):
-                resp2 = (
-                    self.supabase.table("scraper_search_terms")
-                    .select("search_term")
-                    .eq("platform", "ravelry_pa_categories")
-                    .execute()
-                )
-                cats = [r.get("search_term") for r in (resp2.data or []) if r.get("search_term")]
-            if isinstance(cats, list) and cats:
-                scraper.PA_CATEGORIES = cats
+            return terms if isinstance(terms, list) and terms else None
         except Exception:
-            pass
-        try:
-            result = await scraper.scrape(test_mode=test_mode, test_limit=test_limit)
-            return result
-        finally:
-            await scraper.close()
+            return None
 
-    async def scrape_github(self, test_mode: bool = False, test_limit: int = 5) -> dict[str, Any]:
-        """Scrape GitHub for assistive technology repositories"""
-        token: str | None = None
-        # Prefer stored token (set via admin UI), fall back to env for local/dev.
+    async def _load_platform_token(self, platform: str) -> str | None:
         try:
             config_response = (
                 self.supabase.table("oauth_configs")
                 .select("access_token")
-                .eq("platform", "github")
+                .eq("platform", platform)
                 .execute()
             )
             token = (
@@ -160,41 +130,341 @@ class ScraperService:
                 if config_response.data
                 else None
             )
+            return token
         except Exception:
-            token = None
+            return None
 
+    async def _scrape_thingiverse_legacy(
+        self, access_token: str | None, test_mode: bool = False, test_limit: int = 5
+    ) -> dict[str, Any]:
+        """Legacy Thingiverse implementation kept as a safe fallback."""
+        scraper = ThingiverseScraper(self.supabase, access_token)
+        terms = self._load_platform_terms("thingiverse")
+        if terms:
+            scraper.SEARCH_TERMS = terms
+
+        try:
+            result = await scraper.scrape(test_mode=test_mode, test_limit=test_limit)
+            result["harness"] = "legacy"
+            return result
+        finally:
+            await scraper.close()
+
+    async def _scrape_thingiverse_core(
+        self, access_token: str | None, test_mode: bool = False, test_limit: int = 5
+    ) -> dict[str, Any]:
+        """Run Thingiverse via core adapter enumeration/fetch with legacy persistence layer."""
+        if not access_token:
+            raise ValueError("Thingiverse access token is required")
+
+        adapter = ThingiverseSourceAdapter(self.supabase, access_token=access_token)
+        persistence = ThingiverseScraper(self.supabase, access_token)
+
+        terms = self._load_platform_terms("thingiverse")
+        if terms:
+            adapter.SEARCH_TERMS = terms
+            persistence.SEARCH_TERMS = terms
+
+        mode = ScrapeMode.FULL_SOURCE_TEST_N if test_mode else ScrapeMode.FULL_SOURCE
+        context = ScrapeRunContext(mode=mode, max_products=test_limit if test_mode else None)
+
+        start_time = datetime.now(UTC)
+        products_found = 0
+        products_added = 0
+        products_updated = 0
+
+        try:
+            candidates = await adapter.enumerate_candidates(context)
+
+            for candidate in candidates:
+                raw = await adapter.fetch_one(candidate, context)
+                if not raw:
+                    continue
+
+                products_found += 1
+
+                thing_id = raw.get("id")
+                url = raw.get("public_url") or (
+                    f"https://www.thingiverse.com/thing:{thing_id}" if thing_id is not None else None
+                )
+                if not url:
+                    continue
+
+                existing = await persistence._product_exists(
+                    url,
+                    external_id=str(thing_id) if thing_id is not None else None,
+                    source=persistence.get_source_name(),
+                )
+
+                if existing:
+                    result = await persistence._update_product(existing["id"], raw)
+                    if result:
+                        products_updated += 1
+                else:
+                    result = await persistence._create_product(raw)
+                    if result:
+                        products_added += 1
+
+            duration = (datetime.now(UTC) - start_time).total_seconds()
+            return {
+                "source": "Thingiverse",
+                "products_found": products_found,
+                "products_added": products_added,
+                "products_updated": products_updated,
+                "duration_seconds": duration,
+                "status": "success",
+                "harness": "core",
+            }
+        except Exception as e:
+            duration = (datetime.now(UTC) - start_time).total_seconds()
+            return {
+                "source": "Thingiverse",
+                "products_found": products_found,
+                "products_added": products_added,
+                "products_updated": products_updated,
+                "duration_seconds": duration,
+                "status": "error",
+                "error_message": str(e),
+                "harness": "core",
+            }
+        finally:
+            await adapter.close()
+            await persistence.close()
+
+    async def _scrape_github_legacy(
+        self, test_mode: bool = False, test_limit: int = 5
+    ) -> dict[str, Any]:
+        token = await self._load_platform_token("github")
         if not token:
             token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_ACCESS_TOKEN")
 
         scraper = GitHubScraper(self.supabase, access_token=token)
-        # Load persisted search terms, supporting both array and normalized schemas
-        try:
-            response = (
-                self.supabase.table("scraper_search_terms")
-                .select("search_terms")
-                .eq("platform", "github")
-                .limit(1)
-                .execute()
-            )
-            terms = (response.data or [{}])[0].get("search_terms") if response.data else None
-            if not (isinstance(terms, list) and terms):
-                resp2 = (
-                    self.supabase.table("scraper_search_terms")
-                    .select("search_term")
-                    .eq("platform", "github")
-                    .execute()
-                )
-                terms = [r.get("search_term") for r in (resp2.data or []) if r.get("search_term")]
-            if isinstance(terms, list) and terms:
-                scraper.SEARCH_TERMS = terms
-        except Exception:
-            # If DB read fails, continue with default in-memory terms
-            pass
+        terms = self._load_platform_terms("github")
+        if terms:
+            scraper.SEARCH_TERMS = terms
         try:
             result = await scraper.scrape(test_mode=test_mode, test_limit=test_limit)
+            result["harness"] = "legacy"
             return result
         finally:
             await scraper.close()
+
+    async def _scrape_github_core(
+        self, test_mode: bool = False, test_limit: int = 5
+    ) -> dict[str, Any]:
+        token = await self._load_platform_token("github")
+        if not token:
+            token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_ACCESS_TOKEN")
+
+        adapter = GitHubSourceAdapter(self.supabase, access_token=token)
+        persistence = GitHubScraper(self.supabase, access_token=token)
+
+        terms = self._load_platform_terms("github")
+        if terms:
+            adapter.SEARCH_TERMS = terms
+            persistence.SEARCH_TERMS = terms
+
+        mode = ScrapeMode.FULL_SOURCE_TEST_N if test_mode else ScrapeMode.FULL_SOURCE
+        context = ScrapeRunContext(mode=mode, max_products=test_limit if test_mode else None)
+
+        start_time = datetime.now(UTC)
+        products_found = 0
+        products_added = 0
+        products_updated = 0
+
+        try:
+            candidates = await adapter.enumerate_candidates(context)
+            for candidate in candidates:
+                raw = await adapter.fetch_one(candidate, context)
+                if not raw:
+                    continue
+
+                products_found += 1
+
+                url = raw.get("html_url") or raw.get("url")
+                full_name = raw.get("full_name")
+                if not url and full_name:
+                    url = f"https://github.com/{full_name}"
+                if not url:
+                    continue
+
+                external_id = raw.get("id") or raw.get("node_id")
+                existing = await persistence._product_exists(
+                    url,
+                    external_id=str(external_id) if external_id is not None else None,
+                    source=persistence.get_source_name(),
+                )
+
+                if existing:
+                    result = await persistence._update_product(existing["id"], raw)
+                    if result:
+                        products_updated += 1
+                else:
+                    result = await persistence._create_product(raw)
+                    if result:
+                        products_added += 1
+
+            duration = (datetime.now(UTC) - start_time).total_seconds()
+            return {
+                "source": "GitHub",
+                "products_found": products_found,
+                "products_added": products_added,
+                "products_updated": products_updated,
+                "duration_seconds": duration,
+                "status": "success",
+                "harness": "core",
+            }
+        except Exception as e:
+            duration = (datetime.now(UTC) - start_time).total_seconds()
+            return {
+                "source": "GitHub",
+                "products_found": products_found,
+                "products_added": products_added,
+                "products_updated": products_updated,
+                "duration_seconds": duration,
+                "status": "error",
+                "error_message": str(e),
+                "harness": "core",
+            }
+        finally:
+            await adapter.close()
+            await persistence.close()
+
+    async def _scrape_ravelry_legacy(
+        self, access_token: str, test_mode: bool = False, test_limit: int = 5
+    ) -> dict[str, Any]:
+        scraper = RavelryScraper(self.supabase, access_token)
+        cats = self._load_platform_terms("ravelry_pa_categories")
+        if cats:
+            scraper.PA_CATEGORIES = cats
+        try:
+            result = await scraper.scrape(test_mode=test_mode, test_limit=test_limit)
+            result["harness"] = "legacy"
+            return result
+        finally:
+            await scraper.close()
+
+    async def _scrape_ravelry_core(
+        self, access_token: str, test_mode: bool = False, test_limit: int = 5
+    ) -> dict[str, Any]:
+        adapter = RavelrySourceAdapter(self.supabase, access_token=access_token)
+        persistence = RavelryScraper(self.supabase, access_token)
+
+        cats = self._load_platform_terms("ravelry_pa_categories")
+        if cats:
+            adapter.PA_CATEGORIES = cats
+            persistence.PA_CATEGORIES = cats
+
+        mode = ScrapeMode.FULL_SOURCE_TEST_N if test_mode else ScrapeMode.FULL_SOURCE
+        context = ScrapeRunContext(mode=mode, max_products=test_limit if test_mode else None)
+
+        start_time = datetime.now(UTC)
+        products_found = 0
+        products_added = 0
+        products_updated = 0
+
+        try:
+            candidates = await adapter.enumerate_candidates(context)
+            for candidate in candidates:
+                raw = await adapter.fetch_one(candidate, context)
+                if not raw:
+                    continue
+
+                products_found += 1
+
+                permalink = str(raw.get("permalink") or "").strip()
+                url = raw.get("url") or (
+                    f"https://www.ravelry.com/patterns/library/{permalink}"
+                    if permalink
+                    else None
+                )
+                if not url:
+                    continue
+
+                external_id = raw.get("id") or permalink
+                existing = await persistence._product_exists(
+                    url,
+                    external_id=str(external_id) if external_id else None,
+                    source=persistence.get_source_name(),
+                )
+
+                if existing:
+                    result = await persistence._update_product(existing["id"], raw)
+                    if result:
+                        products_updated += 1
+                else:
+                    result = await persistence._create_product(raw)
+                    if result:
+                        products_added += 1
+
+            duration = (datetime.now(UTC) - start_time).total_seconds()
+            return {
+                "source": "Ravelry",
+                "products_found": products_found,
+                "products_added": products_added,
+                "products_updated": products_updated,
+                "duration_seconds": duration,
+                "status": "success",
+                "harness": "core",
+            }
+        except Exception as e:
+            duration = (datetime.now(UTC) - start_time).total_seconds()
+            return {
+                "source": "Ravelry",
+                "products_found": products_found,
+                "products_added": products_added,
+                "products_updated": products_updated,
+                "duration_seconds": duration,
+                "status": "error",
+                "error_message": str(e),
+                "harness": "core",
+            }
+        finally:
+            await adapter.close()
+            await persistence.close()
+
+    async def scrape_thingiverse(
+        self, access_token: str | None, test_mode: bool = False, test_limit: int = 5
+    ) -> dict[str, Any]:
+        """Scrape Thingiverse for accessibility products."""
+        use_core_harness = self._truthy_env("THINGIVERSE_USE_CORE_HARNESS", True)
+        if use_core_harness:
+            return await self._scrape_thingiverse_core(
+                access_token=access_token,
+                test_mode=test_mode,
+                test_limit=test_limit,
+            )
+
+        return await self._scrape_thingiverse_legacy(
+            access_token=access_token,
+            test_mode=test_mode,
+            test_limit=test_limit,
+        )
+
+    async def scrape_ravelry(
+        self, access_token: str, test_mode: bool = False, test_limit: int = 5
+    ) -> dict[str, Any]:
+        """Scrape Ravelry for accessibility patterns."""
+        use_core_harness = self._truthy_env("RAVELRY_USE_CORE_HARNESS", True)
+        if use_core_harness:
+            return await self._scrape_ravelry_core(
+                access_token=access_token,
+                test_mode=test_mode,
+                test_limit=test_limit,
+            )
+
+        return await self._scrape_ravelry_legacy(
+            access_token=access_token,
+            test_mode=test_mode,
+            test_limit=test_limit,
+        )
+
+    async def scrape_github(self, test_mode: bool = False, test_limit: int = 5) -> dict[str, Any]:
+        """Scrape GitHub for assistive technology repositories."""
+        use_core_harness = self._truthy_env("GITHUB_USE_CORE_HARNESS", True)
+        if use_core_harness:
+            return await self._scrape_github_core(test_mode=test_mode, test_limit=test_limit)
+        return await self._scrape_github_legacy(test_mode=test_mode, test_limit=test_limit)
 
     async def scrape_goat(
         self, access_token: str | None = None, test_mode: bool = False, test_limit: int = 5
