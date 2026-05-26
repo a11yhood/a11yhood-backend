@@ -40,6 +40,7 @@ This document tracks the deployment plan implementation progress.
 - [ ] Configure environment variables in hosting platform
   - [ ] Set `ALLOWED_HOSTS` (comma-separated), for example: `api.a11yhood.com,backend-test-git-vercel-support-a11yhood.vercel.app,*.vercel.app`
   - [ ] Ensure `FRONTEND_URL` and `PRODUCTION_URL` match deployed domains
+  - [ ] Set `CRON_SECRET` to a long random value used by Vercel Cron requests
 - [ ] Update OAuth redirect URIs to production domain
 - [ ] Update CORS origins in backend config
 - [ ] Deploy backend to chosen platform
@@ -106,6 +107,7 @@ Common issues and solutions documented in [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.m
 - **Monitoring**: Check Supabase dashboard regularly for usage
 - **Costs**: Monitor Supabase usage to avoid unexpected charges
 - **Testing**: Always test in local production before cloud deploy
+- **Cron**: Vercel Cron only targets production deployments; the cron endpoints require `Authorization: Bearer $CRON_SECRET`
 
 ### Test vs Production
 
@@ -116,6 +118,13 @@ Common issues and solutions documented in [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.m
 | Data | Can reset | Permanent |
 | OAuth | Mock | Real GitHub |
 | Use for | Development | Pre-cloud validation |
+
+### Cron Secret Setup
+
+- Generate a random secret string, for example with `openssl rand -hex 32`.
+- Store the same value in your Vercel project environment variables as `CRON_SECRET`.
+- For local testing, export the same variable in your shell or add it to your local `.env` file.
+- The cron request header must be `Authorization: Bearer <that same value>`.
 
 ### Environment Files
 

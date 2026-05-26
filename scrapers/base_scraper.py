@@ -421,6 +421,31 @@ class BaseScraper(ABC):
                 return None
             raise
 
+    @staticmethod
+    def _has_content(value: Any) -> bool:
+        """Return True when a field has a meaningful existing value."""
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, dict, tuple, set)):
+            return len(value) > 0
+        return True
+
+    def _product_has_tags(self, product_id: str) -> bool:
+        """Check if a product already has tags attached."""
+        try:
+            result = (
+                self.supabase.table("product_tags")
+                .select("product_id")
+                .eq("product_id", product_id)
+                .limit(1)
+                .execute()
+            )
+            return bool(result.data)
+        except Exception:
+            return False
+
     def _create_product_dict(self, raw_data: dict[str, Any]) -> dict[str, Any]:
         """
         Convert scraped data to product dict format
@@ -662,10 +687,34 @@ class BaseScraper(ABC):
         """
         product_name = raw_data.get("name", raw_data.get("title", "UNKNOWN"))
         try:
+            existing_product = None
+            try:
+                existing_response = (
+                    self.supabase.table("products")
+                    .select("id,name,description,type")
+                    .eq("id", product_id)
+                    .limit(1)
+                    .execute()
+                )
+                if existing_response.data:
+                    existing_product = existing_response.data[0]
+            except Exception:
+                existing_product = None
+
             product_data = self._create_product_dict(raw_data)
             product_data = self._canonicalize_source(product_data)
             product_data = self._normalize_image_reference_fields(product_data)
             tag_names = product_data.pop("tags", None)
+
+            # Preserve user-editable fields after first population; only backfill blanks.
+            if existing_product:
+                for editable_field in ("name", "description", "type"):
+                    if self._has_content(existing_product.get(editable_field)):
+                        product_data.pop(editable_field, None)
+
+                if tag_names is not None and self._product_has_tags(product_id):
+                    tag_names = None
+
             # Do not overwrite slug on update; only backfill if completely missing
             if not product_data.get("slug"):
                 product_data = self._ensure_slug(product_data)
