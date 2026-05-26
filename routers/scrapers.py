@@ -371,7 +371,7 @@ async def load_url(
     if not parsed:
         return {
             "success": False,
-            "message": "URL not supported by adapter inquiry flow",
+            "message": "URL not supported by any scraper (adapter inquiry flow)",
         }
 
     source_key, canonical_url, minimal_candidate = parsed

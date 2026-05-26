@@ -40,7 +40,6 @@ This document tracks the deployment plan implementation progress.
 - [ ] Configure environment variables in hosting platform
   - [ ] Set `ALLOWED_HOSTS` (comma-separated), for example: `api.a11yhood.com,backend-test-git-vercel-support-a11yhood.vercel.app,*.vercel.app`
   - [ ] Ensure `FRONTEND_URL` and `PRODUCTION_URL` match deployed domains
-  - [ ] Set `CRON_SECRET` to a long random value used by Vercel Cron requests
 - [ ] Update OAuth redirect URIs to production domain
 - [ ] Update CORS origins in backend config
 - [ ] Deploy backend to chosen platform

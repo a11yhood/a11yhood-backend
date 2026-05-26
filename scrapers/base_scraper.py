@@ -691,7 +691,7 @@ class BaseScraper(ABC):
             try:
                 existing_response = (
                     self.supabase.table("products")
-                    .select("id,name,description,type")
+                    .select("id,name,description,type,last_edited_at,last_edited_by")
                     .eq("id", product_id)
                     .limit(1)
                     .execute()
@@ -706,8 +706,12 @@ class BaseScraper(ABC):
             product_data = self._normalize_image_reference_fields(product_data)
             tag_names = product_data.pop("tags", None)
 
-            # Preserve user-editable fields after first population; only backfill blanks.
-            if existing_product:
+            # Preserve user-editable fields only after a human has edited the product.
+            human_edited = bool(
+                existing_product
+                and (existing_product.get("last_edited_at") or existing_product.get("last_edited_by"))
+            )
+            if human_edited:
                 for editable_field in ("name", "description", "type"):
                     if self._has_content(existing_product.get(editable_field)):
                         product_data.pop(editable_field, None)

@@ -70,12 +70,14 @@ def _build_supabase(existing_product: dict, has_tags: bool):
 
 
 @pytest.mark.asyncio
-async def test_update_product_preserves_populated_user_editable_fields_and_tags():
+async def test_update_product_preserves_populated_human_edited_fields_and_tags():
     existing = {
         "id": "p1",
         "name": "User Curated Name",
         "description": "User Curated Description",
         "type": "Learning",
+        "last_edited_at": "2026-01-01T00:00:00",
+        "last_edited_by": "user-1",
     }
     supabase, products_table = _build_supabase(existing_product=existing, has_tags=True)
     scraper = DummyScraper(supabase)
@@ -117,6 +119,39 @@ async def test_update_product_backfills_missing_fields_and_tags(monkeypatch):
     monkeypatch.setattr("routers.products.set_product_tags", fake_set_product_tags)
 
     ok = await scraper._update_product("p2", {"name": "raw"})
+
+    assert ok is True
+    update_payload = products_table.update.call_args.args[0]
+
+    assert update_payload["name"] == "Scraped Name"
+    assert update_payload["description"] == "Scraped Description"
+    assert update_payload["type"] == "Software"
+    assert captured["called"] is True
+    assert captured["tags"] == ["a11y", "oss"]
+
+
+@pytest.mark.asyncio
+async def test_update_product_refreshes_populated_fields_when_not_human_edited(monkeypatch):
+    existing = {
+        "id": "p3",
+        "name": "Old Name",
+        "description": "Old Description",
+        "type": "Hardware",
+        "last_edited_at": None,
+        "last_edited_by": None,
+    }
+    supabase, products_table = _build_supabase(existing_product=existing, has_tags=False)
+    scraper = DummyScraper(supabase)
+
+    captured = {"called": False, "tags": None}
+
+    def fake_set_product_tags(_db, _product_id, tags):
+        captured["called"] = True
+        captured["tags"] = tags
+
+    monkeypatch.setattr("routers.products.set_product_tags", fake_set_product_tags)
+
+    ok = await scraper._update_product("p3", {"name": "raw"})
 
     assert ok is True
     update_payload = products_table.update.call_args.args[0]
