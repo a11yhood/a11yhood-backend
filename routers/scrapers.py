@@ -375,7 +375,6 @@ async def load_url(
         }
 
     source_key, canonical_url, minimal_candidate = parsed
-    url = canonical_url
 
     # First, check if product already exists in database
     existing = db.table("products").select("*").eq("source_url", canonical_url).limit(1).execute()
