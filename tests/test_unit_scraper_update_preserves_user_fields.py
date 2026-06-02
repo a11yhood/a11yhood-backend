@@ -33,7 +33,7 @@ class DummyScraper(BaseScraper):
         }
 
 
-def _build_supabase(existing_product: dict, has_tags: bool):
+def _build_supabase(existing_product: dict, has_tags: bool, has_editors: bool = False):
     supabase = MagicMock()
 
     products_table = MagicMock()
@@ -58,11 +58,22 @@ def _build_supabase(existing_product: dict, has_tags: bool):
         [{"product_id": existing_product["id"]}] if has_tags else []
     )
 
+    product_editors_table = MagicMock()
+    product_editors_select = MagicMock()
+    product_editors_table.select.return_value = product_editors_select
+    product_editors_select.eq.return_value = product_editors_select
+    product_editors_select.limit.return_value = product_editors_select
+    product_editors_select.execute.return_value = _Response(
+        [{"product_id": existing_product["id"]}] if has_editors else []
+    )
+
     def table_side_effect(name):
         if name == "products":
             return products_table
         if name == "product_tags":
             return product_tags_table
+        if name == "product_editors":
+            return product_editors_table
         return MagicMock()
 
     supabase.table.side_effect = table_side_effect
@@ -161,3 +172,72 @@ async def test_update_product_refreshes_populated_fields_when_not_human_edited(m
     assert update_payload["type"] == "Software"
     assert captured["called"] is True
     assert captured["tags"] == ["a11y", "oss"]
+
+
+@pytest.mark.asyncio
+async def test_update_product_preserves_intentionally_cleared_tags_for_human_edit(monkeypatch):
+    existing = {
+        "id": "p4",
+        "name": "Curated Name",
+        "description": "Curated Description",
+        "type": "Software",
+        "last_edited_at": "2026-01-15T00:00:00",
+        "last_edited_by": "user-2",
+    }
+    supabase, products_table = _build_supabase(existing_product=existing, has_tags=False)
+    scraper = DummyScraper(supabase)
+
+    captured = {"called": False, "tags": None}
+
+    def fake_set_product_tags(_db, _product_id, tags):
+        captured["called"] = True
+        captured["tags"] = tags
+
+    monkeypatch.setattr("routers.products.set_product_tags", fake_set_product_tags)
+
+    ok = await scraper._update_product("p4", {"name": "raw"})
+
+    assert ok is True
+    update_payload = products_table.update.call_args.args[0]
+
+    assert "name" not in update_payload
+    assert "description" not in update_payload
+    assert "type" not in update_payload
+    assert captured["called"] is False
+    assert captured["tags"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_product_preserves_fields_for_editor_managed_legacy_rows(monkeypatch):
+    existing = {
+        "id": "p5",
+        "name": "Legacy Curated Name",
+        "description": "Legacy Curated Description",
+        "type": "Hardware",
+        "last_edited_at": None,
+        "last_edited_by": None,
+    }
+    supabase, products_table = _build_supabase(
+        existing_product=existing,
+        has_tags=True,
+        has_editors=True,
+    )
+    scraper = DummyScraper(supabase)
+
+    captured = {"called": False, "tags": None}
+
+    def fake_set_product_tags(_db, _product_id, tags):
+        captured["called"] = True
+        captured["tags"] = tags
+
+    monkeypatch.setattr("routers.products.set_product_tags", fake_set_product_tags)
+
+    ok = await scraper._update_product("p5", {"name": "raw"})
+
+    assert ok is True
+    update_payload = products_table.update.call_args.args[0]
+    assert "name" not in update_payload
+    assert "description" not in update_payload
+    assert "type" not in update_payload
+    assert captured["called"] is False
+    assert captured["tags"] is None
