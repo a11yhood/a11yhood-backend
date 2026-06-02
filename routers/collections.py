@@ -77,8 +77,12 @@ def _ensure_collection_editor_or_rollback(db, collection_id: str, user_id: str) 
         )
         try:
             db.table("collections").delete().eq("id", collection_id).execute()
-        except Exception:
-            pass
+        except Exception as rollback_exc:
+            logger.warning(
+                "rollback delete failed for collection_id=%s after editor init failure: %s",
+                collection_id,
+                rollback_exc,
+            )
         raise HTTPException(status_code=500, detail="Failed to initialize collection editors")
 
 
