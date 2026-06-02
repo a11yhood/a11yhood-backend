@@ -1016,71 +1016,63 @@ DELETE /api/blog-posts/:id
 
 ## Collections
 
-### Get All Collections
+### Collection Object
+
+Collection responses use snake_case field names:
+
+```json
+{
+  "id": "cf4d6c2e-8d8b-4b6e-a0aa-8f07d9a0a1a9",
+  "slug": "my-favorites",
+  "name": "My Favorites",
+  "description": "Products I love",
+  "is_public": false,
+  "user_id": "49366adb-2d13-412f-9ae5-4c35dbffab10",
+  "user_name": "johndoe",
+  "editor_ids": [
+    "49366adb-2d13-412f-9ae5-4c35dbffab10",
+    "90ea5cc1-e58c-4c3a-a938-8d9ad7d1bb47"
+  ],
+  "product_ids": [
+    "2bf24db6-0a4f-4b2f-9005-8f4cf66d31ab"
+  ],
+  "product_slugs": [
+    "accessible-keyboard"
+  ],
+  "created_at": "2026-06-01T20:44:12+00:00",
+  "updated_at": "2026-06-01T20:45:01+00:00"
+}
+```
+
+### Get Authenticated User Collections
 
 ```http
 GET /api/collections
-GET /api/collections?public=true
+```
+
+Returns collections owned by the authenticated user.
+
+### Get Public Collections
+
+```http
+GET /api/collections/public
+GET /api/collections/public?sort_by=created_at
+GET /api/collections/public?sort_by=product_count
+GET /api/collections/public?sort_by=updated_at
+GET /api/collections/public?search=yarn
 ```
 
 **Query Parameters:**
-- `public` (optional): Filter public collections only
-
-**Response:**
-```json
-[
-  {
-    "id": "coll-1",
-    "name": "My Favorites",
-    "description": "Products I love",
-    "userId": "12345",
-    "userName": "johndoe",
-    "productIds": ["prod-1", "prod-2"],
-    "createdAt": 1704067200000,
-    "updatedAt": 1704153600000,
-    "isPublic": false
-  }
-]
-```
+- `sort_by` (optional): `created_at` (default), `product_count`, or `updated_at`
+- `search` (optional): Case-insensitive filter by collection name
 
 ### Get Single Collection
 
 ```http
-GET /api/collections/:id
+GET /api/collections/{collection_slug}
 ```
 
-**Parameters:**
-- `id`: Collection ID
-
-**Response:**
-```json
-{
-  "id": "coll-1",
-  "name": "My Favorites",
-  ...
-}
-```
-
-### Get User's Collections
-
-```http
-GET /api/users/:userId/collections
-```
-
-**Parameters:**
-- `userId`: User ID
-
-**Response:**
-```json
-[
-  {
-    "id": "coll-1",
-    "name": "My Favorites",
-    "userId": "12345",
-    ...
-  }
-]
-```
+`collection_slug` accepts either slug or UUID.
 
 ### Create Collection
 
@@ -1093,121 +1085,135 @@ POST /api/collections
 {
   "name": "My Favorites",
   "description": "Products I love",
-  "userId": "12345",
-  "userName": "johndoe",
-  "productIds": [],
-  "isPublic": false
+  "is_public": false
 }
 ```
 
-**Response:**
-```json
-{
-  "id": "coll-new",
-  "name": "My Favorites",
-  "createdAt": 1704153600000,
-  "updatedAt": 1704153600000,
-  ...
-}
+Creator is automatically added to `editor_ids`.
+
+### Create Collection From Search
+
+```http
+POST /api/collections/from-search
 ```
+
+Creates a collection and populates products using product search filters.
 
 ### Update Collection
 
 ```http
-PATCH /api/collections/:id
+PUT /api/collections/{collection_slug}
 ```
 
-**Permissions:** Collection owner only
-
-**Parameters:**
-- `id`: Collection ID
+**Permissions:** Owner or collection editor.
 
 **Body:**
 ```json
 {
   "name": "Updated Name",
   "description": "Updated description",
-  "isPublic": true
-}
-```
-
-**Response:**
-```json
-{
-  "id": "coll-1",
-  "name": "Updated Name",
-  "updatedAt": 1704153600000,
-  ...
+  "is_public": true
 }
 ```
 
 ### Delete Collection
 
 ```http
-DELETE /api/collections/:id
+DELETE /api/collections/{collection_slug}
 ```
 
-**Permissions:** Collection owner only
+**Permissions:** Owner or collection editor.
 
-**Parameters:**
-- `id`: Collection ID
+Returns `204 No Content`.
 
-**Response:**
-```json
-{
-  "success": true
-}
-```
-
-### Add Product to Collection
+### Add Single Product to Collection
 
 ```http
-POST /api/collections/:id/products
+POST /api/collections/{collection_slug}/products/{product_slug}
 ```
 
-**Permissions:** Collection owner only
+**Permissions:** Owner or collection editor.
 
-**Parameters:**
-- `id`: Collection ID
+`product_slug` accepts either slug or UUID.
+
+### Add Multiple Products to Collection
+
+```http
+POST /api/collections/{collection_slug}/products
+```
+
+**Permissions:** Owner or collection editor.
 
 **Body:**
 ```json
 {
-  "productId": "prod-1"
+  "product_ids": [
+    "accessible-keyboard",
+    "2bf24db6-0a4f-4b2f-9005-8f4cf66d31ab"
+  ]
 }
 ```
 
-**Response:**
-```json
-{
-  "id": "coll-1",
-  "productIds": ["prod-1"],
-  "updatedAt": 1704153600000,
-  ...
-}
-```
+Each entry can be either a product slug or UUID.
 
-### Remove Product from Collection
+### Remove Single Product from Collection
 
 ```http
-DELETE /api/collections/:id/products/:productId
+DELETE /api/collections/{collection_slug}/products/{product_slug}
 ```
 
-**Permissions:** Collection owner only
+**Permissions:** Owner or collection editor.
 
-**Parameters:**
-- `id`: Collection ID
-- `productId`: Product ID to remove
+### Remove All Products from Collection
+
+```http
+DELETE /api/collections/{collection_slug}/products
+```
+
+**Permissions:** Owner or collection editor.
+
+### Get Collection Editors
+
+```http
+GET /api/collections/{collection_slug}/editors
+```
+
+For private collections, requires owner/editor access.
 
 **Response:**
 ```json
 {
-  "id": "coll-1",
-  "productIds": [],
-  "updatedAt": 1704153600000,
-  ...
+  "collection_id": "cf4d6c2e-8d8b-4b6e-a0aa-8f07d9a0a1a9",
+  "editor_ids": [
+    "49366adb-2d13-412f-9ae5-4c35dbffab10",
+    "90ea5cc1-e58c-4c3a-a938-8d9ad7d1bb47"
+  ]
 }
 ```
+
+### Add Collection Editor
+
+```http
+POST /api/collections/{collection_slug}/editors/{editor_user_id}
+```
+
+**Permissions:** Collection owner, admin, or moderator.
+
+Returns updated collection object.
+
+### Remove Collection Editor
+
+```http
+DELETE /api/collections/{collection_slug}/editors/{editor_user_id}
+```
+
+**Permissions:** Collection owner, admin, or moderator.
+
+Returns updated collection object.
+
+**Validation Notes:**
+- `editor_user_id` must be a valid UUID.
+- Cannot remove the owner as an editor (`400`).
 
 ---
 
