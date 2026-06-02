@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from models.collections import (
     CollectionCreate,
+    CollectionEditorsResponse,
     CollectionFromSearchCreate,
     CollectionResponse,
     CollectionUpdate,
@@ -60,6 +61,14 @@ def _can_edit_collection(db, collection: dict, current_user: dict | None) -> boo
     if collection.get("user_id") == user_id:
         return True
     return _is_collection_editor(db, collection.get("id"), user_id)
+
+
+def _can_manage_collection_editors(collection: dict, current_user: dict | None) -> bool:
+    if not collection or not current_user:
+        return False
+    if collection.get("user_id") == current_user.get("id"):
+        return True
+    return current_user.get("role") in {"admin", "moderator"}
 
 
 def _ensure_collection_editor_or_rollback(db, collection_id: str, user_id: str) -> None:
@@ -423,8 +432,17 @@ def _get_collection_with_products(db, collection_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     collection = collection_resp.data[0]
+    _populate_collection_relationships(db, collection)
+    return collection
 
-    editors_resp = db.table("collection_editors").select("user_id").eq("collection_id", collection_id).execute()
+
+def _populate_collection_relationships(db, collection: dict) -> dict:
+    """Attach editor and product relationship fields expected by the API response model."""
+    collection_id = collection["id"]
+
+    editors_resp = (
+        db.table("collection_editors").select("user_id").eq("collection_id", collection_id).execute()
+    )
     collection["editor_ids"] = [row["user_id"] for row in (editors_resp.data or [])]
 
     # Get product IDs from junction table, ordered by position
@@ -486,17 +504,7 @@ async def get_user_collections(
 
     # Populate product_ids and product_slugs for each collection
     for collection in collections:
-        products_resp = (
-            db.table("collection_products")
-            .select("product_id, products(slug)")
-            .eq("collection_id", collection["id"])
-            .order("position")
-            .execute()
-        )
-        collection["product_ids"] = [p["product_id"] for p in (products_resp.data or [])]
-        collection["product_slugs"] = [
-            p["products"]["slug"] if p.get("products") else None for p in (products_resp.data or [])
-        ]
+        _populate_collection_relationships(db, collection)
 
     return collections
 
@@ -520,17 +528,7 @@ async def get_public_collections(
 
     # Populate product_ids and product_slugs for each collection
     for collection in collections:
-        products_resp = (
-            db.table("collection_products")
-            .select("product_id, products(slug)")
-            .eq("collection_id", collection["id"])
-            .order("position")
-            .execute()
-        )
-        collection["product_ids"] = [p["product_id"] for p in (products_resp.data or [])]
-        collection["product_slugs"] = [
-            p["products"]["slug"] if p.get("products") else None for p in (products_resp.data or [])
-        ]
+        _populate_collection_relationships(db, collection)
 
     # Filter by search if provided
     if search:
@@ -566,20 +564,7 @@ async def get_collection(
         if not current_user or not _can_edit_collection(db, collection, current_user):
             raise HTTPException(status_code=403, detail="Access denied")
 
-    # Populate product_ids and product_slugs from junction table
-    products_resp = (
-        db.table("collection_products")
-        .select("product_id, products(slug)")
-        .eq("collection_id", collection["id"])
-        .order("position")
-        .execute()
-    )
-    collection["product_ids"] = [p["product_id"] for p in (products_resp.data or [])]
-    collection["product_slugs"] = [
-        p["products"]["slug"] if p.get("products") else None for p in (products_resp.data or [])
-    ]
-
-    return collection
+    return _populate_collection_relationships(db, collection)
 
 
 @router.put("/{collection_slug}", response_model=CollectionResponse)
@@ -627,19 +612,100 @@ async def update_collection(
     # Update in database
     response = db.table("collections").update(update_data).eq("id", collection_id).execute()
 
-    updated_collection = response.data[0]
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Collection not found")
 
-    # Populate product_ids from junction table
-    products_resp = (
-        db.table("collection_products")
-        .select("product_id")
-        .eq("collection_id", collection_id)
-        .order("position")
+    return _get_collection_with_products(db, collection_id)
+
+
+@router.get("/{collection_slug}/editors", response_model=CollectionEditorsResponse)
+async def get_collection_editors(
+    collection_slug: str,
+    current_user: dict | None = Depends(get_current_user_optional),
+    db=Depends(get_db),
+):
+    """Return editor IDs for a collection.
+
+    Public collections expose editor IDs publicly. Private collections require owner/editor access.
+    """
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
+
+    if not collection.get("is_public"):
+        if not current_user or not _can_edit_collection(db, collection, current_user):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    editors_resp = (
+        db.table("collection_editors")
+        .select("user_id")
+        .eq("collection_id", collection["id"])
         .execute()
     )
-    updated_collection["product_ids"] = [p["product_id"] for p in (products_resp.data or [])]
+    return {
+        "collection_id": collection["id"],
+        "editor_ids": [row["user_id"] for row in (editors_resp.data or [])],
+    }
 
-    return updated_collection
+
+@router.post("/{collection_slug}/editors/{editor_user_id}", response_model=CollectionResponse)
+async def add_collection_editor(
+    collection_slug: str,
+    editor_user_id: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Add an editor to a collection.
+
+    Allowed for collection owner, admin, or moderator.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not _looks_like_uuid(editor_user_id):
+        raise HTTPException(status_code=400, detail="Invalid editor user id")
+
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
+    if not _can_manage_collection_editors(collection, current_user):
+        raise HTTPException(status_code=403, detail="Only owners and admins can manage editors")
+
+    user_resp = db.table("users").select("id").eq("id", editor_user_id).limit(1).execute()
+    if not user_resp.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db.table("collection_editors").upsert(
+        {"collection_id": collection["id"], "user_id": editor_user_id},
+        on_conflict="collection_id,user_id",
+    ).execute()
+
+    return _get_collection_with_products(db, collection["id"])
+
+
+@router.delete("/{collection_slug}/editors/{editor_user_id}", response_model=CollectionResponse)
+async def remove_collection_editor(
+    collection_slug: str,
+    editor_user_id: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Remove an editor from a collection.
+
+    Allowed for collection owner, admin, or moderator. Owner cannot be removed.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not _looks_like_uuid(editor_user_id):
+        raise HTTPException(status_code=400, detail="Invalid editor user id")
+
+    collection = _get_collection_by_slug_or_id(db, collection_slug)
+    if not _can_manage_collection_editors(collection, current_user):
+        raise HTTPException(status_code=403, detail="Only owners and admins can manage editors")
+
+    if editor_user_id == collection.get("user_id"):
+        raise HTTPException(status_code=400, detail="Cannot remove the collection owner")
+
+    db.table("collection_editors").delete().eq("collection_id", collection["id"]).eq(
+        "user_id", editor_user_id
+    ).execute()
+
+    return _get_collection_with_products(db, collection["id"])
 
 
 @router.delete("/{collection_slug}", status_code=204)

@@ -24,6 +24,11 @@ class ProductIdsRequest(BaseModel):
     product_ids: list[str] = Field(default_factory=list)
 
 
+class CollectionEditorsResponse(BaseModel):
+    collection_id: str
+    editor_ids: list[str] = Field(default_factory=list)
+
+
 class CollectionFromSearchCreate(CollectionBase):
     """Create a collection from search results."""
 

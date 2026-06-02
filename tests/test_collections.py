@@ -30,6 +30,7 @@ class TestCreateCollection:
         assert data["description"] == "Products I love"
         assert data["is_public"] is True
         assert data["user_id"] == test_user["id"]
+        assert test_user["id"] in data["editor_ids"]
         assert data["product_ids"] == []
         assert "id" in data
         assert "created_at" in data
@@ -153,6 +154,7 @@ class TestGetUserCollections:
         assert isinstance(data, list)
         assert len(data) >= 1
         assert any(c["id"] == collection_id for c in data)
+        assert any(test_user["id"] in c["editor_ids"] for c in data if c["id"] == collection_id)
 
     def test_get_user_collections_only_own(self, client, test_user, test_user_2, auth_headers):
         """Test that user only sees their own collections"""
@@ -270,6 +272,7 @@ class TestGetCollectionDetails:
         data = response.json()
         assert data["name"] == "Public Collection"
         assert data["description"] == "A public collection"
+        assert test_user["id"] in data["editor_ids"]
 
     def test_get_collection_details_private_owner(self, client, test_user, auth_headers):
         """Test owner can get their private collection"""
@@ -481,6 +484,77 @@ class TestDeleteCollection:
         """Test that deleting collection requires authentication"""
         response = client.delete(f"/api/collections/{uuid.uuid4()}")
         assert response.status_code == 401
+
+
+class TestCollectionEditors:
+    """Tests for collection editor management routes."""
+
+    def test_get_collection_editors_public(self, client, test_user, auth_headers):
+        collection = client.post(
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Editors Visible"}
+        ).json()
+
+        response = client.get(f"/api/collections/{collection['id']}/editors")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["collection_id"] == collection["id"]
+        assert test_user["id"] in data["editor_ids"]
+
+    def test_owner_can_add_and_remove_editor(
+        self, client, test_user, test_user_2, auth_headers
+    ):
+        collection = client.post(
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Manage Editors"}
+        ).json()
+
+        add_response = client.post(
+            f"/api/collections/{collection['id']}/editors/{test_user_2['id']}",
+            headers=auth_headers(test_user),
+        )
+        assert add_response.status_code == 200
+        assert test_user_2["id"] in add_response.json()["editor_ids"]
+
+        remove_response = client.delete(
+            f"/api/collections/{collection['id']}/editors/{test_user_2['id']}",
+            headers=auth_headers(test_user),
+        )
+        assert remove_response.status_code == 200
+        assert test_user_2["id"] not in remove_response.json()["editor_ids"]
+
+    def test_non_owner_cannot_manage_editors(
+        self, client, test_user, test_user_2, auth_headers
+    ):
+        collection = client.post(
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Owner Only"}
+        ).json()
+
+        response = client.post(
+            f"/api/collections/{collection['id']}/editors/{test_user['id']}",
+            headers=auth_headers(test_user_2),
+        )
+        assert response.status_code == 403
+
+    def test_cannot_remove_owner_from_editors(self, client, test_user, auth_headers):
+        collection = client.post(
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Keep Owner"}
+        ).json()
+
+        response = client.delete(
+            f"/api/collections/{collection['id']}/editors/{test_user['id']}",
+            headers=auth_headers(test_user),
+        )
+        assert response.status_code == 400
+
+    def test_add_editor_requires_valid_existing_user(self, client, test_user, auth_headers):
+        collection = client.post(
+            "/api/collections", headers=auth_headers(test_user), json={"name": "User Validation"}
+        ).json()
+
+        response = client.post(
+            f"/api/collections/{collection['id']}/editors/{uuid.uuid4()}",
+            headers=auth_headers(test_user),
+        )
+        assert response.status_code == 404
 
 
 class TestAddProductToCollection:
