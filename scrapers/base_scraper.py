@@ -446,6 +446,20 @@ class BaseScraper(ABC):
         except Exception:
             return False
 
+    def _product_has_editors(self, product_id: str) -> bool:
+        """Check whether a product is managed by at least one editor/owner."""
+        try:
+            result = (
+                self.supabase.table("product_editors")
+                .select("product_id")
+                .eq("product_id", product_id)
+                .limit(1)
+                .execute()
+            )
+            return bool(result.data)
+        except Exception:
+            return False
+
     def _create_product_dict(self, raw_data: dict[str, Any]) -> dict[str, Any]:
         """
         Convert scraped data to product dict format
@@ -699,7 +713,21 @@ class BaseScraper(ABC):
                 if existing_response.data:
                     existing_product = existing_response.data[0]
             except Exception:
-                existing_product = None
+                # Some environments may have last_edited_at but not last_edited_by yet.
+                # Fall back so we can still honor human-edit protection.
+                try:
+                    fallback_response = (
+                        self.supabase.table("products")
+                        .select("id,name,description,type,last_edited_at")
+                        .eq("id", product_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if fallback_response.data:
+                        existing_product = fallback_response.data[0]
+                        existing_product.setdefault("last_edited_by", None)
+                except Exception:
+                    existing_product = None
 
             product_data = self._create_product_dict(raw_data)
             product_data = self._canonicalize_source(product_data)
@@ -711,12 +739,18 @@ class BaseScraper(ABC):
                 existing_product
                 and (existing_product.get("last_edited_at") or existing_product.get("last_edited_by"))
             )
+            if not human_edited and existing_product:
+                # Legacy edits (before last_edited fields were stamped) may still be
+                # human-managed via ownership/editor assignment.
+                human_edited = self._product_has_editors(product_id)
             if human_edited:
                 for editable_field in ("name", "description", "type"):
                     if self._has_content(existing_product.get(editable_field)):
                         product_data.pop(editable_field, None)
 
-                if tag_names is not None and self._product_has_tags(product_id):
+                if tag_names is not None:
+                    # Preserve user-managed tags even when the user intentionally
+                    # cleared all tags (empty relationship set).
                     tag_names = None
 
             # Do not overwrite slug on update; only backfill if completely missing
