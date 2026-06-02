@@ -307,6 +307,7 @@ def _reset_and_assert_clean(db):
         "product_tags",
         "product_editors",
         "collection_products",
+        "collection_editors",
     ]
 
     # These baseline lookup tables may intentionally persist canonical rows in

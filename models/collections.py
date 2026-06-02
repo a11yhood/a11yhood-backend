@@ -24,6 +24,11 @@ class ProductIdsRequest(BaseModel):
     product_ids: list[str] = Field(default_factory=list)
 
 
+class CollectionEditorsResponse(BaseModel):
+    collection_id: str
+    editor_ids: list[str] = Field(default_factory=list)
+
+
 class CollectionFromSearchCreate(CollectionBase):
     """Create a collection from search results."""
 
@@ -44,6 +49,7 @@ class CollectionResponse(CollectionBase):
     slug: str
     user_id: str
     user_name: str
+    editor_ids: list[str] = Field(default_factory=list)
     product_ids: list[str] = Field(default_factory=list)
     product_slugs: list[str] = Field(default_factory=list)
     created_at: ApiTimestamp
