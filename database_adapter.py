@@ -24,6 +24,7 @@ _ROW_LIMIT_EXEMPT_TABLES = {
     "auth.users",
     "auth.sessions",
     "collection_products",
+    "collection_editors",
     "user_roles",
     "supported_sources",
     "scraper_search_terms",
@@ -92,6 +93,7 @@ class DatabaseAdapter:
     _TEST_TABLES_ORDER = [
         # Junction / child tables (no standalone id or CASCADE targets)
         "collection_products",
+        "collection_editors",
         "product_tags",
         "product_editors",
         "product_urls",

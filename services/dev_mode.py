@@ -25,6 +25,7 @@ UNLIMITED_TABLES = {
     "auth.users",
     "auth.sessions",
     "collection_products",
+    "collection_editors",
     "user_roles",
 }
 
@@ -116,7 +117,7 @@ async def reset_database():
         "product_tags", "product_editors", "product_urls",
         "scraping_logs", "discussions", "ratings",
         "blog_posts", "user_activities", "user_requests",
-        "collection_products", "collections",
+        "collection_products", "collection_editors", "collections",
         "products", "tags", "oauth_configs", "users",
     ]
 

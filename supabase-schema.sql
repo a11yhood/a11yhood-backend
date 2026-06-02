@@ -354,9 +354,18 @@
     PRIMARY KEY (collection_id, product_id)
   );
 
+  CREATE TABLE collection_editors (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(collection_id, user_id)
+  );
+
   CREATE INDEX idx_collection_products_collection_id ON collection_products(collection_id);
   CREATE INDEX idx_collection_products_product_id ON collection_products(product_id);
   CREATE INDEX idx_collection_products_position ON collection_products(collection_id, position);
+  CREATE INDEX idx_collection_editors_collection_user ON collection_editors(collection_id, user_id);
 
   -- ============================================================================
   -- USER ACTIVITIES TABLE
@@ -514,6 +523,7 @@
   ALTER TABLE product_tags ENABLE ROW LEVEL SECURITY;
   ALTER TABLE product_urls ENABLE ROW LEVEL SECURITY;
   ALTER TABLE product_editors ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE collection_editors ENABLE ROW LEVEL SECURITY;
   ALTER TABLE scraper_search_terms ENABLE ROW LEVEL SECURITY;
   ALTER TABLE supported_sources ENABLE ROW LEVEL SECURITY;
   ALTER TABLE valid_categories ENABLE ROW LEVEL SECURITY;
@@ -612,7 +622,14 @@
   -- Collections: Public collections viewable by all, users manage their own
   CREATE POLICY "Public collections are viewable by everyone" 
     ON collections FOR SELECT 
-    USING (is_public = true OR auth.uid() = user_id);
+    USING (
+      is_public = true
+      OR auth.uid() = user_id
+      OR EXISTS (
+        SELECT 1 FROM collection_editors ce
+        WHERE ce.collection_id = collections.id AND ce.user_id = auth.uid()
+      )
+    );
 
   CREATE POLICY "Authenticated users can create collections" 
     ON collections FOR INSERT 
@@ -620,11 +637,48 @@
 
   CREATE POLICY "Users can update own collections" 
     ON collections FOR UPDATE 
-    USING (auth.uid() = user_id);
+    USING (
+      auth.uid() = user_id
+      OR EXISTS (
+        SELECT 1 FROM collection_editors ce
+        WHERE ce.collection_id = collections.id AND ce.user_id = auth.uid()
+      )
+    );
 
   CREATE POLICY "Users can delete own collections" 
     ON collections FOR DELETE 
-    USING (auth.uid() = user_id);
+    USING (
+      auth.uid() = user_id
+      OR EXISTS (
+        SELECT 1 FROM collection_editors ce
+        WHERE ce.collection_id = collections.id AND ce.user_id = auth.uid()
+      )
+    );
+
+  CREATE POLICY "Collection editors are viewable by everyone"
+    ON collection_editors FOR SELECT
+    USING (true);
+
+  CREATE POLICY "Owners and admins can manage collection editors"
+    ON collection_editors FOR ALL
+    USING (
+      EXISTS (
+        SELECT 1
+        FROM collections c
+        WHERE c.id = collection_editors.collection_id
+          AND c.user_id = auth.uid()
+      )
+      OR EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role IN ('admin', 'moderator'))
+    )
+    WITH CHECK (
+      EXISTS (
+        SELECT 1
+        FROM collections c
+        WHERE c.id = collection_editors.collection_id
+          AND c.user_id = auth.uid()
+      )
+      OR EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role IN ('admin', 'moderator'))
+    );
 
   -- User Activities: Users can read their own, admins can read all
   CREATE POLICY "Users can view own activities" 

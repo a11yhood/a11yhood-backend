@@ -248,6 +248,11 @@ BEGIN
     RAISE EXCEPTION 'public restore leaked collections rows: %', leaked_rows;
   END IF;
 
+  SELECT COUNT(*) INTO leaked_rows FROM collection_editors;
+  IF leaked_rows <> 0 THEN
+    RAISE EXCEPTION 'public restore leaked collection_editors rows: %', leaked_rows;
+  END IF;
+
   SELECT COUNT(*) INTO leaked_rows FROM discussions;
   IF leaked_rows <> 0 THEN
     RAISE EXCEPTION 'public restore leaked discussions rows: %', leaked_rows;
@@ -440,6 +445,22 @@ BEGIN
     WHERE p.id IS NULL
   ) THEN
     RAISE EXCEPTION 'orphaned collection_products.product_id rows found';
+  END IF;
+
+  IF to_regclass('public.collection_editors') IS NOT NULL AND EXISTS (
+    SELECT 1 FROM collection_editors ce
+    LEFT JOIN collections c ON c.id = ce.collection_id
+    WHERE c.id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'orphaned collection_editors.collection_id rows found';
+  END IF;
+
+  IF to_regclass('public.collection_editors') IS NOT NULL AND EXISTS (
+    SELECT 1 FROM collection_editors ce
+    LEFT JOIN users u ON u.id = ce.user_id
+    WHERE u.id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'orphaned collection_editors.user_id rows found';
   END IF;
 END
 $$;

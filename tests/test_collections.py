@@ -111,6 +111,27 @@ class TestCreateCollection:
         assert response.status_code == 201
         assert response.json()["is_public"] is False
 
+    def test_create_collection_adds_creator_as_editor(
+        self, client, test_user, auth_headers, sqlite_db
+    ):
+        """Creator should be added to collection_editors when collection is created."""
+        response = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Owned Collection"},
+        )
+        assert response.status_code == 201
+        collection_id = response.json()["id"]
+
+        editors = (
+            sqlite_db.table("collection_editors")
+            .select("user_id")
+            .eq("collection_id", collection_id)
+            .execute()
+        )
+        assert editors.data
+        assert any(row["user_id"] == test_user["id"] for row in editors.data)
+
 
 class TestGetUserCollections:
     """Tests for Story 6.2: User Views Their Collections"""
@@ -288,6 +309,26 @@ class TestGetCollectionDetails:
         response = client.get(f"/api/collections/{uuid.uuid4()}")
         assert response.status_code == 404
 
+    def test_get_collection_details_private_editor_can_view(
+        self, client, test_user, test_user_2, auth_headers, sqlite_db
+    ):
+        """An editor can view a private collection."""
+        create_response = client.post(
+            "/api/collections",
+            headers=auth_headers(test_user),
+            json={"name": "Private Collection", "is_public": False},
+        )
+        collection_id = create_response.json()["id"]
+
+        sqlite_db.table("collection_editors").insert(
+            {"collection_id": collection_id, "user_id": test_user_2["id"]}
+        ).execute()
+
+        response = client.get(
+            f"/api/collections/{collection_id}", headers=auth_headers(test_user_2)
+        )
+        assert response.status_code == 200
+
     def test_get_collection_details_includes_product_slugs(self, client, test_user, test_product, auth_headers):
         """Test that get collection by slug/id returns product_slugs (not just product_ids)"""
         # Create a collection and add a product
@@ -353,6 +394,26 @@ class TestUpdateCollection:
             json={"name": "Hacked"},
         )
         assert response.status_code == 403
+
+    def test_update_collection_allows_editor(
+        self, client, test_user, test_user_2, auth_headers, sqlite_db
+    ):
+        """Test that a collection editor can update collection details."""
+        create_response = client.post(
+            "/api/collections", headers=auth_headers(test_user), json={"name": "Collection"}
+        )
+        collection_id = create_response.json()["id"]
+        sqlite_db.table("collection_editors").insert(
+            {"collection_id": collection_id, "user_id": test_user_2["id"]}
+        ).execute()
+
+        response = client.put(
+            f"/api/collections/{collection_id}",
+            headers=auth_headers(test_user_2),
+            json={"name": "Editor Updated"},
+        )
+        assert response.status_code == 200
+        assert response.json()["name"] == "Editor Updated"
 
     def test_update_collection_visibility(self, client, test_user, auth_headers):
         """Test updating collection visibility"""
@@ -468,6 +529,25 @@ class TestAddProductToCollection:
             headers=auth_headers(test_user_2),
         )
         assert response.status_code == 403
+
+    def test_add_product_allows_editor(
+        self, client, test_user, test_user_2, test_product, auth_headers, sqlite_db
+    ):
+        """Test that an editor can add products."""
+        create_response = client.post(
+            "/api/collections", headers=auth_headers(test_user), json={"name": "My Products"}
+        )
+        collection_id = create_response.json()["id"]
+        sqlite_db.table("collection_editors").insert(
+            {"collection_id": collection_id, "user_id": test_user_2["id"]}
+        ).execute()
+
+        response = client.post(
+            f"/api/collections/{collection_id}/products/{test_product['id']}",
+            headers=auth_headers(test_user_2),
+        )
+        assert response.status_code == 200
+        assert test_product["id"] in response.json()["product_ids"]
 
 
 class TestRemoveProductFromCollection:

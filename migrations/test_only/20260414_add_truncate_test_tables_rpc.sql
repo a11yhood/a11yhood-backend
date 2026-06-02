@@ -20,6 +20,7 @@ BEGIN
   TRUNCATE TABLE
     -- Junction / child tables first so FK constraints are satisfied
     public.collection_products,
+    public.collection_editors,
     public.product_tags,
     public.product_editors,
     public.product_urls,

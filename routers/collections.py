@@ -36,6 +36,52 @@ def _looks_like_uuid(value: str) -> bool:
         return False
 
 
+def _is_collection_editor(db, collection_id: str, user_id: str | None) -> bool:
+    if not collection_id or not user_id:
+        return False
+    try:
+        editors_response = (
+            db.table("collection_editors")
+            .select("user_id")
+            .eq("collection_id", collection_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(editors_response.data)
+    except Exception as e:
+        logger.error(f"collection editor check error: {type(e).__name__}: {str(e)}")
+        return False
+
+
+def _can_edit_collection(db, collection: dict, current_user: dict | None) -> bool:
+    if not collection or not current_user:
+        return False
+    user_id = current_user.get("id")
+    if collection.get("user_id") == user_id:
+        return True
+    return _is_collection_editor(db, collection.get("id"), user_id)
+
+
+def _ensure_collection_editor_or_rollback(db, collection_id: str, user_id: str) -> None:
+    try:
+        db.table("collection_editors").upsert(
+            {"collection_id": collection_id, "user_id": user_id},
+            on_conflict="collection_id,user_id",
+        ).execute()
+    except Exception as exc:
+        logger.error(
+            "failed to initialize collection editor row for collection_id=%s user_id=%s: %s",
+            collection_id,
+            user_id,
+            exc,
+        )
+        try:
+            db.table("collections").delete().eq("id", collection_id).execute()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to initialize collection editors")
+
+
 @router.post("", response_model=CollectionResponse, status_code=201)
 async def create_collection(
     collection_data: CollectionCreate,
@@ -80,6 +126,8 @@ async def create_collection(
         raise HTTPException(status_code=400, detail="Failed to create collection")
 
     created_collection = response.data[0]
+    _ensure_collection_editor_or_rollback(db, created_collection["id"], user_id)
+    created_collection["editor_ids"] = [user_id]
     created_collection["product_ids"] = []
     created_collection["product_slugs"] = []
     return created_collection
@@ -242,6 +290,8 @@ async def create_collection_from_search(
     if not response.data:
         raise HTTPException(status_code=400, detail="Failed to create collection")
 
+    _ensure_collection_editor_or_rollback(db, collection_id, collection["user_id"])
+
     # Insert products into junction table
     if product_ids:
         junction_records = [
@@ -369,6 +419,9 @@ def _get_collection_with_products(db, collection_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     collection = collection_resp.data[0]
+
+    editors_resp = db.table("collection_editors").select("user_id").eq("collection_id", collection_id).execute()
+    collection["editor_ids"] = [row["user_id"] for row in (editors_resp.data or [])]
 
     # Get product IDs from junction table, ordered by position
     junction_resp = (
@@ -506,7 +559,7 @@ async def get_collection(
 
     # Check access
     if not collection.get("is_public"):
-        if not current_user or current_user.get("id") != collection.get("user_id"):
+        if not current_user or not _can_edit_collection(db, collection, current_user):
             raise HTTPException(status_code=403, detail="Access denied")
 
     # Populate product_ids and product_slugs from junction table
@@ -537,14 +590,11 @@ async def update_collection(
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user_id = current_user.get("id")
-
     # Get collection
     collection = _get_collection_by_slug_or_id(db, collection_slug)
 
-    # Check ownership
-    if collection.get("user_id") != user_id:
-        raise HTTPException(status_code=403, detail="Only the owner can edit this collection")
+    if not _can_edit_collection(db, collection, current_user):
+        raise HTTPException(status_code=403, detail="Only owners and editors can update this collection")
 
     # Validate input
     if collection_data.name is not None:
@@ -600,9 +650,10 @@ async def delete_collection(
         raise HTTPException(status_code=401, detail="Not authenticated")
     collection = _get_collection_by_slug_or_id(db, collection_slug)
 
-    # Check ownership
-    if collection.get("user_id") != current_user.get("id"):
-        raise HTTPException(status_code=403, detail="Only the owner can delete this collection")
+    if not _can_edit_collection(db, collection, current_user):
+        raise HTTPException(
+            status_code=403, detail="Only owners and editors can delete this collection"
+        )
 
     # Delete join table links first when available
     try:
@@ -628,15 +679,14 @@ async def add_product_to_collection(
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user_id = current_user.get("id")
-
     # Get collection by slug or id
     collection = _get_collection_by_slug_or_id(db, collection_slug)
     collection_id = collection.get("id")
 
-    # Check ownership
-    if collection.get("user_id") != user_id:
-        raise HTTPException(status_code=403, detail="Only the owner can modify this collection")
+    if not _can_edit_collection(db, collection, current_user):
+        raise HTTPException(
+            status_code=403, detail="Only owners and editors can modify this collection"
+        )
 
     # Get product by slug or UUID
     if _looks_like_uuid(product_slug):
@@ -698,8 +748,6 @@ async def remove_product_from_collection(
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user_id = current_user.get("id")
-
     # Get collection by slug or id
     collection = _get_collection_by_slug_or_id(db, collection_slug)
     collection_id = collection.get("id")
@@ -715,9 +763,10 @@ async def remove_product_from_collection(
 
     product_id = product_response.data[0].get("id")
 
-    # Check ownership
-    if collection.get("user_id") != user_id:
-        raise HTTPException(status_code=403, detail="Only the owner can modify this collection")
+    if not _can_edit_collection(db, collection, current_user):
+        raise HTTPException(
+            status_code=403, detail="Only owners and editors can modify this collection"
+        )
 
     # Remove product from junction table
     db.table("collection_products").delete().eq("collection_id", collection_id).eq(
@@ -743,15 +792,14 @@ async def remove_all_products_from_collection(
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user_id = current_user.get("id")
-
     # Get collection by slug or id
     collection = _get_collection_by_slug_or_id(db, collection_slug)
     collection_id = collection.get("id")
 
-    # Check ownership
-    if collection.get("user_id") != user_id:
-        raise HTTPException(status_code=403, detail="Only the owner can modify this collection")
+    if not _can_edit_collection(db, collection, current_user):
+        raise HTTPException(
+            status_code=403, detail="Only owners and editors can modify this collection"
+        )
 
     # Clear all products from junction table
     db.table("collection_products").delete().eq("collection_id", collection_id).execute()
@@ -776,16 +824,16 @@ async def add_multiple_products_to_collection(
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user_id = current_user.get("id")
     product_ids = request.product_ids
 
     # Get collection by slug or id
     collection = _get_collection_by_slug_or_id(db, collection_slug)
     collection_id = collection.get("id")
 
-    # Check ownership
-    if collection.get("user_id") != user_id:
-        raise HTTPException(status_code=403, detail="Only the owner can modify this collection")
+    if not _can_edit_collection(db, collection, current_user):
+        raise HTTPException(
+            status_code=403, detail="Only owners and editors can modify this collection"
+        )
 
     # Idempotent behavior: Empty list is allowed (returns collection unchanged)
     if not product_ids:
